@@ -1,0 +1,155 @@
+//
+//  GameModels.swift
+//  kboScore
+//
+//  Created by Codex on 3/25/26.
+//
+
+import Foundation
+
+enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
+    case upcoming
+    case live
+    case final
+    case rainDelay
+    case cancelled
+
+    nonisolated var title: String {
+        switch self {
+        case .upcoming:
+            "예정"
+        case .live:
+            "LIVE"
+        case .final:
+            "종료"
+        case .rainDelay:
+            "우천 중단"
+        case .cancelled:
+            "취소"
+        }
+    }
+
+    nonisolated var isLiveLike: Bool {
+        switch self {
+        case .live, .rainDelay:
+            true
+        case .upcoming, .final, .cancelled:
+            false
+        }
+    }
+
+    nonisolated var isFinishedLike: Bool {
+        switch self {
+        case .final, .cancelled:
+            true
+        case .upcoming, .live, .rainDelay:
+            false
+        }
+    }
+}
+
+struct RunnerState: Hashable, Codable, Sendable {
+    var first: Bool
+    var second: Bool
+    var third: Bool
+
+    nonisolated static let empty = RunnerState(first: false, second: false, third: false)
+}
+
+enum GameEventType: String, Codable, Hashable, Sendable {
+    case score
+    case pitching
+    case keyPlay
+    case weather
+    case note
+}
+
+struct GameEvent: Identifiable, Hashable, Codable, Sendable {
+    let id: UUID
+    let type: GameEventType
+    let headline: String
+    let inningText: String
+    let timestamp: Date
+}
+
+struct GameDetail: Identifiable, Hashable, Codable, Sendable {
+    let id: UUID
+    let scheduledStart: Date
+    let venue: String
+    let awayTeam: Team
+    let homeTeam: Team
+    let awayScore: Int?
+    let homeScore: Int?
+    let status: GameStatus
+    let inningText: String?
+    let bases: RunnerState?
+    let outs: Int?
+    let highlightText: String?
+    let events: [GameEvent]
+    let note: String?
+
+    func involves(teamID: String?) -> Bool {
+        guard let teamID else { return false }
+        return awayTeam.id == teamID || homeTeam.id == teamID
+    }
+
+    func summary(isMyTeamGame: Bool) -> GameSummary {
+        GameSummary(
+            id: id,
+            scheduledStart: scheduledStart,
+            venue: venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: awayScore,
+            homeScore: homeScore,
+            status: status,
+            inningText: inningText,
+            recentEvent: highlightText ?? note,
+            isMyTeamGame: isMyTeamGame
+        )
+    }
+
+    var shareText: String {
+        let scoreText: String
+        if let awayScore, let homeScore {
+            scoreText = "\(awayTeam.name) \(awayScore) : \(homeScore) \(homeTeam.name)"
+        } else {
+            scoreText = "\(awayTeam.name) vs \(homeTeam.name)"
+        }
+
+        let stateText = inningText ?? status.title
+        return "KBO LIVE\n\(scoreText)\n\(stateText)\n\(venue)"
+    }
+}
+
+struct GameSummary: Identifiable, Hashable, Sendable {
+    let id: UUID
+    let scheduledStart: Date
+    let venue: String
+    let awayTeam: Team
+    let homeTeam: Team
+    let awayScore: Int?
+    let homeScore: Int?
+    let status: GameStatus
+    let inningText: String?
+    let recentEvent: String?
+    let isMyTeamGame: Bool
+
+    var displayScore: String {
+        guard let awayScore, let homeScore, status != .upcoming else {
+            return "VS"
+        }
+        return "\(awayScore) : \(homeScore)"
+    }
+
+    var secondaryText: String {
+        switch status {
+        case .upcoming:
+            scheduledStart.formatted(date: .omitted, time: .shortened)
+        case .live, .rainDelay:
+            inningText ?? status.title
+        case .final, .cancelled:
+            status.title
+        }
+    }
+}

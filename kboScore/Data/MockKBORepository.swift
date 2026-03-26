@@ -1,0 +1,298 @@
+//
+//  MockKBORepository.swift
+//  kboScore
+//
+//  Created by Codex on 3/25/26.
+//
+
+import Foundation
+
+struct MockKBORepository: KBORepository, Sendable {
+    nonisolated init() {}
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        try await Task.sleep(for: .milliseconds(120))
+        return KBODataMapper.mapBootstrap(MockKBOData.makeBootstrapDTO())
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await Task.sleep(for: .milliseconds(120))
+        let payload = MockKBOData.makeBootstrapDTO()
+        let teams = payload.teams.map {
+            Team(id: $0.id, name: $0.name, shortName: $0.shortName, englishName: $0.englishName, markText: $0.markText)
+        }
+        return KBODataMapper.mapGames(payload.games, teams: teams)
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await Task.sleep(for: .milliseconds(120))
+        return KBODataMapper.mapNotifications(MockKBOData.makeBootstrapDTO().notifications)
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        try await Task.sleep(for: .milliseconds(120))
+        let calendar = Calendar(identifier: .gregorian)
+        return KBODataMapper.mapBootstrap(MockKBOData.makeBootstrapDTO()).games
+            .filter {
+                let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
+                return components.year == month.year && components.month == month.month
+            }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+}
+
+enum MockKBOData: Sendable {
+    private nonisolated static let sampleTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+
+    nonisolated static func makeBootstrap(now: Date = .now) -> KBOBootstrapData {
+        KBODataMapper.mapBootstrap(makeBootstrapDTO(now: now))
+    }
+
+    // Real fixture baseline:
+    // 2026 KBO preseason schedule/results from the official KBO daily schedule on 2026-03-22 to 2026-03-24.
+    // Synthetic edge fixtures remain only for live and rain-delay states because no captured preseason payload exists in-project.
+    nonisolated static func makeBootstrapDTO(now: Date = .now) -> KBOBootstrapDTO {
+        let teams = [
+            KBOTeamDTO(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            KBOTeamDTO(id: "doosan", name: "두산 베어스", shortName: "두산", englishName: "Doosan Bears", markText: "두"),
+            KBOTeamDTO(id: "ssg", name: "SSG 랜더스", shortName: "SSG", englishName: "SSG Landers", markText: "SSG"),
+            KBOTeamDTO(id: "samsung", name: "삼성 라이온즈", shortName: "삼성", englishName: "Samsung Lions", markText: "삼"),
+            KBOTeamDTO(id: "kia", name: "KIA 타이거즈", shortName: "KIA", englishName: "KIA Tigers", markText: "KIA"),
+            KBOTeamDTO(id: "lotte", name: "롯데 자이언츠", shortName: "롯데", englishName: "Lotte Giants", markText: "롯"),
+            KBOTeamDTO(id: "hanwha", name: "한화 이글스", shortName: "한화", englishName: "Hanwha Eagles", markText: "한"),
+            KBOTeamDTO(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            KBOTeamDTO(id: "nc", name: "NC 다이노스", shortName: "NC", englishName: "NC Dinos", markText: "NC"),
+            KBOTeamDTO(id: "kiwoom", name: "키움 히어로즈", shortName: "키움", englishName: "Kiwoom Heroes", markText: "키")
+        ]
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = sampleTimeZone
+        let today = calendar.startOfDay(for: now)
+
+        func date(dayOffset: Int, hour: Int, minute: Int) -> Date {
+            let baseDay = calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today
+            return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: baseDay) ?? baseDay
+        }
+
+        func relative(minutesAgo: Int) -> Date {
+            calendar.date(byAdding: .minute, value: -minutesAgo, to: now) ?? now
+        }
+
+        let liveGameID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let rainDelayGameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let upcomingGameID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let finalGameID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let recentLGGameID = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        let nextLGGameID = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+        let finalDoosanKTGameID = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+
+        let games = [
+            KBOGameDTO(
+                id: liveGameID,
+                scheduledStart: date(dayOffset: 0, hour: 13, minute: 0),
+                venue: "잠실야구장",
+                awayTeamID: "kiwoom",
+                homeTeamID: "lg",
+                awayScore: 8,
+                homeScore: 7,
+                statusCode: "LIVE",
+                statusText: "7회말",
+                inningText: "7회말",
+                bases: KBORunnerStateDTO(first: true, second: false, third: true),
+                outs: 1,
+                highlightText: "이영빈 적시타로 LG가 1점 차까지 추격",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "score", headline: "이영빈 적시타로 LG가 7-8까지 추격", inningText: "7회말", timestamp: relative(minutesAgo: 3)),
+                    KBOGameEventDTO(id: UUID(), type: "pitching", headline: "키움 불펜이 무사 1,3루 위기 진화", inningText: "7회말", timestamp: relative(minutesAgo: 5)),
+                    KBOGameEventDTO(id: UUID(), type: "keyPlay", headline: "문보경 볼넷으로 찬스 연결", inningText: "7회말", timestamp: relative(minutesAgo: 7))
+                ],
+                note: "2026-03-23 잠실 공식 시범경기 매치업 기반 synthetic live fixture"
+            ),
+            KBOGameDTO(
+                id: finalGameID,
+                scheduledStart: date(dayOffset: 0, hour: 13, minute: 0),
+                venue: "인천 SSG랜더스필드",
+                awayTeamID: "lotte",
+                homeTeamID: "ssg",
+                awayScore: 5,
+                homeScore: 2,
+                statusCode: "FINAL",
+                statusText: "종료",
+                inningText: "종료",
+                bases: nil,
+                outs: nil,
+                highlightText: "롯데가 문학 시범경기에서 SSG를 5-2로 제압",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "score", headline: "롯데가 문학 원정 시범경기를 5-2로 마무리", inningText: "종료", timestamp: relative(minutesAgo: 70)),
+                    KBOGameEventDTO(id: UUID(), type: "note", headline: "SSG는 9회말 추격에 실패", inningText: "종료", timestamp: relative(minutesAgo: 74))
+                ],
+                note: "실제 2026 시범경기 결과"
+            ),
+            KBOGameDTO(
+                id: finalDoosanKTGameID,
+                scheduledStart: date(dayOffset: 0, hour: 13, minute: 0),
+                venue: "수원KT위즈파크",
+                awayTeamID: "doosan",
+                homeTeamID: "kt",
+                awayScore: 12,
+                homeScore: 7,
+                statusCode: "FINAL",
+                statusText: "종료",
+                inningText: "종료",
+                bases: nil,
+                outs: nil,
+                highlightText: "두산이 수원 시범경기에서 KT를 12-7로 제압",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "score", headline: "두산이 장단 15안타로 12-7 승리", inningText: "종료", timestamp: relative(minutesAgo: 68)),
+                    KBOGameEventDTO(id: UUID(), type: "note", headline: "KT는 중반 추격에도 마운드가 버티지 못함", inningText: "종료", timestamp: relative(minutesAgo: 72))
+                ],
+                note: "실제 2026 시범경기 결과"
+            ),
+            KBOGameDTO(
+                id: upcomingGameID,
+                scheduledStart: date(dayOffset: 0, hour: 18, minute: 0),
+                venue: "대전 한화생명 볼파크",
+                awayTeamID: "nc",
+                homeTeamID: "hanwha",
+                awayScore: nil,
+                homeScore: nil,
+                statusCode: "PRE",
+                statusText: "경기 예정",
+                inningText: nil,
+                bases: nil,
+                outs: nil,
+                highlightText: "3월 23일 18:00 대전 시범경기 공식 일정",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "note", headline: "NC vs 한화 시범경기 18:00 시작 예정", inningText: "프리뷰", timestamp: relative(minutesAgo: 30))
+                ],
+                note: "실제 2026 시범경기 일정"
+            ),
+            KBOGameDTO(
+                id: recentLGGameID,
+                scheduledStart: date(dayOffset: -1, hour: 13, minute: 0),
+                venue: "대구삼성라이온즈파크",
+                awayTeamID: "lg",
+                homeTeamID: "samsung",
+                awayScore: 14,
+                homeScore: 13,
+                statusCode: "FINAL",
+                statusText: "종료",
+                inningText: "종료",
+                bases: nil,
+                outs: nil,
+                highlightText: "LG가 대구 시범경기에서 삼성을 14-13으로 제압",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "score", headline: "LG가 3월 22일 대구 시범경기에서 14-13 승리", inningText: "종료", timestamp: relative(minutesAgo: 1_020)),
+                    KBOGameEventDTO(id: UUID(), type: "note", headline: "삼성은 9회 추격에도 1점 차 패배", inningText: "종료", timestamp: relative(minutesAgo: 1_030))
+                ],
+                note: "실제 2026 시범경기 결과"
+            ),
+            KBOGameDTO(
+                id: nextLGGameID,
+                scheduledStart: date(dayOffset: 1, hour: 13, minute: 0),
+                venue: "잠실야구장",
+                awayTeamID: "kiwoom",
+                homeTeamID: "lg",
+                awayScore: nil,
+                homeScore: nil,
+                statusCode: "PRE",
+                statusText: "경기 예정",
+                inningText: nil,
+                bases: nil,
+                outs: nil,
+                highlightText: "3월 24일 잠실 시범경기 공식 일정",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "note", headline: "키움 vs LG 시범경기 13:00 예정", inningText: "프리뷰", timestamp: relative(minutesAgo: 20))
+                ],
+                note: "실제 2026 시범경기 일정"
+            ),
+            KBOGameDTO(
+                id: rainDelayGameID,
+                scheduledStart: date(dayOffset: 1, hour: 13, minute: 0),
+                venue: "대구삼성라이온즈파크",
+                awayTeamID: "kia",
+                homeTeamID: "samsung",
+                awayScore: 2,
+                homeScore: 2,
+                statusCode: "DELAY",
+                statusText: "우천 중단",
+                inningText: "5회초",
+                bases: KBORunnerStateDTO(first: false, second: false, third: false),
+                outs: 0,
+                highlightText: "갑작스러운 비로 시범경기 진행이 중단된 synthetic edge fixture",
+                events: [
+                    KBOGameEventDTO(id: UUID(), type: "weather", headline: "우천으로 경기 중단, 재개 시각 미정", inningText: "5회초", timestamp: relative(minutesAgo: 18)),
+                    KBOGameEventDTO(id: UUID(), type: "score", headline: "5회초 2-2 동점 이후 강우 시작", inningText: "5회초", timestamp: relative(minutesAgo: 26))
+                ],
+                note: "실제 2026-03-24 대구 시범경기 매치업 기반 synthetic rain-delay fixture"
+            )
+        ]
+
+        let notifications = [
+            KBONotificationDTO(
+                id: UUID(),
+                type: "scoreChange",
+                title: "실시간 스코어",
+                body: "LG 7 - 8 키움 (7회말)",
+                sentAt: relative(minutesAgo: 3),
+                isRead: false,
+                relatedGameID: liveGameID,
+                relatedTeamIDs: ["lg", "kiwoom"]
+            ),
+            KBONotificationDTO(
+                id: UUID(),
+                type: "leadChange",
+                title: "리드 변경",
+                body: "키움이 잠실 시범경기에서 8-7로 다시 앞섰습니다.",
+                sentAt: relative(minutesAgo: 4),
+                isRead: false,
+                relatedGameID: liveGameID,
+                relatedTeamIDs: ["lg", "kiwoom"]
+            ),
+            KBONotificationDTO(
+                id: UUID(),
+                type: "gameEnd",
+                title: "경기 종료",
+                body: "롯데 5 - 2 SSG, 문학 시범경기가 종료되었습니다.",
+                sentAt: relative(minutesAgo: 45),
+                isRead: true,
+                relatedGameID: finalGameID,
+                relatedTeamIDs: ["lotte", "ssg"]
+            ),
+            KBONotificationDTO(
+                id: UUID(),
+                type: "gameStart",
+                title: "경기 시작",
+                body: "NC vs 한화 시범경기가 18:00 대전에서 시작 예정입니다.",
+                sentAt: relative(minutesAgo: 35),
+                isRead: true,
+                relatedGameID: upcomingGameID,
+                relatedTeamIDs: ["nc", "hanwha"]
+            ),
+            KBONotificationDTO(
+                id: UUID(),
+                type: "rainDelay",
+                title: "우천 중단",
+                body: "KIA vs 삼성 경기는 synthetic edge fixture로 우천 중단 상태를 유지합니다.",
+                sentAt: relative(minutesAgo: 18),
+                isRead: true,
+                relatedGameID: rainDelayGameID,
+                relatedTeamIDs: ["kia", "samsung"]
+            )
+        ]
+
+        return KBOBootstrapDTO(
+            teams: teams,
+            games: games.sorted { $0.scheduledStart > $1.scheduledStart },
+            notifications: notifications.sorted { $0.sentAt > $1.sentAt },
+            settings: AppSettings(
+                favoriteTeamID: "lg",
+                notificationPreferences: NotificationPreferences(),
+                quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
+                liveActivitiesEnabled: true,
+                appearance: .system,
+                teamThemeMode: .favoriteTeam
+            )
+        )
+    }
+}

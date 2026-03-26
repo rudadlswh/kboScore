@@ -1,0 +1,56 @@
+{
+  "payload": {
+    "schedule": {
+      "items": [
+        {
+          "game_id": "44444444-4444-4444-4444-444444444444",
+          "game_date": "20260323",
+          "game_time": "13:00",
+          "stadium_name": "인천 SSG랜더스필드",
+          "visitor": {
+            "team_id": "lotte",
+            "team_name": "롯데 자이언츠",
+            "abbr": "롯데"
+          },
+          "home_team": {
+            "code": "ssg",
+            "full_name": "SSG 랜더스",
+            "abbreviation": "SSG"
+          },
+          "visitor_score": "5",
+          "home_score": 2,
+          "state": "경기 종료"
+        },
+        {
+          "game_id": "22222222-2222-2222-2222-222222222222",
+          "game_date": "20260324",
+          "game_time": "13:00",
+          "stadium_name": "대구삼성라이온즈파크",
+          "away_team": {
+            "team_id": "kia",
+            "team_name": "KIA 타이거즈",
+            "abbr": "KIA"
+          },
+          "home_team": {
+            "code": "samsung",
+            "full_name": "삼성 라이온즈",
+            "abbreviation": "삼성"
+          },
+          "away_score": "2",
+          "home_score": "2",
+          "state": "우천 중단"
+        }
+      ]
+    },
+    "alerts": [
+      {
+        "event_type": "gameEnd",
+        "headline": "경기 종료",
+        "message": "롯데 5 - 2 SSG, 문학 시범경기가 종료되었습니다.",
+        "sent_at": "2026-03-23T13:45:00+09:00",
+        "team_ids": ["lotte", "ssg"],
+        "game_id": "44444444-4444-4444-4444-444444444444"
+      }
+    ]
+  }
+}

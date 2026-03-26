@@ -1,0 +1,190 @@
+{
+  "teams": [
+    { "id": "lg", "name": "LG 트윈스", "short_name": "LG", "english_name": "LG Twins", "mark_text": "LG" },
+    { "id": "doosan", "name": "두산 베어스", "short_name": "두산", "english_name": "Doosan Bears", "mark_text": "두" },
+    { "id": "ssg", "name": "SSG 랜더스", "short_name": "SSG", "english_name": "SSG Landers", "mark_text": "SSG" },
+    { "id": "samsung", "name": "삼성 라이온즈", "short_name": "삼성", "english_name": "Samsung Lions", "mark_text": "삼" },
+    { "id": "kia", "name": "KIA 타이거즈", "short_name": "KIA", "english_name": "KIA Tigers", "mark_text": "KIA" },
+    { "id": "lotte", "name": "롯데 자이언츠", "short_name": "롯데", "english_name": "Lotte Giants", "mark_text": "롯" },
+    { "id": "hanwha", "name": "한화 이글스", "short_name": "한화", "english_name": "Hanwha Eagles", "mark_text": "한" },
+    { "id": "kt", "name": "KT 위즈", "short_name": "KT", "english_name": "KT Wiz", "mark_text": "KT" },
+    { "id": "nc", "name": "NC 다이노스", "short_name": "NC", "english_name": "NC Dinos", "mark_text": "NC" },
+    { "id": "kiwoom", "name": "키움 히어로즈", "short_name": "키움", "english_name": "Kiwoom Heroes", "mark_text": "키" }
+  ],
+  "games": [
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "scheduled_start": "2026-03-23T13:00:00+09:00",
+      "venue": "잠실야구장",
+      "away_team_id": "kiwoom",
+      "home_team_id": "lg",
+      "away_score": 8,
+      "home_score": 7,
+      "status_code": "LIVE",
+      "status_text": "7회말",
+      "inning_text": "7회말",
+      "bases": { "first": true, "second": false, "third": true },
+      "outs": 1,
+      "highlight_text": "이영빈 적시타로 LG가 1점 차까지 추격",
+      "events": [
+        {
+          "id": "a1111111-1111-1111-1111-111111111111",
+          "type": "score",
+          "headline": "이영빈 적시타로 LG가 7-8까지 추격",
+          "inning_text": "7회말",
+          "timestamp": "2026-03-23T14:27:00+09:00"
+        }
+      ],
+      "note": "2026-03-23 잠실 공식 시범경기 매치업 기반 synthetic live fixture"
+    },
+    {
+      "id": "44444444-4444-4444-4444-444444444444",
+      "scheduled_start": "2026-03-23T13:00:00+09:00",
+      "venue": "인천 SSG랜더스필드",
+      "away_team_id": "lotte",
+      "home_team_id": "ssg",
+      "away_score": 5,
+      "home_score": 2,
+      "status_code": "FINAL",
+      "status_text": "종료",
+      "inning_text": "종료",
+      "events": [],
+      "note": "실제 2026 시범경기 결과"
+    },
+    {
+      "id": "77777777-7777-7777-7777-777777777777",
+      "scheduled_start": "2026-03-23T13:00:00+09:00",
+      "venue": "수원KT위즈파크",
+      "away_team_id": "doosan",
+      "home_team_id": "kt",
+      "away_score": 12,
+      "home_score": 7,
+      "status_code": "FINAL",
+      "status_text": "종료",
+      "inning_text": "종료",
+      "events": [],
+      "note": "실제 2026 시범경기 결과"
+    },
+    {
+      "id": "33333333-3333-3333-3333-333333333333",
+      "scheduled_start": "2026-03-23T18:00:00+09:00",
+      "venue": "대전 한화생명 볼파크",
+      "away_team_id": "nc",
+      "home_team_id": "hanwha",
+      "status_code": "PRE",
+      "status_text": "경기 예정",
+      "events": [],
+      "note": "실제 2026 시범경기 일정"
+    },
+    {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "scheduled_start": "2026-03-22T13:00:00+09:00",
+      "venue": "대구삼성라이온즈파크",
+      "away_team_id": "lg",
+      "home_team_id": "samsung",
+      "away_score": 14,
+      "home_score": 13,
+      "status_code": "FINAL",
+      "status_text": "종료",
+      "inning_text": "종료",
+      "events": [],
+      "note": "실제 2026 시범경기 결과"
+    },
+    {
+      "id": "66666666-6666-6666-6666-666666666666",
+      "scheduled_start": "2026-03-24T13:00:00+09:00",
+      "venue": "잠실야구장",
+      "away_team_id": "kiwoom",
+      "home_team_id": "lg",
+      "status_code": "PRE",
+      "status_text": "경기 예정",
+      "events": [],
+      "note": "실제 2026 시범경기 일정"
+    },
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "scheduled_start": "2026-03-24T13:00:00+09:00",
+      "venue": "대구삼성라이온즈파크",
+      "away_team_id": "kia",
+      "home_team_id": "samsung",
+      "away_score": 2,
+      "home_score": 2,
+      "status_code": "DELAY",
+      "status_text": "우천 중단",
+      "inning_text": "5회초",
+      "bases": { "first": false, "second": false, "third": false },
+      "outs": 0,
+      "events": [],
+      "note": "실제 2026-03-24 대구 시범경기 매치업 기반 synthetic rain-delay fixture"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "90111111-1111-1111-1111-111111111111",
+      "type": "scoreChange",
+      "title": "실시간 스코어",
+      "body": "LG 7 - 8 키움 (7회말)",
+      "sent_at": "2026-03-23T14:27:00+09:00",
+      "is_read": false,
+      "related_game_id": "11111111-1111-1111-1111-111111111111",
+      "related_team_ids": ["lg", "kiwoom"]
+    },
+    {
+      "id": "90222222-2222-2222-2222-222222222222",
+      "type": "leadChange",
+      "title": "리드 변경",
+      "body": "키움이 잠실 시범경기에서 8-7로 다시 앞섰습니다.",
+      "sent_at": "2026-03-23T14:26:00+09:00",
+      "is_read": false,
+      "related_game_id": "11111111-1111-1111-1111-111111111111",
+      "related_team_ids": ["lg", "kiwoom"]
+    },
+    {
+      "id": "90333333-3333-3333-3333-333333333333",
+      "type": "gameEnd",
+      "title": "경기 종료",
+      "body": "롯데 5 - 2 SSG, 문학 시범경기가 종료되었습니다.",
+      "sent_at": "2026-03-23T13:45:00+09:00",
+      "is_read": true,
+      "related_game_id": "44444444-4444-4444-4444-444444444444",
+      "related_team_ids": ["lotte", "ssg"]
+    },
+    {
+      "id": "90444444-4444-4444-4444-444444444444",
+      "type": "gameStart",
+      "title": "경기 시작",
+      "body": "NC vs 한화 시범경기가 18:00 대전에서 시작 예정입니다.",
+      "sent_at": "2026-03-23T13:55:00+09:00",
+      "is_read": true,
+      "related_game_id": "33333333-3333-3333-3333-333333333333",
+      "related_team_ids": ["nc", "hanwha"]
+    },
+    {
+      "id": "90555555-5555-5555-5555-555555555555",
+      "type": "rainDelay",
+      "title": "우천 중단",
+      "body": "KIA vs 삼성 경기는 synthetic edge fixture로 우천 중단 상태를 유지합니다.",
+      "sent_at": "2026-03-23T14:12:00+09:00",
+      "is_read": true,
+      "related_game_id": "22222222-2222-2222-2222-222222222222",
+      "related_team_ids": ["kia", "samsung"]
+    }
+  ],
+  "settings": {
+    "favorite_team_id": "lg",
+    "notification_preferences": {
+      "game_start": true,
+      "score_change": true,
+      "lead_change": true,
+      "game_end": true,
+      "rain_delay": true
+    },
+    "quiet_hours": {
+      "is_enabled": false,
+      "start_hour": 23,
+      "end_hour": 7
+    },
+    "live_activities_enabled": true,
+    "appearance": "시스템"
+  }
+}

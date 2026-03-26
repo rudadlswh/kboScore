@@ -1,0 +1,106 @@
+//
+//  SettingsView.swift
+//  kboScore
+//
+//  Created by Codex on 3/25/26.
+//
+
+import SwiftUI
+
+struct SettingsView: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        @Bindable var appModel = appModel
+
+        NavigationStack {
+            Form {
+                Section("응원 팀") {
+                    Picker("응원 팀 선택", selection: $appModel.settings.favoriteTeamID) {
+                        Text("선택 안 함")
+                            .tag(String?.none)
+
+                        ForEach(appModel.teams) { team in
+                            Text(team.name)
+                                .tag(Optional(team.id))
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                }
+
+                Section("알림 설정") {
+                    Toggle("경기 시작", isOn: $appModel.settings.notificationPreferences.gameStart)
+                    Toggle("점수 변경", isOn: $appModel.settings.notificationPreferences.scoreChange)
+                    Toggle("리드 변경", isOn: $appModel.settings.notificationPreferences.leadChange)
+                    Toggle("경기 종료", isOn: $appModel.settings.notificationPreferences.gameEnd)
+                    Toggle("우천/취소", isOn: $appModel.settings.notificationPreferences.rainDelay)
+
+                    LabeledContent("조용한 시간", value: appModel.settings.quietHours.description)
+
+                    Toggle("라이브 액티비티", isOn: $appModel.settings.liveActivitiesEnabled)
+                }
+
+                Section("화면 모드") {
+                    Picker("모드", selection: $appModel.settings.appearance) {
+                        ForEach(AppearanceOption.allCases) { option in
+                            Text(option.rawValue)
+                                .tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("팀 테마", selection: $appModel.settings.teamThemeMode) {
+                        ForEach(TeamThemeMode.allCases) { mode in
+                            Text(mode.rawValue)
+                                .tag(mode)
+                        }
+                    }
+                    .pickerStyle(.navigationLink)
+                }
+
+                Section("정보") {
+                    InfoRow(title: "데이터 출처", value: "목 데이터 (실 API 연동 예정)")
+                    InfoRow(title: "개인정보 처리방침", value: "준비 중")
+                    InfoRow(title: "앱 버전", value: appVersion)
+                }
+
+                #if DEBUG
+                Section("디버그") {
+                    InfoRow(title: "활성 데이터", value: appModel.debugActiveDataSource)
+                    InfoRow(title: "표시 데이터", value: appModel.debugDeliverySource)
+                    InfoRow(title: "기준 URL", value: appModel.debugBaseURL ?? "설정 안 됨")
+                    InfoRow(title: "마지막 갱신", value: appModel.debugLastRefreshText)
+                    InfoRow(title: "지연 상태", value: appModel.isShowingStaleData ? "지연됨" : "정상")
+                }
+                #endif
+            }
+            .navigationTitle("설정")
+            .formStyle(.grouped)
+        }
+    }
+
+    private var appVersion: String {
+        let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "\(shortVersion) (\(build))"
+    }
+}
+
+private struct InfoRow: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+#Preview {
+    SettingsView()
+        .environment(AppModel.previewModel())
+}
