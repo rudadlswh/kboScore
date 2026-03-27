@@ -1,0 +1,12 @@
+{
+  "gameList": [
+    {
+      "stadium": "JS",
+      "stadiumFullName": "잠실야구장",
+      "homeCode": "LG",
+      "awayCode": "KT",
+      "gameSc": "4",
+      "gameTime": "18:30"
+    }
+  ]
+}

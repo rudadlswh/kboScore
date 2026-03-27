@@ -2,5 +2,8 @@
 backend/.env
 backend/api/__pycache__/
 .aiassistant/
+backend/collector/.venv-test/
+backend/collector/.pytest_cache/
+backend/.pytest_cache/
 
 .idea/
