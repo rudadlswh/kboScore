@@ -60,6 +60,7 @@ struct HomeView: View {
             .background(KBOLivePalette.background)
             .navigationTitle("KBO LIVE")
             .navigationBarTitleDisplayMode(.inline)
+            .notificationsToolbarButton()
             .refreshable {
                 await appModel.refreshHome()
             }

@@ -11,6 +11,8 @@ struct ContentView: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
+        @Bindable var appModel = appModel
+
         Group {
             if appModel.isLoading && appModel.games.isEmpty {
                 ProgressView("KBO LIVE 불러오는 중")
@@ -23,23 +25,27 @@ struct ContentView: View {
                     description: Text(loadErrorMessage)
                 )
             } else {
-                TabView {
+                TabView(selection: $appModel.selectedTab) {
                     HomeView()
+                        .tag(AppTab.home)
                         .tabItem {
                             Label("홈", systemImage: "house.fill")
                         }
 
                     MyTeamView()
+                        .tag(AppTab.myTeam)
                         .tabItem {
                             Label("마이팀", systemImage: "star.fill")
                         }
 
-                    NotificationsView()
+                    ScheduleView()
+                        .tag(AppTab.schedule)
                         .tabItem {
-                            Label("알림", systemImage: "bell.fill")
+                            Label("일정", systemImage: "calendar")
                         }
 
                     SettingsView()
+                        .tag(AppTab.settings)
                         .tabItem {
                             Label("설정", systemImage: "gearshape.fill")
                         }
@@ -50,6 +56,34 @@ struct ContentView: View {
         }
         .task {
             await appModel.loadIfNeeded()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { appModel.isNotificationsPresented },
+                set: { isPresented in
+                    if !isPresented {
+                        appModel.dismissNotifications()
+                    }
+                }
+            )
+        ) {
+            NotificationsView()
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { appModel.presentedGameID != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        appModel.dismissPresentedGameDetail()
+                    }
+                }
+            )
+        ) {
+            if let gameID = appModel.presentedGameID {
+                NavigationStack {
+                    GameDetailView(gameID: gameID)
+                }
+            }
         }
     }
 }

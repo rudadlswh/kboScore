@@ -6,7 +6,21 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0E9566BEBD854D9D1E4A685A /* FavoriteTeamGameActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */; };
+		227A8A4633A90B208DCEED71 /* KBOScoreLiveActivityWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5507D843B43777EF9137F4D7 /* KBOScoreLiveActivityWidgetBundle.swift */; };
+		66094892F9D497AF3F3E00DA /* kboScoreLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */; };
+		C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19882FE9C0B099E95FE387FF /* KBOScoreLiveActivityWidget.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		344D6F98A182E925DB92EFC4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9ACDD1A52F7418770049BF00 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7CABFB91388F40A07B6875BC;
+			remoteInfo = kboScoreLiveActivityExtension;
+		};
 		9ACDD1BB2F7418780049BF00 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 9ACDD1A52F7418770049BF00 /* Project object */;
@@ -23,10 +37,30 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		62D620F1A758FF0F5F6D607F /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				66094892F9D497AF3F3E00DA /* kboScoreLiveActivityExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		19882FE9C0B099E95FE387FF /* KBOScoreLiveActivityWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KBOScoreLiveActivityWidget.swift; sourceTree = "<group>"; };
+		5507D843B43777EF9137F4D7 /* KBOScoreLiveActivityWidgetBundle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = KBOScoreLiveActivityWidgetBundle.swift; sourceTree = "<group>"; };
+		5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = kboScoreLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ACDD1AD2F7418770049BF00 /* kboScore.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = kboScore.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ACDD1BA2F7418780049BF00 /* kboScoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kboScoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ACDD1C42F7418780049BF00 /* kboScoreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kboScoreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9AFF634E2F7596E800F8D447 /* .env */ = {isa = PBXFileReference; lastKnownFileType = text; path = .env; sourceTree = "<group>"; };
+		9AFF634F2F75974D00F8D447 /* docker-compose.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = "docker-compose.yml"; sourceTree = "<group>"; };
+		C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamGameActivityAttributes.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,9 +79,26 @@
 			path = kboScoreUITests;
 			sourceTree = "<group>";
 		};
+		9AFF63502F7597B900F8D447 /* infra */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = infra;
+			sourceTree = "<group>";
+		};
+		9AFF63512F7597BD00F8D447 /* api */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = api;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		81DA0B4B7A25C03C44E6C8DE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9ACDD1AA2F7418770049BF00 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -72,13 +123,25 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		5D38420BBCAF36CC55B6F0FA /* kboScoreLiveActivityExtension */ = {
+			isa = PBXGroup;
+			children = (
+				5507D843B43777EF9137F4D7 /* KBOScoreLiveActivityWidgetBundle.swift */,
+				19882FE9C0B099E95FE387FF /* KBOScoreLiveActivityWidget.swift */,
+			);
+			path = kboScoreLiveActivityExtension;
+			sourceTree = "<group>";
+		};
 		9ACDD1A42F7418770049BF00 = {
 			isa = PBXGroup;
 			children = (
+				9AFF634D2F7596D700F8D447 /* backend */,
 				9ACDD1AF2F7418770049BF00 /* kboScore */,
 				9ACDD1BD2F7418780049BF00 /* kboScoreTests */,
 				9ACDD1C72F7418780049BF00 /* kboScoreUITests */,
 				9ACDD1AE2F7418770049BF00 /* Products */,
+				5D38420BBCAF36CC55B6F0FA /* kboScoreLiveActivityExtension */,
+				BD0D7A35B5EA04A6D30B0C32 /* LiveActivitiesShared */,
 			);
 			sourceTree = "<group>";
 		};
@@ -88,13 +151,51 @@
 				9ACDD1AD2F7418770049BF00 /* kboScore.app */,
 				9ACDD1BA2F7418780049BF00 /* kboScoreTests.xctest */,
 				9ACDD1C42F7418780049BF00 /* kboScoreUITests.xctest */,
+				5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		9AFF634D2F7596D700F8D447 /* backend */ = {
+			isa = PBXGroup;
+			children = (
+				9AFF63512F7597BD00F8D447 /* api */,
+				9AFF63502F7597B900F8D447 /* infra */,
+				9AFF634E2F7596E800F8D447 /* .env */,
+				9AFF634F2F75974D00F8D447 /* docker-compose.yml */,
+			);
+			path = backend;
+			sourceTree = "<group>";
+		};
+		BD0D7A35B5EA04A6D30B0C32 /* LiveActivitiesShared */ = {
+			isa = PBXGroup;
+			children = (
+				C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */,
+			);
+			name = LiveActivitiesShared;
+			path = kboScore/LiveActivitiesShared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		7CABFB91388F40A07B6875BC /* kboScoreLiveActivityExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D92CFC1271D87277099822AB /* Build configuration list for PBXNativeTarget "kboScoreLiveActivityExtension" */;
+			buildPhases = (
+				AFD9F988EDF48107BD080B5F /* Sources */,
+				81DA0B4B7A25C03C44E6C8DE /* Frameworks */,
+				0107860BBB65717FB4C95A4B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = kboScoreLiveActivityExtension;
+			productName = kboScoreLiveActivityExtension;
+			productReference = 5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		9ACDD1AC2F7418770049BF00 /* kboScore */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9ACDD1CE2F7418780049BF00 /* Build configuration list for PBXNativeTarget "kboScore" */;
@@ -102,17 +203,17 @@
 				9ACDD1A92F7418770049BF00 /* Sources */,
 				9ACDD1AA2F7418770049BF00 /* Frameworks */,
 				9ACDD1AB2F7418770049BF00 /* Resources */,
+				62D620F1A758FF0F5F6D607F /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				D39AC85C20EBB127320F6EB6 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				9ACDD1AF2F7418770049BF00 /* kboScore */,
 			);
 			name = kboScore;
-			packageProductDependencies = (
-			);
 			productName = kboScore;
 			productReference = 9ACDD1AD2F7418770049BF00 /* kboScore.app */;
 			productType = "com.apple.product-type.application";
@@ -134,8 +235,6 @@
 				9ACDD1BD2F7418780049BF00 /* kboScoreTests */,
 			);
 			name = kboScoreTests;
-			packageProductDependencies = (
-			);
 			productName = kboScoreTests;
 			productReference = 9ACDD1BA2F7418780049BF00 /* kboScoreTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -157,8 +256,6 @@
 				9ACDD1C72F7418780049BF00 /* kboScoreUITests */,
 			);
 			name = kboScoreUITests;
-			packageProductDependencies = (
-			);
 			productName = kboScoreUITests;
 			productReference = 9ACDD1C42F7418780049BF00 /* kboScoreUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -203,11 +300,19 @@
 				9ACDD1AC2F7418770049BF00 /* kboScore */,
 				9ACDD1B92F7418780049BF00 /* kboScoreTests */,
 				9ACDD1C32F7418780049BF00 /* kboScoreUITests */,
+				7CABFB91388F40A07B6875BC /* kboScoreLiveActivityExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		0107860BBB65717FB4C95A4B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9ACDD1AB2F7418770049BF00 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -253,6 +358,16 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AFD9F988EDF48107BD080B5F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				227A8A4633A90B208DCEED71 /* KBOScoreLiveActivityWidgetBundle.swift in Sources */,
+				C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */,
+				0E9566BEBD854D9D1E4A685A /* FavoriteTeamGameActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -266,9 +381,47 @@
 			target = 9ACDD1AC2F7418770049BF00 /* kboScore */;
 			targetProxy = 9ACDD1C52F7418780049BF00 /* PBXContainerItemProxy */;
 		};
+		D39AC85C20EBB127320F6EB6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = kboScoreLiveActivityExtension;
+			target = 7CABFB91388F40A07B6875BC /* kboScoreLiveActivityExtension */;
+			targetProxy = 344D6F98A182E925DB92EFC4 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		173FF4F81CC9A573B3AFB360 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M6L5TLN44L;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = kboScoreLiveActivityExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chogm.kboScore.LiveActivityExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		9ACDD1CC2F7418780049BF00 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -398,6 +551,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -442,6 +596,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -575,6 +730,37 @@
 			};
 			name = Release;
 		};
+		AF82D1EDDCC8DFFFF088E0A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = M6L5TLN44L;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = kboScoreLiveActivityExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.chogm.kboScore.LiveActivityExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -610,6 +796,15 @@
 			buildConfigurations = (
 				9ACDD1D52F7418780049BF00 /* Debug */,
 				9ACDD1D62F7418780049BF00 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D92CFC1271D87277099822AB /* Build configuration list for PBXNativeTarget "kboScoreLiveActivityExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				173FF4F81CC9A573B3AFB360 /* Release */,
+				AF82D1EDDCC8DFFFF088E0A1 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

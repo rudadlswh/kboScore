@@ -495,8 +495,14 @@ struct LiveKBORepository: KBORepository, Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let runtimeState: RepositoryRuntimeState?
+    private let nowProvider: @Sendable () -> Date
 
-    init(baseURL: URL, session: URLSession = .shared, runtimeState: RepositoryRuntimeState? = nil) {
+    init(
+        baseURL: URL,
+        session: URLSession = .shared,
+        runtimeState: RepositoryRuntimeState? = nil,
+        nowProvider: @escaping @Sendable () -> Date = { .now }
+    ) {
         if baseURL.absoluteString.hasSuffix("/") {
             self.baseURL = baseURL
         } else {
@@ -504,12 +510,46 @@ struct LiveKBORepository: KBORepository, Sendable {
         }
         self.session = session
         self.runtimeState = runtimeState
+        self.nowProvider = nowProvider
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
-        let payload = try await fetchNormalizedPayload(.bootstrap).asBootstrapDTO()
-        await runtimeState?.record(source: .live, delivery: .live)
-        return KBODataMapper.mapBootstrap(payload)
+        if isOfficialKBOHost {
+            let payload = try await fetchNormalizedPayload(.games).asBootstrapDTO()
+            await runtimeState?.record(source: .live, delivery: .live)
+            return KBODataMapper.mapBootstrap(
+                KBOBootstrapDTO(
+                    teams: payload.teams,
+                    games: payload.games,
+                    notifications: [],
+                    settings: nil
+                )
+            )
+        }
+
+        do {
+            let payload = try await fetchNormalizedPayload(.bootstrap).asBootstrapDTO()
+            await runtimeState?.record(source: .live, delivery: .live)
+            return KBODataMapper.mapBootstrap(payload)
+        } catch {
+            #if DEBUG
+            print("[LiveAPI] bootstrap primary endpoint failed. falling back to monthly schedule. error=\(error)")
+            #endif
+
+            let month = KBOMonthScheduleKey(date: nowProvider())
+            let fallbackPayload = try await fetchNormalizedPayload(.monthlySchedule(month))
+            let fallbackBootstrap = KBOBootstrapDTO(
+                teams: fallbackPayload.teams,
+                games: fallbackPayload.games,
+                notifications: [],
+                settings: nil
+            )
+            #if DEBUG
+            print("[LiveAPI] bootstrap fallback active endpoint=schedule/month month=\(month.year)-\(month.month)")
+            #endif
+            await runtimeState?.record(source: .live, delivery: .live)
+            return KBODataMapper.mapBootstrap(fallbackBootstrap)
+        }
     }
 
     nonisolated func fetchGames() async throws -> [GameDetail] {
@@ -540,18 +580,62 @@ struct LiveKBORepository: KBORepository, Sendable {
 
     private func fetchNormalizedPayload(_ endpoint: Endpoint) async throws -> KBOExternalNormalizedPayload {
         let request = try makeRequest(for: endpoint)
-        let (data, response) = try await session.data(for: request)
+        #if DEBUG
+        let method = request.httpMethod ?? "GET"
+        let urlText = request.url?.absoluteString ?? "nil"
+        print("[LiveAPI] request endpoint=\(endpoint.path) method=\(method) url=\(urlText)")
+        #endif
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            #if DEBUG
+            print("[LiveAPI] transportError endpoint=\(endpoint.path) error=\(error)")
+            #endif
+            throw error
+        }
+        #if DEBUG
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
+        let preview = rawBody.count > 4_000 ? String(rawBody.prefix(4_000)) + "...(truncated)" : rawBody
+        print("[LiveAPI] response endpoint=\(endpoint.path) status=\(statusCode)")
+        print("[LiveAPI] rawResponseBody endpoint=\(endpoint.path) body=\(preview)")
+        #endif
         try validate(response: response, endpoint: endpoint)
 
         do {
-            return try KBOExternalResponseAdapter.normalize(data: data)
+            let payload = try KBOExternalResponseAdapter.normalize(data: data)
+            #if DEBUG
+            print(
+                "[LiveAPI] decoded endpoint=\(endpoint.path) teams=\(payload.teams.count) games=\(payload.games.count) notifications=\(payload.notifications.count)"
+            )
+            #endif
+            return payload
         } catch {
+            #if DEBUG
+            print("[LiveAPI] decodingError endpoint=\(endpoint.path) error=\(error)")
+            #endif
             throw LiveRepositoryError.decoding(endpoint: endpoint.path, underlying: error)
         }
     }
 
     private func makeRequest(for endpoint: Endpoint) throws -> URLRequest {
         switch endpoint {
+        case .games where isOfficialKBOHost:
+            let contract = try OfficialKBOLiveGamesRequestContract(baseURL: baseURL, date: nowProvider())
+            guard let url = contract.url else {
+                throw LiveRepositoryError.invalidBaseURL
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.setValue(contract.contentType, forHTTPHeaderField: "Content-Type")
+            request.setValue(contract.accept, forHTTPHeaderField: "Accept")
+            request.setValue(contract.requestedWith, forHTTPHeaderField: "X-Requested-With")
+            request.httpBody = contract.bodyData
+            return request
         case .monthlySchedule(let month) where isOfficialKBOHost:
             let contract = try OfficialKBOMonthlyScheduleRequestContract(baseURL: baseURL, month: month)
             guard let url = contract.url else {
@@ -579,7 +663,7 @@ struct LiveKBORepository: KBORepository, Sendable {
         }
     }
 
-    private var isOfficialKBOHost: Bool {
+    nonisolated private var isOfficialKBOHost: Bool {
         baseURL.host?.contains("koreabaseball.com") == true
     }
 
@@ -610,7 +694,7 @@ struct LiveKBORepository: KBORepository, Sendable {
             case .teams:
                 "teams"
             case .monthlySchedule(let month):
-                "schedule?year=\(month.year)&month=\(String(format: "%02d", month.month))"
+                "schedule/month?year=\(month.year)&month=\(month.month)"
             }
         }
     }
@@ -654,6 +738,60 @@ struct OfficialKBOMonthlyScheduleRequestContract: Sendable {
 
     var bodyData: Data {
         Data(bodyString.utf8)
+    }
+}
+
+struct OfficialKBOLiveGamesRequestContract: Sendable {
+    let date: Date
+    let url: URL?
+
+    let contentType = "application/x-www-form-urlencoded; charset=UTF-8"
+    let accept = "application/json"
+    let requestedWith = "XMLHttpRequest"
+
+    init(baseURL: URL, date: Date) throws {
+        self.date = date
+        self.url = URL(string: "ws/Main.asmx/GetKboGameList", relativeTo: baseURL)?.absoluteURL
+        if url == nil {
+            throw LiveRepositoryError.invalidBaseURL
+        }
+    }
+
+    var seriesIDList: String {
+        if kboDate >= "20241026" {
+            return "0,1,3,4,5,6,7,8,9"
+        }
+        if kboDate.prefix(4) >= "2021" {
+            return "0,1,3,4,5,6,7,9"
+        }
+        return "0,1,3,4,5,7,9"
+    }
+
+    var queryItems: [URLQueryItem] {
+        [
+            URLQueryItem(name: "leId", value: "1"),
+            URLQueryItem(name: "srId", value: seriesIDList),
+            URLQueryItem(name: "date", value: kboDate)
+        ]
+    }
+
+    var bodyString: String {
+        var components = URLComponents()
+        components.queryItems = queryItems
+        return components.percentEncodedQuery ?? ""
+    }
+
+    var bodyData: Data {
+        Data(bodyString.utf8)
+    }
+
+    private var kboDate: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
     }
 }
 

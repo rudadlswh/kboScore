@@ -35,6 +35,15 @@ struct SettingsView: View {
                     Toggle("경기 종료", isOn: $appModel.settings.notificationPreferences.gameEnd)
                     Toggle("우천/취소", isOn: $appModel.settings.notificationPreferences.rainDelay)
 
+                    LabeledContent("권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
+                    LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
+
+                    Button("알림 권한 요청") {
+                        Task {
+                            await appModel.requestNotificationAuthorization()
+                        }
+                    }
+
                     LabeledContent("조용한 시간", value: appModel.settings.quietHours.description)
 
                     Toggle("라이브 액티비티", isOn: $appModel.settings.liveActivitiesEnabled)
@@ -71,11 +80,27 @@ struct SettingsView: View {
                     InfoRow(title: "기준 URL", value: appModel.debugBaseURL ?? "설정 안 됨")
                     InfoRow(title: "마지막 갱신", value: appModel.debugLastRefreshText)
                     InfoRow(title: "지연 상태", value: appModel.isShowingStaleData ? "지연됨" : "정상")
+                    if let apnsDeviceToken = appModel.apnsDeviceToken {
+                        InfoRow(title: "APNs 토큰", value: String(apnsDeviceToken.prefix(16)) + "…")
+                    }
+                    InfoRow(title: "등록 엔드포인트", value: appModel.notificationRegistrationEndpointDescription ?? "설정 안 됨")
+                    InfoRow(title: "등록 상태", value: appModel.notificationRegistrationSyncStatus.rawValue)
+                    InfoRow(title: "등록 시도", value: appModel.notificationRegistrationLastAttemptText)
+                    InfoRow(title: "등록 payload", value: appModel.notificationRegistrationPayloadPreviewText)
+                    Button("테스트 알림 예약") {
+                        Task {
+                            await appModel.scheduleDebugNotification()
+                        }
+                    }
                 }
                 #endif
             }
             .navigationTitle("설정")
+            .notificationsToolbarButton()
             .formStyle(.grouped)
+            .task {
+                await appModel.refreshNotificationAuthorizationStatus()
+            }
         }
     }
 

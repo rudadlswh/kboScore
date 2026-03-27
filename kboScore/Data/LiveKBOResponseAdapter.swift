@@ -204,7 +204,7 @@ enum KBOExternalResponseAdapter {
         let bases = parseBases(in: dictionary)
 
         return KBOGameDTO(
-            id: parseUUID(stringValue(for: ["id", "gameId", "gameID", "matchId"], in: dictionary)) ?? UUID(),
+            id: GameIdentifier.uuid(from: stringValue(for: ["id", "gameId", "gameID", "matchId"], in: dictionary)) ?? UUID(),
             scheduledStart: scheduledStart,
             venue: stringValue(for: ["venue", "stadium", "stadiumName", "ballpark"], in: dictionary) ??
                 stringValue(for: ["name"], in: nestedDictionary(for: ["venue"], in: dictionary)),
@@ -276,7 +276,7 @@ enum KBOExternalResponseAdapter {
             body: stringValue(for: ["body", "message", "description", "text"], in: dictionary) ?? "",
             sentAt: parseDate(in: dictionary, defaultDate: .distantPast),
             isRead: boolValue(for: ["isRead", "read"], in: dictionary) ?? false,
-            relatedGameID: parseUUID(stringValue(for: ["relatedGameID", "gameId", "matchId"], in: dictionary)),
+            relatedGameID: GameIdentifier.uuid(from: stringValue(for: ["relatedGameID", "gameId", "matchId"], in: dictionary)),
             relatedTeamIDs: relatedTeamIDs
         )
     }
@@ -422,7 +422,7 @@ enum KBOExternalResponseAdapter {
         let halfText = stringValue(for: ["GAME_TB_SC_NM"], in: dictionary)
 
         return KBOGameDTO(
-            id: parseUUID(stringValue(for: ["G_ID"], in: dictionary)) ?? UUID(),
+            id: GameIdentifier.uuid(from: stringValue(for: ["G_ID"], in: dictionary)) ?? UUID(),
             scheduledStart: parseDate(in: dictionary),
             venue: stringValue(for: ["S_NM"], in: dictionary),
             awayTeamID: awayTeam.id,
@@ -432,7 +432,7 @@ enum KBOExternalResponseAdapter {
             statusCode: normalizedOfficialStatusCode(gameState: gameState, cancelName: cancelName),
             statusText: normalizedOfficialStatusText(gameState: gameState, cancelName: cancelName),
             inningText: officialInningText(number: inningNumber, halfText: halfText, stateCode: gameState),
-            bases: nil,
+            bases: officialBases(in: dictionary),
             outs: intValue(for: ["OUT_CN"], in: dictionary),
             highlightText: nil,
             events: [],
@@ -477,7 +477,7 @@ enum KBOExternalResponseAdapter {
         let isFinal = teamsAndScores.awayScore != nil && teamsAndScores.homeScore != nil
 
         let game = KBOGameDTO(
-            id: parseUUID(gameLink.gameID) ?? UUID(),
+            id: GameIdentifier.uuid(from: gameLink.gameID) ?? UUID(),
             scheduledStart: scheduledStart,
             venue: venueText,
             awayTeamID: awayTeam.id,
@@ -754,6 +754,15 @@ enum KBOExternalResponseAdapter {
             return "\(number)회 \(halfText)"
         }
         return "\(number)회"
+    }
+
+    nonisolated private static func officialBases(in dictionary: [String: Any]) -> KBORunnerStateDTO? {
+        let first = (intValue(for: ["B1_BAT_ORDER_NO"], in: dictionary) ?? 0) > 0
+        let second = (intValue(for: ["B2_BAT_ORDER_NO"], in: dictionary) ?? 0) > 0
+        let third = (intValue(for: ["B3_BAT_ORDER_NO"], in: dictionary) ?? 0) > 0
+
+        guard first || second || third else { return nil }
+        return KBORunnerStateDTO(first: first, second: second, third: third)
     }
 
     nonisolated private static func officialTeamDTO(codeOrIdentifier: String?, name: String?) -> KBOTeamDTO? {

@@ -9,9 +9,15 @@ import SwiftUI
 
 @main
 struct kboScoreApp: App {
+    @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var notificationDelegate
     @State private var appModel: AppModel = {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle()
-        return AppModel(repository: bundle.repository, repositoryRuntimeState: bundle.runtimeState)
+        let notificationRegistrationClient = NotificationRegistrationClientFactory.makeAppClient()
+        return AppModel(
+            repository: bundle.repository,
+            repositoryRuntimeState: bundle.runtimeState,
+            notificationRegistrationClient: notificationRegistrationClient
+        )
     }()
 
     var body: some Scene {
@@ -19,6 +25,10 @@ struct kboScoreApp: App {
             ContentView()
                 .environment(appModel)
                 .preferredColorScheme(appModel.settings.appearance.colorScheme)
+                .task {
+                    appModel.connectNotificationDelegate(notificationDelegate)
+                    await appModel.syncNotificationRegistrationState()
+                }
         }
     }
 }

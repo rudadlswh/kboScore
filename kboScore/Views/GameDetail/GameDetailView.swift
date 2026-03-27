@@ -110,22 +110,9 @@ struct GameDetailView: View {
     @ViewBuilder
     private func actionButtons(for game: GameDetail) -> some View {
         HStack(spacing: 10) {
-            Button {
-                appModel.toggleLiveActivity(for: game.id)
-            } label: {
-                Label(
-                    appModel.isLiveActivityOn(for: game.id) ? "추적 중" : "라이브 액티비티",
-                    systemImage: appModel.isLiveActivityOn(for: game.id) ? "dot.radiowaves.left.and.right.circle.fill" : "dot.radiowaves.left.and.right"
-                )
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(appModel.currentTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .foregroundStyle(Color.white)
+            if appModel.shouldShowLiveActivityAction(for: game) {
+                LiveActivityActionButton(game: game)
             }
-            .buttonStyle(.plain)
-            .disabled(!game.status.isLiveLike || !appModel.settings.liveActivitiesEnabled)
-            .opacity((game.status.isLiveLike && appModel.settings.liveActivitiesEnabled) ? 1 : 0.45)
 
             ShareLink(item: game.shareText) {
                 Label("경기 공유하기", systemImage: "square.and.arrow.up")
