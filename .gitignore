@@ -2,3 +2,5 @@
 backend/.env
 backend/api/__pycache__/
 .aiassistant/
+
+.idea/
