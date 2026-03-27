@@ -38,16 +38,14 @@ def get_teams():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT
-                    id::text AS id,
-                    code,
-                    name_ko,
-                    name_en,
-                    short_name,
-                    theme_color,
-                    logo_asset_name,
-                    sort_order,
-                    is_active
+                SELECT id::text AS id, code,
+                       name_ko,
+                       name_en,
+                       short_name,
+                       theme_color,
+                       logo_asset_name,
+                       sort_order,
+                       is_active
                 FROM teams
                 WHERE is_active = TRUE
                 ORDER BY sort_order ASC, code ASC
@@ -73,9 +71,9 @@ def get_teams():
 
 @app.get("/schedule/month")
 def get_schedule_month(
-    year: int = Query(...),
-    month: int = Query(..., ge=1, le=12),
-    teamCode: str | None = Query(default=None),
+        year: int = Query(...),
+        month: int = Query(..., ge=1, le=12),
+        teamCode: str | None = Query(default=None),
 ):
     month_start = date(year, month, 1)
     if month == 12:
@@ -86,34 +84,32 @@ def get_schedule_month(
     normalized_team_code = teamCode.strip().upper() if teamCode and teamCode.strip() else None
 
     query = """
-        SELECT
-            g.id::text AS id,
-            g.game_date,
-            CASE
-                WHEN g.scheduled_at IS NULL THEN NULL
-                ELSE to_char(g.scheduled_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI')
-            END AS game_time,
-            g.status,
-            g.stadium,
-            g.home_score,
-            g.away_score,
-            g.inning_state,
-            home.code AS home_code,
-            home.name_ko AS home_name_ko,
-            home.short_name AS home_short_name,
-            home.theme_color AS home_theme_color,
-            home.logo_asset_name AS home_logo_asset_name,
-            away.code AS away_code,
-            away.name_ko AS away_name_ko,
-            away.short_name AS away_short_name,
-            away.theme_color AS away_theme_color,
-            away.logo_asset_name AS away_logo_asset_name
-        FROM games g
-        JOIN teams home ON home.id = g.home_team_id
-        JOIN teams away ON away.id = g.away_team_id
-        WHERE g.game_date >= %s
-          AND g.game_date < %s
-    """
+            SELECT g.id::text AS id, g.game_date,
+                   CASE
+                       WHEN g.scheduled_at IS NULL THEN NULL
+                       ELSE to_char(g.scheduled_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI')
+                       END              AS game_time,
+                   g.status,
+                   g.stadium,
+                   g.home_score,
+                   g.away_score,
+                   g.inning_state,
+                   home.code            AS home_code,
+                   home.name_ko         AS home_name_ko,
+                   home.short_name      AS home_short_name,
+                   home.theme_color     AS home_theme_color,
+                   home.logo_asset_name AS home_logo_asset_name,
+                   away.code            AS away_code,
+                   away.name_ko         AS away_name_ko,
+                   away.short_name      AS away_short_name,
+                   away.theme_color     AS away_theme_color,
+                   away.logo_asset_name AS away_logo_asset_name
+            FROM games g
+                     JOIN teams home ON home.id = g.home_team_id
+                     JOIN teams away ON away.id = g.away_team_id
+            WHERE g.game_date >= %s
+              AND g.game_date < %s \
+            """
     params = [month_start, next_month_start]
 
     if normalized_team_code:
