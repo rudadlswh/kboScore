@@ -4,7 +4,7 @@ from datetime import date
 import psycopg
 from fastapi import FastAPI, Query
 from psycopg.rows import dict_row
-
+from typing import Optional
 app = FastAPI()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
