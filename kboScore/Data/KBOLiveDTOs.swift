@@ -105,6 +105,26 @@ struct KBOGameDTO: Codable, Sendable {
     let events: [KBOGameEventDTO]
     let note: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case scheduledStart
+        case venue
+        case awayTeamID
+        case homeTeamID
+        case awayTeamId
+        case homeTeamId
+        case awayScore
+        case homeScore
+        case statusCode
+        case statusText
+        case inningText
+        case bases
+        case outs
+        case highlightText
+        case events
+        case note
+    }
+
     nonisolated init(
         id: UUID,
         scheduledStart: Date,
@@ -144,8 +164,16 @@ struct KBOGameDTO: Codable, Sendable {
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         scheduledStart = try container.decodeFlexibleDate(forKey: .scheduledStart) ?? .distantPast
         venue = try container.decodeIfPresent(String.self, forKey: .venue)
-        awayTeamID = try container.decodeIfPresent(String.self, forKey: .awayTeamID) ?? "unknown-away"
-        homeTeamID = try container.decodeIfPresent(String.self, forKey: .homeTeamID) ?? "unknown-home"
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        let providerTeamIDs = Self.providerTeamIDs(from: note)
+        let decodedAwayTeamID = (try container.decodeIfPresent(String.self, forKey: .awayTeamID))?.nilIfBlank
+        let decodedAwayTeamId = (try container.decodeIfPresent(String.self, forKey: .awayTeamId))?.nilIfBlank
+        let nestedAwayTeamID = Self.nestedTeamIdentifier(from: decoder, keyCandidates: ["awayTeam", "away"])
+        awayTeamID = decodedAwayTeamID ?? decodedAwayTeamId ?? nestedAwayTeamID ?? providerTeamIDs?.away ?? ""
+        let decodedHomeTeamID = (try container.decodeIfPresent(String.self, forKey: .homeTeamID))?.nilIfBlank
+        let decodedHomeTeamId = (try container.decodeIfPresent(String.self, forKey: .homeTeamId))?.nilIfBlank
+        let nestedHomeTeamID = Self.nestedTeamIdentifier(from: decoder, keyCandidates: ["homeTeam", "home"])
+        homeTeamID = decodedHomeTeamID ?? decodedHomeTeamId ?? nestedHomeTeamID ?? providerTeamIDs?.home ?? ""
         awayScore = try container.decodeIfPresent(Int.self, forKey: .awayScore)
         homeScore = try container.decodeIfPresent(Int.self, forKey: .homeScore)
         statusCode = try container.decodeIfPresent(String.self, forKey: .statusCode)
@@ -155,7 +183,59 @@ struct KBOGameDTO: Codable, Sendable {
         outs = try container.decodeIfPresent(Int.self, forKey: .outs)
         highlightText = try container.decodeIfPresent(String.self, forKey: .highlightText)
         events = try container.decodeIfPresent([KBOGameEventDTO].self, forKey: .events) ?? []
-        note = try container.decodeIfPresent(String.self, forKey: .note)
+    }
+
+    private nonisolated static func providerTeamIDs(from note: String?) -> (away: String, home: String)? {
+        guard let note else { return nil }
+        guard let range = note.range(of: "provider_game_id=") else { return nil }
+        let suffix = note[range.upperBound...]
+        let token = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
+        let parts = token.split(separator: "_")
+        guard parts.count >= 2 else { return nil }
+        return (String(parts[parts.count - 2]), String(parts[parts.count - 1]))
+    }
+
+    private nonisolated static func nestedTeamIdentifier(
+        from decoder: any Decoder,
+        keyCandidates: [String]
+    ) -> String? {
+        guard let container = try? decoder.container(keyedBy: AnyCodingKey.self) else { return nil }
+        for keyName in keyCandidates {
+            guard let key = AnyCodingKey(stringValue: keyName),
+                  let nested = try? container.nestedContainer(keyedBy: AnyCodingKey.self, forKey: key) else {
+                continue
+            }
+
+            let idKeys = ["id", "teamID", "teamId", "code"]
+            for idKeyName in idKeys {
+                guard let idKey = AnyCodingKey(stringValue: idKeyName),
+                      let value = try? nested.decodeIfPresent(String.self, forKey: idKey),
+                      let resolved = value.nilIfBlank else {
+                    continue
+                }
+                return resolved
+            }
+        }
+        return nil
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(scheduledStart, forKey: .scheduledStart)
+        try container.encodeIfPresent(venue, forKey: .venue)
+        try container.encode(awayTeamID, forKey: .awayTeamID)
+        try container.encode(homeTeamID, forKey: .homeTeamID)
+        try container.encodeIfPresent(awayScore, forKey: .awayScore)
+        try container.encodeIfPresent(homeScore, forKey: .homeScore)
+        try container.encodeIfPresent(statusCode, forKey: .statusCode)
+        try container.encodeIfPresent(statusText, forKey: .statusText)
+        try container.encodeIfPresent(inningText, forKey: .inningText)
+        try container.encodeIfPresent(bases, forKey: .bases)
+        try container.encodeIfPresent(outs, forKey: .outs)
+        try container.encodeIfPresent(highlightText, forKey: .highlightText)
+        try container.encode(events, forKey: .events)
+        try container.encodeIfPresent(note, forKey: .note)
     }
 }
 
@@ -232,7 +312,7 @@ struct KBOBootstrapDTO: Codable, Sendable {
 enum KBODataMapper {
     nonisolated static func mapBootstrap(_ payload: KBOBootstrapDTO) -> KBOBootstrapData {
         let teams = payload.teams.map(mapTeam)
-        let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { ($0.id, $0) })
+        let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
 
         return KBOBootstrapData(
             teams: teams,
@@ -245,7 +325,7 @@ enum KBODataMapper {
     }
 
     nonisolated static func mapGames(_ payload: [KBOGameDTO], teams: [Team]) -> [GameDetail] {
-        let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { ($0.id, $0) })
+        let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
         return payload.compactMap { mapGame($0, teamsByID: teamsByID) }
             .sorted { $0.scheduledStart > $1.scheduledStart }
     }
@@ -255,8 +335,8 @@ enum KBODataMapper {
             .sorted { $0.sentAt > $1.sentAt }
     }
 
-    nonisolated static func mapGameStatus(code: String?, text: String?) -> GameStatus {
-        let normalized = [code, text]
+    nonisolated static func mapGameStatus(code: String?, text: String?, inningText: String? = nil) -> GameStatus {
+        let normalized = [code, text, inningText]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .joined(separator: " ")
 
@@ -280,8 +360,9 @@ enum KBODataMapper {
     }
 
     nonisolated static func mapTeam(_ dto: KBOTeamDTO) -> Team {
-        Team(
-            id: dto.id,
+        let normalizedID = normalizedTeamID(dto.id)
+        return Team(
+            id: normalizedID,
             name: dto.name,
             shortName: dto.shortName,
             englishName: dto.englishName,
@@ -295,9 +376,9 @@ enum KBODataMapper {
             return nil
         }
 
-        let status = mapGameStatus(code: dto.statusCode, text: dto.statusText)
+        let status = mapGameStatus(code: dto.statusCode, text: dto.statusText, inningText: dto.inningText)
         let inningText = dto.inningText?.nilIfBlank
-        let note = dto.note?.nilIfBlank
+        let note = sanitizedNote(dto.note)
         let highlight = dto.highlightText?.nilIfBlank
 
         return GameDetail(
@@ -338,18 +419,31 @@ enum KBODataMapper {
             sentAt: dto.sentAt,
             isRead: dto.isRead,
             relatedGameID: dto.relatedGameID,
-            relatedTeamIDs: dto.relatedTeamIDs
+            relatedTeamIDs: dto.relatedTeamIDs.map(normalizedTeamID)
         )
     }
 
     nonisolated private static func resolvedTeam(id: String, teamsByID: [String: Team]) -> Team? {
-        teamsByID[id] ?? Team(
-            id: id,
+        let normalizedID = normalizedTeamID(id)
+        return teamsByID[normalizedID] ?? Team(
+            id: normalizedID,
             name: "알 수 없는 팀",
-            shortName: id.uppercased(),
-            englishName: id.uppercased(),
-            markText: String(id.prefix(3)).uppercased()
+            shortName: normalizedID.uppercased(),
+            englishName: normalizedID.uppercased(),
+            markText: String(normalizedID.prefix(3)).uppercased()
         )
+    }
+
+    nonisolated private static func normalizedTeamID(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    nonisolated private static func sanitizedNote(
+        _ raw: String?
+    ) -> String? {
+        guard let raw, let note = raw.nilIfBlank else { return nil }
+        // Keep provider identifiers intact so higher layers can recover team IDs when needed.
+        return note
     }
 
     nonisolated private static func mapEventType(_ rawValue: String) -> GameEventType {
@@ -394,26 +488,41 @@ private extension String {
 
 private extension KeyedDecodingContainer {
     nonisolated func decodeFlexibleDate(forKey key: Key) throws -> Date? {
-        if let timestamp = try decodeIfPresent(Date.self, forKey: key) {
+        if let timestamp = try? decodeIfPresent(Date.self, forKey: key) {
             return timestamp
         }
 
-        if let seconds = try decodeIfPresent(Double.self, forKey: key) {
+        if let seconds = try? decodeIfPresent(Double.self, forKey: key) {
             return Date(timeIntervalSince1970: seconds)
         }
 
-        if let milliseconds = try decodeIfPresent(Int64.self, forKey: key) {
+        if let milliseconds = try? decodeIfPresent(Int64.self, forKey: key) {
             if milliseconds > 2_000_000_000 {
                 return Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
             }
             return Date(timeIntervalSince1970: TimeInterval(milliseconds))
         }
 
-        if let text = try decodeIfPresent(String.self, forKey: key) {
+        if let text = try? decodeIfPresent(String.self, forKey: key) {
             return FlexibleDateParser.parse(text)
         }
 
         return nil
+    }
+}
+
+private struct AnyCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = String(intValue)
+        self.intValue = intValue
     }
 }
 

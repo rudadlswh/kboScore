@@ -65,11 +65,90 @@ struct kboScoreTests {
         #expect(games.allSatisfy { $0.involves(teamID: "lg") })
     }
 
+    @Test func scheduleMonthNavigationSkipsEmptyMonths() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+
+        let marchGame = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            scheduledStart: isoDate("2026-03-10T18:30:00+09:00"),
+            venue: "잠실야구장",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let mayGame = makeGameDetail(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
+            scheduledStart: isoDate("2026-05-10T18:30:00+09:00"),
+            venue: "문학",
+            awayTeam: lg,
+            homeTeam: ssg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: base.teams,
+                games: [marchGame, mayGame],
+                notifications: base.notifications,
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let aprilMonth = isoDate("2026-04-01T09:00:00+09:00")
+        let marchMonth = model.startOfMonth(for: marchGame.scheduledStart)
+        let mayMonth = model.startOfMonth(for: mayGame.scheduledStart)
+        let resolvedMonth = model.nearestScheduleMonth(to: aprilMonth, filter: .all)
+        let nextMonth = model.shiftedScheduleMonth(from: marchGame.scheduledStart, by: 1, filter: .all)
+        let previousMonth = model.shiftedScheduleMonth(from: mayGame.scheduledStart, by: -1, filter: .all)
+
+        #expect(resolvedMonth == mayMonth)
+        #expect(nextMonth == mayMonth)
+        #expect(previousMonth == marchMonth)
+    }
+
+    @Test func finalGameDerivesWinnerScoreAndTeamResult() async throws {
+        let model = AppModel(bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-03-23T15:00:00+09:00")), usePersistedSettings: false)
+        let sampleDate = isoDate("2026-03-23T13:00:00+09:00")
+        let allGames = model.scheduleGames(on: sampleDate, filter: .all)
+        let matchingFinalGame = allGames.first { game in
+            game.awayTeam.id == "lotte" && game.homeTeam.id == "ssg" && game.status == .final
+        }
+        let finalGame = try #require(matchingFinalGame)
+
+        #expect(finalGame.finalWinningTeam?.id == "lotte")
+        #expect(finalGame.finalScoreLine == "롯데 5 : 2 SSG")
+        #expect(finalGame.finalResult(for: "lotte") == .win)
+        #expect(finalGame.finalResult(for: "ssg") == .loss)
+    }
+
+    @Test func scheduleCalendarDaysExposeFavoriteTeamFinalResult() async throws {
+        let model = AppModel(bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-03-23T15:00:00+09:00")), usePersistedSettings: false)
+        model.settings.favoriteTeamID = "lg"
+        let referenceDate = isoDate("2026-03-22T09:00:00+09:00")
+        let calendar = Calendar(identifier: .gregorian)
+        let days = model.scheduleCalendarDays(for: referenceDate, filter: .all)
+        let matchingDay = days.first { day in
+            calendar.isDate(day.date, inSameDayAs: referenceDate)
+        }
+        let favoriteDay = try #require(matchingDay)
+
+        #expect(favoriteDay.favoriteTeamResult == .win)
+    }
+
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
+        #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: nil, inningText: "1회초") == .live)
     }
 
     @Test func mapperBuildsStableDomainModelsFromDTOs() async throws {
@@ -803,6 +882,75 @@ struct kboScoreTests {
         #expect(await counter.value == 1)
     }
 
+    @Test func cachedRepositoryFallsBackToPersistedGamesCacheAcrossInstances() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+
+        let configuration = RepositoryCacheConfiguration(
+            bootstrapTTL: 1,
+            gamesTTL: 0,
+            notificationsTTL: 1,
+            monthlyScheduleTTL: 60,
+            diskCacheDirectory: cacheDirectory
+        )
+        let seededRepository = CachedKBORepository(
+            base: StubRepository(fetchGames: { stubGames() }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+        let expectedGames = try await seededRepository.fetchGames()
+
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: "https://example.com",
+            deliverySource: .live
+        )
+        let cachedRepository = CachedKBORepository(
+            base: StubRepository(fetchGames: { throw URLError(.cannotConnectToHost) }),
+            configuration: configuration,
+            runtimeState: runtimeState
+        )
+
+        let cachedGames = try await cachedRepository.fetchGames()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(cachedGames == expectedGames)
+        #expect(snapshot.deliverySource == .cache)
+        #expect(snapshot.isUsingStaleCache == true)
+    }
+
+    @Test func cachedRepositoryFallsBackToPersistedMonthlyScheduleAcrossInstances() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+
+        let configuration = RepositoryCacheConfiguration(
+            bootstrapTTL: 1,
+            gamesTTL: 1,
+            notificationsTTL: 1,
+            monthlyScheduleTTL: 0,
+            diskCacheDirectory: cacheDirectory
+        )
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 3)
+        let seededRepository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in stubGames() }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+        let expectedSchedule = try await seededRepository.fetchMonthlySchedule(for: monthKey)
+
+        let cachedRepository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in throw URLError(.timedOut) }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+
+        let cachedSchedule = try await cachedRepository.fetchMonthlySchedule(for: monthKey)
+
+        #expect(cachedSchedule == expectedSchedule)
+    }
+
     @Test func appModelKeepsExistingGamesWhenRefreshFails() async throws {
         let repository = StubRepository(
             fetchGames: {
@@ -1171,4 +1319,36 @@ private func stubGames() -> [GameDetail] {
 
 private func stubNotifications() -> [NotificationItem] {
     stubBootstrap().notifications
+}
+
+private func isoDate(_ rawValue: String) -> Date {
+    ISO8601DateFormatter().date(from: rawValue)!
+}
+
+private func makeGameDetail(
+    id: UUID,
+    scheduledStart: Date,
+    venue: String,
+    awayTeam: Team,
+    homeTeam: Team,
+    awayScore: Int?,
+    homeScore: Int?,
+    status: GameStatus
+) -> GameDetail {
+    GameDetail(
+        id: id,
+        scheduledStart: scheduledStart,
+        venue: venue,
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: awayScore,
+        homeScore: homeScore,
+        status: status,
+        inningText: status.title,
+        bases: nil,
+        outs: nil,
+        highlightText: nil,
+        events: [],
+        note: nil
+    )
 }

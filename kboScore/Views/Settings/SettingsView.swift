@@ -20,6 +20,12 @@ struct SettingsView: View {
                         Text("선택 안 함")
                             .tag(String?.none)
 
+                        if let selectedTeamID = appModel.settings.favoriteTeamID,
+                           appModel.teams.contains(where: { $0.id == selectedTeamID }) == false {
+                            Text(TeamIdentity.catalog[selectedTeamID]?.displayName ?? selectedTeamID)
+                                .tag(Optional(selectedTeamID))
+                        }
+
                         ForEach(appModel.teams) { team in
                             Text(team.name)
                                 .tag(Optional(team.id))

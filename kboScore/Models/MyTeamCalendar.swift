@@ -13,6 +13,8 @@ struct MyTeamCalendarDay: Identifiable, Hashable, Sendable {
     let isToday: Bool
     let gameCount: Int
     let dominantStatus: GameStatus?
+    let opponentTeam: Team?
+    let favoriteTeamResult: TeamGameResult?
 
     var id: Date { date }
     var hasGames: Bool { gameCount > 0 }
