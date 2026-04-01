@@ -427,6 +427,9 @@ final class AppModel {
         return dayGames.sorted { lhs, rhs in
             let lhsIsMyTeam = lhs.involves(teamID: settings.favoriteTeamID)
             let rhsIsMyTeam = rhs.involves(teamID: settings.favoriteTeamID)
+            if lhsIsMyTeam != rhsIsMyTeam {
+                return lhsIsMyTeam && !rhsIsMyTeam
+            }
             if lhs.status == rhs.status {
                 return lhs.scheduledStart < rhs.scheduledStart
             }
@@ -436,6 +439,40 @@ final class AppModel {
 
     func myTeamGames(on date: Date) -> [GameDetail] {
         scheduleGames(on: date, filter: .myTeam)
+    }
+
+    func scheduleHasAvailableMonths(filter: ScheduleFilter) -> Bool {
+        availableScheduleMonths(filter: filter).isEmpty == false
+    }
+
+    func isScheduleMonthAvailable(_ date: Date, filter: ScheduleFilter) -> Bool {
+        let monthStart = startOfMonth(for: date)
+        return availableScheduleMonths(filter: filter).contains(monthStart)
+    }
+
+    func nearestScheduleMonth(to date: Date, filter: ScheduleFilter) -> Date? {
+        let months = availableScheduleMonths(filter: filter)
+        guard months.isEmpty == false else { return nil }
+
+        let monthStart = startOfMonth(for: date)
+        if let nextMonth = months.first(where: { $0 >= monthStart }) {
+            return nextMonth
+        }
+        return months.last
+    }
+
+    func shiftedScheduleMonth(from date: Date, by offset: Int, filter: ScheduleFilter) -> Date? {
+        let months = availableScheduleMonths(filter: filter)
+        guard months.isEmpty == false else { return nil }
+
+        let monthStart = startOfMonth(for: date)
+        guard let currentIndex = months.firstIndex(of: monthStart) else {
+            return nearestScheduleMonth(to: date, filter: filter)
+        }
+
+        let targetIndex = currentIndex + offset
+        guard months.indices.contains(targetIndex) else { return nil }
+        return months[targetIndex]
     }
 
     func scheduleCalendarDays(for month: Date, filter: ScheduleFilter) -> [MyTeamCalendarDay] {
@@ -472,7 +509,9 @@ final class AppModel {
                     isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
                     isToday: calendar.isDateInToday(cursor),
                     gameCount: dayGames.count,
-                    dominantStatus: dominantStatus(for: dayGames)
+                    dominantStatus: dominantStatus(for: dayGames),
+                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
+                    favoriteTeamResult: calendarFavoriteTeamResult(for: dayGames)
                 )
             )
             guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
@@ -1088,6 +1127,10 @@ final class AppModel {
     }
 
     private func homeSummaryComparator(_ lhs: GameSummary, _ rhs: GameSummary) -> Bool {
+        if lhs.isMyTeamGame != rhs.isMyTeamGame {
+            return lhs.isMyTeamGame && !rhs.isMyTeamGame
+        }
+
         let lhsPriority = homePriority(for: lhs)
         let rhsPriority = homePriority(for: rhs)
 
@@ -1126,6 +1169,60 @@ final class AppModel {
             return .cancelled
         }
         return nil
+    }
+
+    private func calendarOpponentTeam(for games: [GameDetail], filter: ScheduleFilter) -> Team? {
+        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
+
+        for game in games {
+            if game.awayTeam.id == favoriteTeamID {
+                return game.homeTeam
+            }
+            if game.homeTeam.id == favoriteTeamID {
+                return game.awayTeam
+            }
+        }
+
+        return nil
+    }
+
+    private func calendarFavoriteTeamResult(for games: [GameDetail]) -> TeamGameResult? {
+        for game in games {
+            if let result = game.finalResult(for: settings.favoriteTeamID) {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {
+        let monthStarts = knownScheduleGames(filter: filter)
+            .map { startOfMonth(for: $0.scheduledStart) }
+
+        return Array(Set(monthStarts)).sorted()
+    }
+
+    private func knownScheduleGames(filter: ScheduleFilter) -> [GameDetail] {
+        var uniqueGames: [UUID: GameDetail] = [:]
+
+        for game in games {
+            uniqueGames[game.id] = game
+        }
+
+        for monthGames in monthlyScheduleGames.values {
+            for game in monthGames {
+                uniqueGames[game.id] = game
+            }
+        }
+
+        let mergedGames = Array(uniqueGames.values)
+        switch filter {
+        case .all:
+            return mergedGames
+        case .myTeam:
+            guard let favoriteTeamID = settings.favoriteTeamID else { return [] }
+            return mergedGames.filter { $0.involves(teamID: favoriteTeamID) }
+        }
     }
 
     private func myTeamMonthScheduleSource(for date: Date) -> [GameDetail] {

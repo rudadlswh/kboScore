@@ -72,6 +72,11 @@ struct GameEvent: Identifiable, Hashable, Codable, Sendable {
     let timestamp: Date
 }
 
+enum TeamGameResult: Hashable, Sendable {
+    case win
+    case loss
+}
+
 struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let scheduledStart: Date
@@ -119,6 +124,32 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
         let stateText = inningText ?? status.title
         return "KBO LIVE\n\(scoreText)\n\(stateText)\n\(venue)"
+    }
+
+    var hasCompleteFinalScore: Bool {
+        status == .final && awayScore != nil && homeScore != nil
+    }
+
+    var finalWinningTeam: Team? {
+        guard hasCompleteFinalScore, let awayScore, let homeScore, awayScore != homeScore else {
+            return nil
+        }
+        return awayScore > homeScore ? awayTeam : homeTeam
+    }
+
+    var finalScoreLine: String? {
+        guard hasCompleteFinalScore, let awayScore, let homeScore else { return nil }
+        return "\(awayTeam.shortName) \(awayScore) : \(homeScore) \(homeTeam.shortName)"
+    }
+
+    func finalResult(for teamID: String?) -> TeamGameResult? {
+        guard hasCompleteFinalScore,
+              let winningTeam = finalWinningTeam,
+              let teamID,
+              involves(teamID: teamID) else {
+            return nil
+        }
+        return winningTeam.id == teamID ? .win : .loss
     }
 }
 

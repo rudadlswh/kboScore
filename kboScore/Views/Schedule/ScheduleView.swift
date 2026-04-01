@@ -17,7 +17,8 @@ struct ScheduleView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
+                    if appModel.isScheduleMonthAvailable(displayedMonth, filter: scheduleFilter),
+                       let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
                         DataStatusBannerView(message: statusMessage)
                     }
 
@@ -38,10 +39,7 @@ struct ScheduleView: View {
                 await appModel.refreshSchedule(for: displayedMonth)
             }
             .task(id: scheduleTaskID) {
-                if Calendar(identifier: .gregorian).isDate(selectedDate, equalTo: displayedMonth, toGranularity: .month) == false {
-                    selectedDate = displayedMonth
-                }
-                await appModel.loadScheduleIfNeeded(for: displayedMonth)
+                await normalizeDisplayedMonth()
             }
             .navigationDestination(for: UUID.self) { gameID in
                 GameDetailView(gameID: gameID)
@@ -52,6 +50,23 @@ struct ScheduleView: View {
     private var scheduleTaskID: String {
         let key = KBOMonthScheduleKey(date: displayedMonth)
         return "\(scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(key.yearMonthText)"
+    }
+
+    private func normalizeDisplayedMonth() async {
+        await appModel.loadScheduleIfNeeded(for: displayedMonth)
+
+        guard let resolvedMonth = appModel.nearestScheduleMonth(to: displayedMonth, filter: scheduleFilter) else {
+            return
+        }
+
+        if Calendar(identifier: .gregorian).isDate(displayedMonth, equalTo: resolvedMonth, toGranularity: .month) == false {
+            displayedMonth = resolvedMonth
+        }
+        if Calendar(identifier: .gregorian).isDate(selectedDate, equalTo: resolvedMonth, toGranularity: .month) == false {
+            selectedDate = appModel.startOfMonth(for: resolvedMonth)
+        }
+
+        await appModel.loadScheduleIfNeeded(for: resolvedMonth)
     }
 }
 
@@ -65,46 +80,6 @@ private struct ScheduleCalendarCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button {
-                    let previousMonth = appModel.shiftedMonth(from: displayedMonth, by: -1)
-                    displayedMonth = previousMonth
-                    selectedDate = appModel.startOfMonth(for: previousMonth)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(appModel.currentTheme.accent)
-                        .frame(width: 34, height: 34)
-                        .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                VStack(spacing: 2) {
-                    Text(appModel.calendarMonthTitle(for: displayedMonth))
-                        .font(.headline.weight(.bold))
-                    Text(monthSummaryText)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    let nextMonth = appModel.shiftedMonth(from: displayedMonth, by: 1)
-                    displayedMonth = nextMonth
-                    selectedDate = appModel.startOfMonth(for: nextMonth)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(appModel.currentTheme.accent)
-                        .frame(width: 34, height: 34)
-                        .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-
             Picker("일정 필터", selection: $scheduleFilter) {
                 ForEach(ScheduleFilter.allCases) { filter in
                     Text(filter.rawValue)
@@ -113,100 +88,168 @@ private struct ScheduleCalendarCardView: View {
             }
             .pickerStyle(.segmented)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 8) {
-                ForEach(weekdaySymbols, id: \.self) { symbol in
-                    Text(symbol)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
-
-                ForEach(calendarDays) { day in
+            if isDisplayedMonthAvailable {
+                HStack {
                     Button {
-                        selectedDate = day.date
+                        guard let previousMonth = previousAvailableMonth else { return }
+                        displayedMonth = previousMonth
+                        selectedDate = appModel.startOfMonth(for: previousMonth)
                     } label: {
-                        VStack(spacing: 4) {
-                            Text(day.date.formatted(.dateTime.day()))
-                                .font(.caption.weight(isSelected(day) ? .bold : .medium))
-                                .foregroundStyle(dayNumberColor(for: day))
-
-                            ZStack {
-                                Circle()
-                                    .fill(markerColor(for: day))
-                                    .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
-                                    .opacity(day.hasGames ? 1 : 0.12)
-
-                                if day.gameCount > 1 {
-                                    Text("\(day.gameCount)")
-                                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(dayBorderColor(for: day), lineWidth: day.isToday || isSelected(day) ? 1 : 0)
-                        )
+                        Image(systemName: "chevron.left")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(appModel.currentTheme.accent)
+                            .frame(width: 34, height: 34)
+                            .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .opacity(previousAvailableMonth == nil ? 0.4 : 1)
                     }
                     .buttonStyle(.plain)
-                }
-            }
+                    .disabled(previousAvailableMonth == nil)
 
-            if appModel.isLoadingSchedule(for: displayedMonth) {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("공식 월간 일정 불러오는 중")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
-                Text(statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                    Spacer()
 
-            #if DEBUG
-            if let debugSummary = appModel.scheduleDebugSummary(for: displayedMonth) {
-                Text(debugSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            #endif
-
-            if selectedGames.isEmpty {
-                EmptyStateView(
-                    systemImage: "calendar",
-                    title: selectedDayTitle,
-                    message: emptyMessage
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text(selectedDayTitle)
-                            .font(.subheadline.weight(.bold))
-                        Spacer()
-                        Text("경기 \(selectedGames.count)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(appModel.currentTheme.accent)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(appModel.currentTheme.chipBackground, in: Capsule())
+                    VStack(spacing: 2) {
+                        Text(appModel.calendarMonthTitle(for: displayedMonth))
+                            .font(.headline.weight(.bold))
+                        Text(monthSummaryText)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
 
-                    ForEach(selectedGames) { game in
-                        NavigationLink(value: game.id) {
-                            ScheduleGameRow(
-                                game: game,
-                                favoriteTeamID: appModel.settings.favoriteTeamID,
-                                filter: scheduleFilter
+                    Spacer()
+
+                    Button {
+                        guard let nextMonth = nextAvailableMonth else { return }
+                        displayedMonth = nextMonth
+                        selectedDate = appModel.startOfMonth(for: nextMonth)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(appModel.currentTheme.accent)
+                            .frame(width: 34, height: 34)
+                            .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .opacity(nextAvailableMonth == nil ? 0.4 : 1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(nextAvailableMonth == nil)
+                }
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 8) {
+                    ForEach(weekdaySymbols, id: \.self) { symbol in
+                        Text(symbol)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    ForEach(calendarDays) { day in
+                        Button {
+                            selectedDate = day.date
+                        } label: {
+                            VStack(spacing: 4) {
+                                Text(day.date.formatted(.dateTime.day()))
+                                    .font(.caption.weight(isSelected(day) ? .bold : .medium))
+                                    .foregroundStyle(dayNumberColor(for: day))
+
+                                ZStack {
+                                    if let opponentTeam = day.opponentTeam {
+                                        TeamMarkView(team: opponentTeam, size: day.gameCount > 1 ? 18 : 16)
+                                            .opacity(day.hasGames ? 1 : 0)
+                                    } else {
+                                        Circle()
+                                            .fill(markerColor(for: day))
+                                            .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
+                                            .opacity(day.hasGames ? 1 : 0.12)
+                                    }
+
+                                    if day.gameCount > 1 {
+                                        Text("\(day.gameCount)")
+                                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 4)
+                                            .padding(.vertical, 1)
+                                            .background(appModel.currentTheme.accent, in: Capsule())
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(dayBorderColor(for: day), lineWidth: day.isToday || isSelected(day) ? 1 : 0)
                             )
                         }
                         .buttonStyle(.plain)
                     }
                 }
+
+                if appModel.isLoadingSchedule(for: displayedMonth) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("공식 월간 일정 불러오는 중")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                #if DEBUG
+                if let debugSummary = appModel.scheduleDebugSummary(for: displayedMonth) {
+                    Text(debugSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                #endif
+
+                if selectedGames.isEmpty {
+                    EmptyStateView(
+                        systemImage: "calendar",
+                        title: selectedDayTitle,
+                        message: emptyMessage
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(selectedDayTitle)
+                                .font(.subheadline.weight(.bold))
+                            Spacer()
+                            Text("경기 \(selectedGames.count)")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(appModel.currentTheme.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(appModel.currentTheme.chipBackground, in: Capsule())
+                        }
+
+                        ForEach(selectedGames) { game in
+                            NavigationLink(value: game.id) {
+                                ScheduleGameRow(
+                                    game: game,
+                                    favoriteTeamID: appModel.settings.favoriteTeamID,
+                                    filter: scheduleFilter
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            } else if appModel.scheduleHasAvailableMonths(filter: scheduleFilter) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("경기 있는 달로 이동 중")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                EmptyStateView(
+                    systemImage: "calendar",
+                    title: emptyMonthTitle,
+                    message: emptyMonthMessage
+                )
             }
         }
         .cardSurface(
@@ -235,6 +278,32 @@ private struct ScheduleCalendarCardView: View {
         return count == 0 ? "등록 경기 없음" : "이달 경기 \(count)"
     }
 
+    private var isDisplayedMonthAvailable: Bool {
+        appModel.isScheduleMonthAvailable(displayedMonth, filter: scheduleFilter)
+    }
+
+    private var previousAvailableMonth: Date? {
+        appModel.shiftedScheduleMonth(from: displayedMonth, by: -1, filter: scheduleFilter)
+    }
+
+    private var nextAvailableMonth: Date? {
+        appModel.shiftedScheduleMonth(from: displayedMonth, by: 1, filter: scheduleFilter)
+    }
+
+    private var emptyMonthTitle: String {
+        if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
+            return "응원 팀을 선택해 주세요"
+        }
+        return "표시할 일정이 없습니다"
+    }
+
+    private var emptyMonthMessage: String {
+        if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
+            return "응원 팀을 선택하면 경기 있는 달만 일정에 표시됩니다."
+        }
+        return "현재 일정 데이터에 경기 있는 달이 없습니다."
+    }
+
     private var emptyMessage: String {
         if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
             return "응원 팀을 선택하면 마이팀 일정이 표시됩니다."
@@ -260,6 +329,14 @@ private struct ScheduleCalendarCardView: View {
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
         if isSelected(day) {
             return appModel.currentTheme.accent
+        }
+        if let favoriteTeamResult = day.favoriteTeamResult {
+            switch favoriteTeamResult {
+            case .win:
+                return KBOLivePalette.upcoming.opacity(0.18)
+            case .loss:
+                return KBOLivePalette.live.opacity(0.18)
+            }
         }
         if day.isToday {
             return appModel.currentTheme.chipBackground
@@ -303,6 +380,12 @@ private struct ScheduleGameRow: View {
                 Text(subtitleText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let finalResultText {
+                    Text(finalResultText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
             }
 
             Spacer()
@@ -346,6 +429,15 @@ private struct ScheduleGameRow: View {
             return game.venue
         }
         return "\(game.venue) · \(game.homeTeam.shortName) 홈"
+    }
+
+    private var finalResultText: String? {
+        guard filter == .all,
+              let winningTeam = game.finalWinningTeam,
+              let scoreLine = game.finalScoreLine else {
+            return nil
+        }
+        return "\(winningTeam.shortName) 승 · \(scoreLine)"
     }
 
     private var homeAwayLabel: String {
