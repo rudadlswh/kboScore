@@ -138,7 +138,9 @@ final class AppModel {
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
         let persistedDeviceToken = Self.loadPersistedDeviceToken()
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
-        self.settings = persistedSettings ?? .default
+        var initialSettings = persistedSettings ?? .default
+        initialSettings.favoriteTeamID = Self.canonicalTeamIdentifier(initialSettings.favoriteTeamID)
+        self.settings = initialSettings
         self.debugActiveDataSource = "목 데이터"
         self.debugDeliverySource = "목 데이터"
         self.debugBaseURL = nil
@@ -185,6 +187,29 @@ final class AppModel {
         if !hasPersistedSettingsAtLaunch {
             settings = bootstrap.settings
         }
+        normalizeFavoriteTeamSelectionIfNeeded()
+    }
+
+    private func normalizeFavoriteTeamSelectionIfNeeded() {
+        guard let favoriteTeamID = Self.canonicalTeamIdentifier(settings.favoriteTeamID) else {
+            if settings.favoriteTeamID != nil {
+                settings.favoriteTeamID = nil
+            }
+            return
+        }
+
+        if settings.favoriteTeamID != favoriteTeamID {
+            settings.favoriteTeamID = favoriteTeamID
+        }
+
+        if let canonical = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == favoriteTeamID })?.id {
+            if settings.favoriteTeamID != canonical {
+                settings.favoriteTeamID = canonical
+            }
+            return
+        }
+
+        settings.favoriteTeamID = nil
     }
 
     func refreshHome() async {
@@ -258,7 +283,7 @@ final class AppModel {
 
     var filteredHomeGames: [GameSummary] {
         todayGames
-            .map { $0.summary(isMyTeamGame: $0.involves(teamID: settings.favoriteTeamID)) }
+            .map { makeHomeSummary(from: $0) }
             .filter(matchesHomeFilter)
             .sorted(by: homeSummaryComparator)
     }
@@ -281,6 +306,101 @@ final class AppModel {
 
     var favoriteTeamLiveGame: GameDetail? {
         games.first { $0.status.isLiveLike && $0.involves(teamID: settings.favoriteTeamID) }
+    }
+
+    private func makeHomeSummary(from game: GameDetail) -> GameSummary {
+        let providerIDs = homeCardProviderTeamIDs(from: game.note)
+        let awayTeam = resolveHomeCardTeam(game.awayTeam, fallbackID: providerIDs?.awayID)
+        let homeTeam = resolveHomeCardTeam(game.homeTeam, fallbackID: providerIDs?.homeID)
+        let recentEvent = sanitizeHomeCardRecentEvent(
+            game.highlightText ?? game.note,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            status: game.status
+        )
+
+        return GameSummary(
+            id: game.id,
+            scheduledStart: game.scheduledStart,
+            venue: game.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: game.awayScore,
+            homeScore: game.homeScore,
+            status: game.status,
+            inningText: game.inningText,
+            recentEvent: recentEvent,
+            isMyTeamGame: game.involves(teamID: settings.favoriteTeamID)
+        )
+    }
+
+    private func resolveHomeCardTeam(_ team: Team, fallbackID: String? = nil) -> Team {
+        let canonicalID = Self.canonicalTeamIdentifier(team.id) ?? team.id
+        let resolvedID: String
+        if canonicalID.hasPrefix("unknown"),
+           let fallbackID = Self.canonicalTeamIdentifier(fallbackID) {
+            resolvedID = fallbackID
+        } else {
+            resolvedID = canonicalID
+        }
+
+        if let resolved = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == resolvedID }) {
+            return resolved
+        }
+
+        if let identity = TeamIdentity.catalog[resolvedID] {
+            return Team(
+                id: resolvedID,
+                name: identity.displayName,
+                shortName: identity.shortLabel,
+                englishName: team.englishName,
+                markText: identity.monogram
+            )
+        }
+
+        return Team(
+            id: resolvedID,
+            name: team.name,
+            shortName: team.shortName,
+            englishName: team.englishName,
+            markText: team.markText
+        )
+    }
+
+    private func homeCardProviderTeamIDs(from note: String?) -> (awayID: String, homeID: String)? {
+        guard let note else { return nil }
+        guard let providerRange = note.range(of: "provider_game_id=") else { return nil }
+
+        let suffix = note[providerRange.upperBound...]
+        let rawValue = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
+        let components = rawValue.split(separator: "_").map(String.init)
+        guard components.count >= 2 else { return nil }
+
+        let awayRaw = components[components.count - 2]
+        let homeRaw = components[components.count - 1]
+        guard let awayID = Self.canonicalTeamIdentifier(awayRaw),
+              let homeID = Self.canonicalTeamIdentifier(homeRaw) else {
+            return nil
+        }
+
+        return (awayID: awayID, homeID: homeID)
+    }
+
+    private func sanitizeHomeCardRecentEvent(
+        _ text: String?,
+        awayTeam: Team,
+        homeTeam: Team,
+        status: GameStatus
+    ) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return nil }
+
+        let lowered = trimmed.lowercased()
+        if lowered.contains("provider_game_id=") || lowered.hasPrefix("db_export") {
+            return "\(awayTeam.shortName) vs \(homeTeam.shortName) · \(status.title)"
+        }
+        return trimmed
     }
 
     var myTeamNextGame: GameDetail? {
@@ -781,6 +901,28 @@ final class AppModel {
             return "업데이트가 지연되고 있습니다."
         }
         return "업데이트 지연 · 마지막 갱신 \(lastRefreshAt.formatted(date: .omitted, time: .shortened))"
+    }
+
+    private static func canonicalTeamIdentifier(_ value: String?) -> String? {
+        guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.isEmpty == false else {
+            return nil
+        }
+
+        let lowered = raw.lowercased()
+        if TeamIdentity.catalog[lowered] != nil {
+            return lowered
+        }
+
+        if let matched = TeamIdentity.catalog.first(where: { _, identity in
+            identity.shortLabel.caseInsensitiveCompare(raw) == .orderedSame ||
+            identity.monogram.caseInsensitiveCompare(raw) == .orderedSame ||
+            identity.displayName == raw
+        })?.key {
+            return matched
+        }
+
+        return lowered
     }
 
     private func persistSettings() {

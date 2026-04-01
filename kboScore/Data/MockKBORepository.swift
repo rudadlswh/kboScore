@@ -41,6 +41,133 @@ struct MockKBORepository: KBORepository, Sendable {
     }
 }
 
+struct BundledJSONKBORepository: KBORepository, Sendable {
+    private let bundle: Bundle
+    private let resourceName: String
+
+    nonisolated init(
+        bundle: Bundle = .main,
+        resourceName: String = "LocalBootstrapData"
+    ) {
+        self.bundle = bundle
+        self.resourceName = resourceName
+    }
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        try loadBootstrap()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try loadBootstrap().games
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try loadBootstrap().notifications
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        let calendar = Calendar(identifier: .gregorian)
+        return try loadBootstrap().games
+            .filter {
+                let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
+                return components.year == month.year && components.month == month.month
+            }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    nonisolated private func loadBootstrap() throws -> KBOBootstrapData {
+#if DEBUG
+        print("[BundledJSONKBORepository] Looking up \(resourceName).json in bundle: \(bundle.bundlePath)")
+#endif
+        guard let url = bundle.url(forResource: resourceName, withExtension: "json") else {
+#if DEBUG
+            print("[BundledJSONKBORepository] Resource lookup failed: \(resourceName).json")
+#endif
+            throw BundledJSONRepositoryError.missingResource(name: resourceName)
+        }
+
+#if DEBUG
+        print("[BundledJSONKBORepository] Resource URL resolved: \(url.path)")
+#endif
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+#if DEBUG
+            print("[BundledJSONKBORepository] Data read success: \(data.count) bytes")
+#endif
+        } catch {
+#if DEBUG
+            print("[BundledJSONKBORepository] Data read failed: \(error)")
+#endif
+            throw error
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload: KBOBootstrapDTO
+        do {
+            payload = try decoder.decode(KBOBootstrapDTO.self, from: data)
+#if DEBUG
+            print(
+                "[BundledJSONKBORepository] JSON decode success: " +
+                "teams=\(payload.teams.count), games=\(payload.games.count), notifications=\(payload.notifications.count)"
+            )
+#endif
+        } catch let decodingError as DecodingError {
+#if DEBUG
+            print("[BundledJSONKBORepository] JSON decode failed: \(Self.describe(decodingError: decodingError))")
+#endif
+            throw decodingError
+        } catch {
+#if DEBUG
+            print("[BundledJSONKBORepository] JSON decode failed: \(error)")
+#endif
+            throw error
+        }
+
+        let mapped = KBODataMapper.mapBootstrap(payload)
+#if DEBUG
+        print(
+            "[BundledJSONKBORepository] Mapping success: " +
+            "teams=\(mapped.teams.count), games=\(mapped.games.count), notifications=\(mapped.notifications.count)"
+        )
+#endif
+        return mapped
+    }
+
+    nonisolated private static func describe(decodingError: DecodingError) -> String {
+        func codingPathText(_ path: [CodingKey]) -> String {
+            let joined = path.map(\.stringValue).joined(separator: ".")
+            return joined.isEmpty ? "<root>" : joined
+        }
+
+        switch decodingError {
+        case .typeMismatch(let type, let context):
+            return "typeMismatch(\(type), path=\(codingPathText(context.codingPath)), debug=\(context.debugDescription), underlying=\(String(describing: context.underlyingError)))"
+        case .valueNotFound(let type, let context):
+            return "valueNotFound(\(type), path=\(codingPathText(context.codingPath)), debug=\(context.debugDescription), underlying=\(String(describing: context.underlyingError)))"
+        case .keyNotFound(let key, let context):
+            return "keyNotFound(\(key.stringValue), path=\(codingPathText(context.codingPath)), debug=\(context.debugDescription), underlying=\(String(describing: context.underlyingError)))"
+        case .dataCorrupted(let context):
+            return "dataCorrupted(path=\(codingPathText(context.codingPath)), debug=\(context.debugDescription), underlying=\(String(describing: context.underlyingError)))"
+        @unknown default:
+            return "unknown DecodingError: \(decodingError)"
+        }
+    }
+}
+
+enum BundledJSONRepositoryError: LocalizedError {
+    case missingResource(name: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingResource(let name):
+            "Bundled JSON resource is missing: \(name).json"
+        }
+    }
+}
+
 enum MockKBOData: Sendable {
     private nonisolated static let sampleTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
 

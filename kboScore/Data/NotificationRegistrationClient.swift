@@ -36,14 +36,9 @@ enum NotificationRegistrationClientFactory {
     static func makeAppClient(
         configuration: NotificationRegistrationConfiguration = .current()
     ) -> any NotificationRegistrationClient {
-        guard let endpointURL = configuration.endpointURL else {
-            return NoOpNotificationRegistrationClient()
-        }
-
-        return RemoteNotificationRegistrationClient(
-            endpointURL: endpointURL,
-            session: makeSession(timeout: configuration.timeout)
-        )
+        // Backend notification registration is intentionally disabled in JSON-only mode.
+        let _ = configuration
+        return NoOpNotificationRegistrationClient()
     }
 
     static func makeSession(timeout: TimeInterval) -> URLSession {

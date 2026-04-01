@@ -16,7 +16,7 @@ enum RepositoryDataSourceKind: String, Sendable {
 enum RepositoryDeliverySourceKind: String, Sendable {
     case mock = "목 데이터"
     case live = "실시간 응답"
-    case cache = "메모리 캐시"
+    case cache = "로컬 캐시"
     case mockFallback = "목 데이터 폴백"
 }
 
@@ -125,64 +125,124 @@ struct KBORepositoryConfiguration: Sendable {
     }
 }
 
+struct StaticJSONBootstrapConfiguration: Sendable {
+    let bootstrapURL: URL?
+
+    nonisolated static func current(bundle: Bundle = .main) -> StaticJSONBootstrapConfiguration {
+        let bundleURL = bundle.object(forInfoDictionaryKey: "KBOStaticJSONBootstrapURL") as? String
+        return StaticJSONBootstrapConfiguration(
+            bootstrapURL: URL(string: bundleURL ?? "")
+        )
+    }
+}
+
+enum RemoteStaticJSONRepositoryError: LocalizedError, Sendable {
+    case missingBootstrapURL
+    case nonHTTPSURL(URL)
+    case invalidResponse
+    case httpStatus(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingBootstrapURL:
+            "KBOStaticJSONBootstrapURL is not configured."
+        case .nonHTTPSURL(let url):
+            "KBOStaticJSONBootstrapURL must be HTTPS: \(url.absoluteString)"
+        case .invalidResponse:
+            "Invalid HTTP response while loading static bootstrap JSON."
+        case .httpStatus(let code):
+            "Static bootstrap JSON request failed with status code \(code)."
+        }
+    }
+}
+
+struct RemoteStaticJSONKBORepository: KBORepository, Sendable {
+    private let bootstrapURL: URL?
+    private let session: URLSession
+
+    nonisolated init(bootstrapURL: URL?, session: URLSession) {
+        self.bootstrapURL = bootstrapURL
+        self.session = session
+    }
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        let dto = try await fetchBootstrapDTO()
+        return KBODataMapper.mapBootstrap(dto)
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await fetchBootstrapData().games
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await fetchBootstrapData().notifications
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        let calendar = Calendar(identifier: .gregorian)
+        return try await fetchBootstrapData().games
+            .filter {
+                let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
+                return components.year == month.year && components.month == month.month
+            }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    nonisolated private func fetchBootstrapDTO() async throws -> KBOBootstrapDTO {
+        guard let bootstrapURL else {
+            throw RemoteStaticJSONRepositoryError.missingBootstrapURL
+        }
+        guard bootstrapURL.scheme?.lowercased() == "https" else {
+            throw RemoteStaticJSONRepositoryError.nonHTTPSURL(bootstrapURL)
+        }
+
+        var request = URLRequest(url: bootstrapURL)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RemoteStaticJSONRepositoryError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw RemoteStaticJSONRepositoryError.httpStatus(httpResponse.statusCode)
+        }
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(KBOBootstrapDTO.self, from: data)
+    }
+}
+
 enum KBORepositoryFactory {
     static func makeAppRepository(configuration: KBORepositoryConfiguration = .current()) -> any KBORepository {
         makeAppRepositoryBundle(configuration: configuration).repository
     }
 
     static func makeAppRepositoryBundle(configuration: KBORepositoryConfiguration = .current()) -> AppRepositoryBundle {
-        let mockRepository = MockKBORepository()
-
-        guard let liveBaseURL = configuration.liveBaseURL else {
-            let runtimeState = RepositoryRuntimeState(
-                activeSource: .mock,
-                baseURL: nil,
-                deliverySource: .mock
-            )
-            return AppRepositoryBundle(
-                repository: CachedKBORepository(
-                    base: RuntimeStateReportingRepository(
-                        base: mockRepository,
-                        source: .mock,
-                        delivery: .mock,
-                        runtimeState: runtimeState
-                    ),
-                    configuration: configuration.cacheConfiguration,
-                    runtimeState: runtimeState
-                ),
-                runtimeState: runtimeState
-            )
-        }
-
+        let staticConfiguration = StaticJSONBootstrapConfiguration.current()
         let runtimeState = RepositoryRuntimeState(
             activeSource: .live,
-            baseURL: liveBaseURL.absoluteString,
+            baseURL: staticConfiguration.bootstrapURL?.absoluteString,
             deliverySource: .live
         )
-        let liveRepository = LiveKBORepository(
-            baseURL: liveBaseURL,
-            session: Self.makeSession(timeout: configuration.timeout),
+        let primary = CachedKBORepository(
+            base: AnyKBORepository(
+                RemoteStaticJSONKBORepository(
+                    bootstrapURL: staticConfiguration.bootstrapURL,
+                    session: Self.makeSession(timeout: configuration.timeout)
+                )
+            ),
+            configuration: configuration.cacheConfiguration,
             runtimeState: runtimeState
         )
+        let fallback = BundledJSONKBORepository()
 
-        let baseRepository: any KBORepository
-        guard configuration.useMockFallback else {
-            baseRepository = liveRepository
-            return AppRepositoryBundle(
-                repository: CachedKBORepository(
-                    base: AnyKBORepository(baseRepository),
-                    configuration: configuration.cacheConfiguration,
-                    runtimeState: runtimeState
-                ),
-                runtimeState: runtimeState
-            )
-        }
-
-        baseRepository = FallbackKBORepository(primary: liveRepository, fallback: mockRepository, runtimeState: runtimeState)
         return AppRepositoryBundle(
-            repository: CachedKBORepository(
-                base: AnyKBORepository(baseRepository),
-                configuration: configuration.cacheConfiguration,
+            repository: FallbackKBORepository(
+                primary: primary,
+                fallback: fallback,
                 runtimeState: runtimeState
             ),
             runtimeState: runtimeState
@@ -203,12 +263,28 @@ struct RepositoryCacheConfiguration: Sendable {
     let gamesTTL: TimeInterval
     let notificationsTTL: TimeInterval
     let monthlyScheduleTTL: TimeInterval
+    let diskCacheDirectory: URL?
+
+    init(
+        bootstrapTTL: TimeInterval,
+        gamesTTL: TimeInterval,
+        notificationsTTL: TimeInterval,
+        monthlyScheduleTTL: TimeInterval,
+        diskCacheDirectory: URL? = nil
+    ) {
+        self.bootstrapTTL = bootstrapTTL
+        self.gamesTTL = gamesTTL
+        self.notificationsTTL = notificationsTTL
+        self.monthlyScheduleTTL = monthlyScheduleTTL
+        self.diskCacheDirectory = diskCacheDirectory
+    }
 
     nonisolated static let `default` = RepositoryCacheConfiguration(
         bootstrapTTL: 15,
         gamesTTL: 12,
         notificationsTTL: 20,
-        monthlyScheduleTTL: 300
+        monthlyScheduleTTL: 300,
+        diskCacheDirectory: nil
     )
 }
 
@@ -217,7 +293,366 @@ private struct RepositoryCacheEntry<Value: Sendable>: Sendable {
     let timestamp: Date
 }
 
+private struct BootstrapCachePayload: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case payload
+    }
+
+    let payload: KBOBootstrapDTO
+
+    nonisolated init(value: KBOBootstrapData) {
+        payload = KBOBootstrapDTO(
+            teams: value.teams.map(Self.makeTeamDTO),
+            games: value.games.map(Self.makeGameDTO),
+            notifications: value.notifications.map(Self.makeNotificationDTO),
+            settings: value.settings
+        )
+    }
+
+    nonisolated init(payload: KBOBootstrapDTO) {
+        self.payload = payload
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        payload = try container.decode(KBOBootstrapDTO.self, forKey: .payload)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(payload, forKey: .payload)
+    }
+
+    nonisolated var bootstrapData: KBOBootstrapData {
+        KBODataMapper.mapBootstrap(payload)
+    }
+
+    nonisolated fileprivate static func makeTeamDTO(from team: Team) -> KBOTeamDTO {
+        KBOTeamDTO(
+            id: team.id,
+            name: team.name,
+            shortName: team.shortName,
+            englishName: team.englishName,
+            markText: team.markText
+        )
+    }
+
+    nonisolated fileprivate static func makeGameDTO(from game: GameDetail) -> KBOGameDTO {
+        KBOGameDTO(
+            id: game.id,
+            scheduledStart: game.scheduledStart,
+            venue: game.venue,
+            awayTeamID: game.awayTeam.id,
+            homeTeamID: game.homeTeam.id,
+            awayScore: game.awayScore,
+            homeScore: game.homeScore,
+            statusCode: statusCode(for: game.status),
+            statusText: game.status.title,
+            inningText: game.inningText,
+            bases: game.bases.map { KBORunnerStateDTO(first: $0.first, second: $0.second, third: $0.third) },
+            outs: game.outs,
+            highlightText: game.highlightText,
+            events: game.events.map {
+                KBOGameEventDTO(
+                    id: $0.id,
+                    type: $0.type.rawValue,
+                    headline: $0.headline,
+                    inningText: $0.inningText,
+                    timestamp: $0.timestamp
+                )
+            },
+            note: game.note
+        )
+    }
+
+    nonisolated fileprivate static func makeNotificationDTO(from item: NotificationItem) -> KBONotificationDTO {
+        KBONotificationDTO(
+            id: item.id,
+            type: item.type.rawValue,
+            title: item.title,
+            body: item.body,
+            sentAt: item.sentAt,
+            isRead: item.isRead,
+            relatedGameID: item.relatedGameID,
+            relatedTeamIDs: item.relatedTeamIDs
+        )
+    }
+
+    nonisolated private static func statusCode(for status: GameStatus) -> String {
+        switch status {
+        case .upcoming:
+            "PRE"
+        case .live:
+            "LIVE"
+        case .final:
+            "FINAL"
+        case .rainDelay:
+            "DELAY"
+        case .cancelled:
+            "CANCELLED"
+        }
+    }
+}
+
+private struct GamesCachePayload: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case teams
+        case games
+    }
+
+    let teams: [KBOTeamDTO]
+    let games: [KBOGameDTO]
+
+    nonisolated init(games value: [GameDetail]) {
+        let uniqueTeams = Dictionary(
+            uniqueKeysWithValues: value.flatMap { [$0.awayTeam, $0.homeTeam] }.map { ($0.id, $0) }
+        )
+        teams = uniqueTeams.values
+            .sorted { $0.id < $1.id }
+            .map(BootstrapCachePayload.makeTeamDTO)
+        games = value.map(BootstrapCachePayload.makeGameDTO)
+    }
+
+    nonisolated init(teams: [KBOTeamDTO], games: [KBOGameDTO]) {
+        self.teams = teams
+        self.games = games
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        teams = try container.decode([KBOTeamDTO].self, forKey: .teams)
+        games = try container.decode([KBOGameDTO].self, forKey: .games)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(teams, forKey: .teams)
+        try container.encode(games, forKey: .games)
+    }
+
+    nonisolated var domainGames: [GameDetail] {
+        KBODataMapper.mapGames(games, teams: teams.map(KBODataMapper.mapTeam))
+    }
+}
+
+private struct NotificationsCachePayload: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case notifications
+    }
+
+    let notifications: [KBONotificationDTO]
+
+    nonisolated init(notifications value: [NotificationItem]) {
+        notifications = value.map(BootstrapCachePayload.makeNotificationDTO)
+    }
+
+    nonisolated init(notifications: [KBONotificationDTO]) {
+        self.notifications = notifications
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        notifications = try container.decode([KBONotificationDTO].self, forKey: .notifications)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notifications, forKey: .notifications)
+    }
+
+    nonisolated var domainNotifications: [NotificationItem] {
+        KBODataMapper.mapNotifications(notifications)
+    }
+}
+
+private struct BootstrapDiskCacheEntry: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case timestamp
+    }
+
+    let value: BootstrapCachePayload
+    let timestamp: Date
+
+    nonisolated init(value: BootstrapCachePayload, timestamp: Date) {
+        self.value = value
+        self.timestamp = timestamp
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        value = try container.decode(BootstrapCachePayload.self, forKey: .value)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
+}
+
+private struct GamesDiskCacheEntry: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case timestamp
+    }
+
+    let value: GamesCachePayload
+    let timestamp: Date
+
+    nonisolated init(value: GamesCachePayload, timestamp: Date) {
+        self.value = value
+        self.timestamp = timestamp
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        value = try container.decode(GamesCachePayload.self, forKey: .value)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
+}
+
+private struct NotificationsDiskCacheEntry: Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case timestamp
+    }
+
+    let value: NotificationsCachePayload
+    let timestamp: Date
+
+    nonisolated init(value: NotificationsCachePayload, timestamp: Date) {
+        self.value = value
+        self.timestamp = timestamp
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        value = try container.decode(NotificationsCachePayload.self, forKey: .value)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
+}
+
+private actor RepositoryDiskCache {
+    private let directoryURL: URL
+    private let fileManager: FileManager
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    init(directoryURL: URL?, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        self.directoryURL = directoryURL ?? Self.defaultDirectory(fileManager: fileManager)
+    }
+
+    func loadBootstrap() -> RepositoryCacheEntry<KBOBootstrapData>? {
+        guard let entry = loadBootstrapEntry(fileName: "bootstrap.json") else {
+            return nil
+        }
+        return RepositoryCacheEntry(value: entry.value.bootstrapData, timestamp: entry.timestamp)
+    }
+
+    func loadGames() -> RepositoryCacheEntry<[GameDetail]>? {
+        loadGamesEntry(fileName: "games.json").map {
+            RepositoryCacheEntry(value: $0.value.domainGames, timestamp: $0.timestamp)
+        }
+    }
+
+    func loadNotifications() -> RepositoryCacheEntry<[NotificationItem]>? {
+        loadNotificationsEntry(fileName: "notifications.json").map {
+            RepositoryCacheEntry(value: $0.value.domainNotifications, timestamp: $0.timestamp)
+        }
+    }
+
+    func loadMonthlySchedule(for month: KBOMonthScheduleKey) -> RepositoryCacheEntry<[GameDetail]>? {
+        loadGamesEntry(fileName: monthlyScheduleFileName(for: month)).map {
+            RepositoryCacheEntry(
+                value: $0.value.domainGames.sorted { $0.scheduledStart < $1.scheduledStart },
+                timestamp: $0.timestamp
+            )
+        }
+    }
+
+    func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) {
+        store(BootstrapDiskCacheEntry(value: BootstrapCachePayload(value: value), timestamp: timestamp), fileName: "bootstrap.json")
+    }
+
+    func storeGames(_ value: [GameDetail], timestamp: Date) {
+        store(GamesDiskCacheEntry(value: GamesCachePayload(games: value), timestamp: timestamp), fileName: "games.json")
+    }
+
+    func storeNotifications(_ value: [NotificationItem], timestamp: Date) {
+        store(
+            NotificationsDiskCacheEntry(value: NotificationsCachePayload(notifications: value), timestamp: timestamp),
+            fileName: "notifications.json"
+        )
+    }
+
+    func storeMonthlySchedule(_ value: [GameDetail], for month: KBOMonthScheduleKey, timestamp: Date) {
+        store(
+            GamesDiskCacheEntry(value: GamesCachePayload(games: value), timestamp: timestamp),
+            fileName: monthlyScheduleFileName(for: month)
+        )
+    }
+
+    private func loadBootstrapEntry(fileName: String) -> BootstrapDiskCacheEntry? {
+        let fileURL = directoryURL.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? decoder.decode(BootstrapDiskCacheEntry.self, from: data)
+    }
+
+    private func loadGamesEntry(fileName: String) -> GamesDiskCacheEntry? {
+        let fileURL = directoryURL.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? decoder.decode(GamesDiskCacheEntry.self, from: data)
+    }
+
+    private func loadNotificationsEntry(fileName: String) -> NotificationsDiskCacheEntry? {
+        let fileURL = directoryURL.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return try? decoder.decode(NotificationsDiskCacheEntry.self, from: data)
+    }
+
+    private func store<Value: Codable & Sendable>(_ value: Value, fileName: String) {
+        let fileURL = directoryURL.appendingPathComponent(fileName)
+        do {
+            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
+            let data = try encoder.encode(value)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            #if DEBUG
+            print("[RepositoryDiskCache] write failed file=\(fileName) error=\(error)")
+            #endif
+        }
+    }
+
+    nonisolated private static func defaultDirectory(fileManager: FileManager) -> URL {
+        let baseURL = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first ??
+            URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        return baseURL
+            .appendingPathComponent("kboScore", isDirectory: true)
+            .appendingPathComponent("RepositoryCache-v1", isDirectory: true)
+    }
+
+    private func monthlyScheduleFileName(for month: KBOMonthScheduleKey) -> String {
+        "schedule-\(month.yearMonthText).json"
+    }
+}
+
 private actor RepositoryResponseCache {
+    private let diskCache: RepositoryDiskCache
     private var bootstrapEntry: RepositoryCacheEntry<KBOBootstrapData>?
     private var gamesEntry: RepositoryCacheEntry<[GameDetail]>?
     private var notificationsEntry: RepositoryCacheEntry<[NotificationItem]>?
@@ -228,12 +663,16 @@ private actor RepositoryResponseCache {
     private var notificationsTask: Task<[NotificationItem], Error>?
     private var monthlyScheduleTasks: [KBOMonthScheduleKey: Task<[GameDetail], Error>] = [:]
 
+    init(configuration: RepositoryCacheConfiguration) {
+        self.diskCache = RepositoryDiskCache(directoryURL: configuration.diskCacheDirectory)
+    }
+
     func bootstrapValue(
         ttl: TimeInterval,
         fetch: @escaping @Sendable () async throws -> KBOBootstrapData
     ) async throws -> (value: KBOBootstrapData, cachedAt: Date, isCacheHit: Bool, isStale: Bool) {
         let now = Date()
-        if let bootstrapEntry, now.timeIntervalSince(bootstrapEntry.timestamp) < ttl {
+        if let bootstrapEntry = await cachedBootstrapEntry(), now.timeIntervalSince(bootstrapEntry.timestamp) < ttl {
             return (bootstrapEntry.value, bootstrapEntry.timestamp, true, false)
         }
 
@@ -245,7 +684,7 @@ private actor RepositoryResponseCache {
 
         let task = Task {
             let value = try await fetch()
-            storeBootstrap(value, timestamp: .now)
+            await self.storeBootstrap(value, timestamp: .now)
             return value
         }
         bootstrapTask = task
@@ -255,7 +694,7 @@ private actor RepositoryResponseCache {
             let value = try await task.value
             return (value, bootstrapEntry?.timestamp ?? .now, false, false)
         } catch {
-            if let bootstrapEntry {
+            if let bootstrapEntry = await cachedBootstrapEntry() {
                 return (bootstrapEntry.value, bootstrapEntry.timestamp, true, true)
             }
             throw error
@@ -267,7 +706,7 @@ private actor RepositoryResponseCache {
         fetch: @escaping @Sendable () async throws -> [GameDetail]
     ) async throws -> (value: [GameDetail], cachedAt: Date, isCacheHit: Bool, isStale: Bool) {
         let now = Date()
-        if let gamesEntry, now.timeIntervalSince(gamesEntry.timestamp) < ttl {
+        if let gamesEntry = await cachedGamesEntry(), now.timeIntervalSince(gamesEntry.timestamp) < ttl {
             return (gamesEntry.value, gamesEntry.timestamp, true, false)
         }
 
@@ -279,7 +718,7 @@ private actor RepositoryResponseCache {
 
         let task = Task {
             let value = try await fetch()
-            storeGames(value, timestamp: .now)
+            await self.storeGames(value, timestamp: .now)
             return value
         }
         gamesTask = task
@@ -289,7 +728,7 @@ private actor RepositoryResponseCache {
             let value = try await task.value
             return (value, gamesEntry?.timestamp ?? .now, false, false)
         } catch {
-            if let gamesEntry {
+            if let gamesEntry = await cachedGamesEntry() {
                 return (gamesEntry.value, gamesEntry.timestamp, true, true)
             }
             throw error
@@ -301,7 +740,7 @@ private actor RepositoryResponseCache {
         fetch: @escaping @Sendable () async throws -> [NotificationItem]
     ) async throws -> (value: [NotificationItem], cachedAt: Date, isCacheHit: Bool, isStale: Bool) {
         let now = Date()
-        if let notificationsEntry, now.timeIntervalSince(notificationsEntry.timestamp) < ttl {
+        if let notificationsEntry = await cachedNotificationsEntry(), now.timeIntervalSince(notificationsEntry.timestamp) < ttl {
             return (notificationsEntry.value, notificationsEntry.timestamp, true, false)
         }
 
@@ -313,7 +752,7 @@ private actor RepositoryResponseCache {
 
         let task = Task {
             let value = try await fetch()
-            storeNotifications(value, timestamp: .now)
+            await self.storeNotifications(value, timestamp: .now)
             return value
         }
         notificationsTask = task
@@ -323,7 +762,7 @@ private actor RepositoryResponseCache {
             let value = try await task.value
             return (value, notificationsEntry?.timestamp ?? .now, false, false)
         } catch {
-            if let notificationsEntry {
+            if let notificationsEntry = await cachedNotificationsEntry() {
                 return (notificationsEntry.value, notificationsEntry.timestamp, true, true)
             }
             throw error
@@ -336,7 +775,7 @@ private actor RepositoryResponseCache {
         fetch: @escaping @Sendable () async throws -> [GameDetail]
     ) async throws -> (value: [GameDetail], cachedAt: Date, isCacheHit: Bool, isStale: Bool) {
         let now = Date()
-        if let entry = monthlyScheduleEntries[month], now.timeIntervalSince(entry.timestamp) < ttl {
+        if let entry = await cachedMonthlyScheduleEntry(for: month), now.timeIntervalSince(entry.timestamp) < ttl {
             return (entry.value, entry.timestamp, true, false)
         }
 
@@ -348,7 +787,7 @@ private actor RepositoryResponseCache {
 
         let task = Task {
             let value = try await fetch()
-            storeMonthlySchedule(value, for: month, timestamp: .now)
+            await self.storeMonthlySchedule(value, for: month, timestamp: .now)
             return value
         }
         monthlyScheduleTasks[month] = task
@@ -358,27 +797,71 @@ private actor RepositoryResponseCache {
             let value = try await task.value
             return (value, monthlyScheduleEntries[month]?.timestamp ?? .now, false, false)
         } catch {
-            if let entry = monthlyScheduleEntries[month] {
+            if let entry = await cachedMonthlyScheduleEntry(for: month) {
                 return (entry.value, entry.timestamp, true, true)
             }
             throw error
         }
     }
 
-    private func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) {
+    private func cachedBootstrapEntry() async -> RepositoryCacheEntry<KBOBootstrapData>? {
+        if let bootstrapEntry {
+            return bootstrapEntry
+        }
+
+        let diskEntry = await diskCache.loadBootstrap()
+        bootstrapEntry = diskEntry
+        return diskEntry
+    }
+
+    private func cachedGamesEntry() async -> RepositoryCacheEntry<[GameDetail]>? {
+        if let gamesEntry {
+            return gamesEntry
+        }
+
+        let diskEntry = await diskCache.loadGames()
+        gamesEntry = diskEntry
+        return diskEntry
+    }
+
+    private func cachedNotificationsEntry() async -> RepositoryCacheEntry<[NotificationItem]>? {
+        if let notificationsEntry {
+            return notificationsEntry
+        }
+
+        let diskEntry = await diskCache.loadNotifications()
+        notificationsEntry = diskEntry
+        return diskEntry
+    }
+
+    private func cachedMonthlyScheduleEntry(for month: KBOMonthScheduleKey) async -> RepositoryCacheEntry<[GameDetail]>? {
+        if let entry = monthlyScheduleEntries[month] {
+            return entry
+        }
+
+        let diskEntry = await diskCache.loadMonthlySchedule(for: month)
+        monthlyScheduleEntries[month] = diskEntry
+        return diskEntry
+    }
+
+    private func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) async {
         bootstrapEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
+        await diskCache.storeBootstrap(value, timestamp: timestamp)
     }
 
-    private func storeGames(_ value: [GameDetail], timestamp: Date) {
+    private func storeGames(_ value: [GameDetail], timestamp: Date) async {
         gamesEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
+        await diskCache.storeGames(value, timestamp: timestamp)
     }
 
-    private func storeNotifications(_ value: [NotificationItem], timestamp: Date) {
+    private func storeNotifications(_ value: [NotificationItem], timestamp: Date) async {
         notificationsEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
+        await diskCache.storeNotifications(value, timestamp: timestamp)
     }
 
-    private func storeMonthlySchedule(_ value: [GameDetail], for month: KBOMonthScheduleKey, timestamp: Date) {
+    private func storeMonthlySchedule(_ value: [GameDetail], for month: KBOMonthScheduleKey, timestamp: Date) async {
         monthlyScheduleEntries[month] = RepositoryCacheEntry(value: value, timestamp: timestamp)
+        await diskCache.storeMonthlySchedule(value, for: month, timestamp: timestamp)
     }
 }
 
@@ -448,7 +931,18 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, Sendable {
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
 
-    private let cache = RepositoryResponseCache()
+    private let cache: RepositoryResponseCache
+
+    init(
+        base: Base,
+        configuration: RepositoryCacheConfiguration,
+        runtimeState: RepositoryRuntimeState?
+    ) {
+        self.base = base
+        self.configuration = configuration
+        self.runtimeState = runtimeState
+        self.cache = RepositoryResponseCache(configuration: configuration)
+    }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         let result = try await cache.bootstrapValue(ttl: configuration.bootstrapTTL) {
@@ -802,9 +1296,7 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         do {
-            let result = try await primary.fetchBootstrapData()
-            await runtimeState?.record(source: .live, delivery: .live)
-            return result
+            return try await primary.fetchBootstrapData()
         } catch {
             let result = try await fallback.fetchBootstrapData()
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
@@ -814,9 +1306,7 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
 
     nonisolated func fetchGames() async throws -> [GameDetail] {
         do {
-            let result = try await primary.fetchGames()
-            await runtimeState?.record(source: .live, delivery: .live)
-            return result
+            return try await primary.fetchGames()
         } catch {
             let result = try await fallback.fetchGames()
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
@@ -826,9 +1316,7 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
 
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         do {
-            let result = try await primary.fetchNotifications()
-            await runtimeState?.record(source: .live, delivery: .live)
-            return result
+            return try await primary.fetchNotifications()
         } catch {
             let result = try await fallback.fetchNotifications()
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
@@ -838,9 +1326,7 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         do {
-            let result = try await primary.fetchMonthlySchedule(for: month)
-            await runtimeState?.record(source: .live, delivery: .live)
-            return result
+            return try await primary.fetchMonthlySchedule(for: month)
         } catch {
             let result = try await fallback.fetchMonthlySchedule(for: month)
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)

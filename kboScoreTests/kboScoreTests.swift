@@ -70,6 +70,7 @@ struct kboScoreTests {
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
+        #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: nil, inningText: "1회초") == .live)
     }
 
     @Test func mapperBuildsStableDomainModelsFromDTOs() async throws {
@@ -801,6 +802,75 @@ struct kboScoreTests {
 
         #expect(first.count == second.count)
         #expect(await counter.value == 1)
+    }
+
+    @Test func cachedRepositoryFallsBackToPersistedGamesCacheAcrossInstances() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+
+        let configuration = RepositoryCacheConfiguration(
+            bootstrapTTL: 1,
+            gamesTTL: 0,
+            notificationsTTL: 1,
+            monthlyScheduleTTL: 60,
+            diskCacheDirectory: cacheDirectory
+        )
+        let seededRepository = CachedKBORepository(
+            base: StubRepository(fetchGames: { stubGames() }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+        let expectedGames = try await seededRepository.fetchGames()
+
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: "https://example.com",
+            deliverySource: .live
+        )
+        let cachedRepository = CachedKBORepository(
+            base: StubRepository(fetchGames: { throw URLError(.cannotConnectToHost) }),
+            configuration: configuration,
+            runtimeState: runtimeState
+        )
+
+        let cachedGames = try await cachedRepository.fetchGames()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(cachedGames == expectedGames)
+        #expect(snapshot.deliverySource == .cache)
+        #expect(snapshot.isUsingStaleCache == true)
+    }
+
+    @Test func cachedRepositoryFallsBackToPersistedMonthlyScheduleAcrossInstances() async throws {
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+
+        let configuration = RepositoryCacheConfiguration(
+            bootstrapTTL: 1,
+            gamesTTL: 1,
+            notificationsTTL: 1,
+            monthlyScheduleTTL: 0,
+            diskCacheDirectory: cacheDirectory
+        )
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 3)
+        let seededRepository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in stubGames() }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+        let expectedSchedule = try await seededRepository.fetchMonthlySchedule(for: monthKey)
+
+        let cachedRepository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in throw URLError(.timedOut) }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+
+        let cachedSchedule = try await cachedRepository.fetchMonthlySchedule(for: monthKey)
+
+        #expect(cachedSchedule == expectedSchedule)
     }
 
     @Test func appModelKeepsExistingGamesWhenRefreshFails() async throws {
