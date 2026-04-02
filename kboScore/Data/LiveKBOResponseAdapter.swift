@@ -201,6 +201,10 @@ enum KBOExternalResponseAdapter {
             stringValue(for: ["name", "description", "text"], in: nestedDictionary(for: ["status"], in: dictionary))
         let statusCode = stringValue(for: ["statusCode", "status", "statusCd", "stateCode"], in: dictionary) ??
             stringValue(for: ["code", "value"], in: nestedDictionary(for: ["status"], in: dictionary))
+        let seasonClassification = stringValue(
+            for: ["seasonClassification", "seasonType", "gameClassification", "gameType", "GAME_SC_NM"],
+            in: dictionary
+        )
         let bases = parseBases(in: dictionary)
 
         return KBOGameDTO(
@@ -216,6 +220,7 @@ enum KBOExternalResponseAdapter {
                 intValue(for: ["score", "runs"], in: homeTeam),
             statusCode: statusCode,
             statusText: statusText,
+            seasonClassification: seasonClassification,
             inningText: stringValue(for: ["inningText", "inning", "displayInning"], in: dictionary),
             bases: bases,
             outs: intValue(for: ["outs", "outCount"], in: dictionary),
@@ -431,6 +436,7 @@ enum KBOExternalResponseAdapter {
             homeScore: intValue(for: ["B_SCORE_CN"], in: dictionary),
             statusCode: normalizedOfficialStatusCode(gameState: gameState, cancelName: cancelName),
             statusText: normalizedOfficialStatusText(gameState: gameState, cancelName: cancelName),
+            seasonClassification: stringValue(for: ["GAME_SC_NM"], in: dictionary),
             inningText: officialInningText(number: inningNumber, halfText: halfText, stateCode: gameState),
             bases: officialBases(in: dictionary),
             outs: intValue(for: ["OUT_CN"], in: dictionary),

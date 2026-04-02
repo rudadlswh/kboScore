@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from html import unescape
 
 from collector.models.live_models import NormalizedLiveGameState
+from collector.models.season_classification import classify_game_season_text
 from collector.utils.http import HTTPClient
 from collector.utils.time import KST
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +168,7 @@ class KBOScoreboardSource:
             source_observed_at=observed_at,
             provider_game_ref=provider_game_ref,
             status=status,
+            season_classification=classify_game_season_text(phase_text),
             phase_text=phase_text,
             inning_number=inning_number,
             inning_half=inning_half,
@@ -186,19 +191,45 @@ class KBOScoreboardSource:
         cancel_code = self._normalize_text(item.get("CANCEL_SC_ID"))
         game_state = self._normalize_text(item.get("GAME_STATE_SC"))
         game_result = int(item.get("GAME_RESULT_CK") or 0)
+        raw_game_phase = self._normalize_text(item.get("GAME_SC_NM"))
+        phase_text = raw_game_phase or cancel_reason
+        season_classification = classify_game_season_text(raw_game_phase)
         inning_number = self._parse_int(item.get("GAME_INN_NO"))
         inning_half = self._normalize_half(item.get("GAME_TB_SC"))
+        if inning_number is None or inning_half is None:
+            inferred_inning_number, inferred_inning_half = self._parse_inning_from_phase_text(phase_text)
+            inning_number = inning_number if inning_number is not None else inferred_inning_number
+            inning_half = inning_half if inning_half is not None else inferred_inning_half
         inning_label = self._build_inning_label(inning_number, inning_half)
-        phase_text = self._normalize_text(item.get("GAME_SC_NM")) or cancel_reason
+        home_score = self._parse_int(item.get("B_SCORE_CN")) or 0
+        away_score = self._parse_int(item.get("T_SCORE_CN")) or 0
 
         status = self._map_status(
             cancel_code=cancel_code,
             cancel_reason=cancel_reason,
             game_state=game_state,
             game_result=game_result,
+            phase_text=phase_text,
             inning_number=inning_number,
-            home_score=self._parse_int(item.get("B_SCORE_CN")) or 0,
-            away_score=self._parse_int(item.get("T_SCORE_CN")) or 0,
+            home_score=home_score,
+            away_score=away_score,
+        )
+        provider_game_ref = self._require_text(item.get("G_ID"), "G_ID")
+
+        logger.info(
+            "live_status_mapped",
+            extra={
+                "source_name": "scoreboard_ajax_fallback",
+                "provider_game_ref": provider_game_ref,
+                "raw_game_state": game_state,
+                "raw_phase_text": phase_text,
+                "raw_cancel_code": cancel_code,
+                "raw_cancel_reason": cancel_reason,
+                "mapped_status": status,
+                "inning_label": inning_label,
+                "home_score": home_score,
+                "away_score": away_score,
+            },
         )
 
         final_reason_text = cancel_reason if status == "finished" and cancel_reason and cancel_reason != "정상경기" else None
@@ -207,14 +238,15 @@ class KBOScoreboardSource:
         return NormalizedLiveGameState(
             source_name="scoreboard_ajax_fallback",
             source_observed_at=observed_at,
-            provider_game_ref=self._require_text(item.get("G_ID"), "G_ID"),
+            provider_game_ref=provider_game_ref,
             status=status,
+            season_classification=season_classification,
             phase_text=phase_text,
             inning_number=inning_number,
             inning_half=inning_half,
             inning_label=inning_label,
-            home_score=self._parse_int(item.get("B_SCORE_CN")) or 0,
-            away_score=self._parse_int(item.get("T_SCORE_CN")) or 0,
+            home_score=home_score,
+            away_score=away_score,
             outs=self._parse_int(item.get("OUT_CN")),
             balls=self._parse_int(item.get("BALL_CN")),
             strikes=self._parse_int(item.get("STRIKE_CN")),
@@ -233,6 +265,7 @@ class KBOScoreboardSource:
         cancel_reason: str | None,
         game_state: str | None,
         game_result: int,
+        phase_text: str | None,
         inning_number: int | None,
         home_score: int,
         away_score: int,
@@ -248,6 +281,9 @@ class KBOScoreboardSource:
             return "finished"
 
         if game_state in {"1", "2"}:
+            return "live"
+
+        if phase_text and KBOScoreboardSource._is_live_phase_text(phase_text):
             return "live"
 
         if inning_number is not None or home_score > 0 or away_score > 0:
@@ -269,6 +305,24 @@ class KBOScoreboardSource:
         if inning_number is None or inning_half is None:
             return None
         return f"{inning_number}회{'초' if inning_half == 'top' else '말'}"
+
+    @staticmethod
+    def _parse_inning_from_phase_text(phase_text: str | None) -> tuple[int | None, str | None]:
+        if not phase_text:
+            return None, None
+        match = re.search(r"(\d+)\s*회\s*(초|말)", phase_text)
+        if not match:
+            return None, None
+        inning_number = int(match.group(1))
+        inning_half = "top" if match.group(2) == "초" else "bottom"
+        return inning_number, inning_half
+
+    @staticmethod
+    def _is_live_phase_text(phase_text: str) -> bool:
+        compact_text = re.sub(r"\s+", "", phase_text)
+        if re.search(r"\d+회(초|말)", compact_text):
+            return True
+        return any(keyword in compact_text for keyword in ("경기중", "진행중", "연장", "클리닝타임"))
 
     @staticmethod
     def _normalize_half(value: object) -> str | None:

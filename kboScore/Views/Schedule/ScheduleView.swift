@@ -336,6 +336,8 @@ private struct ScheduleCalendarCardView: View {
                 return KBOLivePalette.upcoming.opacity(0.18)
             case .loss:
                 return KBOLivePalette.live.opacity(0.18)
+            case .tie:
+                return appModel.currentTheme.chipBackground
             }
         }
         if day.isToday {

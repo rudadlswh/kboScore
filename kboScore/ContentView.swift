@@ -32,6 +32,12 @@ struct ContentView: View {
                             Label("홈", systemImage: "house.fill")
                         }
 
+                    StandingsView()
+                        .tag(AppTab.standings)
+                        .tabItem {
+                            Label("순위", systemImage: "list.number")
+                        }
+
                     MyTeamView()
                         .tag(AppTab.myTeam)
                         .tabItem {

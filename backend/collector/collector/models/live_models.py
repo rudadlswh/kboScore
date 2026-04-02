@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from collector.models.season_classification import GameSeasonClassification
+
 
 @dataclass(frozen=True, slots=True)
 class NormalizedLiveGameState:
@@ -11,6 +13,7 @@ class NormalizedLiveGameState:
     source_observed_at: datetime
     provider_game_ref: str
     status: str
+    season_classification: GameSeasonClassification
     phase_text: str | None
     inning_number: int | None
     inning_half: str | None
@@ -30,6 +33,8 @@ class NormalizedLiveGameState:
     def __post_init__(self) -> None:
         if self.status not in {"scheduled", "live", "finished", "postponed", "cancelled"}:
             raise ValueError(f"Unsupported status: {self.status}")
+        if self.season_classification not in set(GameSeasonClassification):
+            raise ValueError(f"Unsupported season_classification: {self.season_classification}")
         if not self.provider_game_ref:
             raise ValueError("provider_game_ref must not be blank")
         if self.inning_half not in {None, "top", "bottom"}:
@@ -62,6 +67,7 @@ class NormalizedLiveGameState:
     def change_detection_payload(self) -> dict:
         return {
             "status": self.status,
+            "season_classification": self.season_classification.value,
             "phase_text": self.phase_text,
             "inning_number": self.inning_number,
             "inning_half": self.inning_half,
@@ -86,6 +92,7 @@ class NormalizedLiveGameState:
             "source_observed_at": self.source_observed_at.isoformat(),
             "provider_game_ref": self.provider_game_ref,
             "status": self.status,
+            "season_classification": self.season_classification.value,
             "phase_text": self.phase_text,
             "inning_number": self.inning_number,
             "inning_half": self.inning_half,
@@ -113,6 +120,7 @@ class NormalizedLiveGameState:
         bases = payload_json.get("bases") or {}
         return {
             "status": payload_json.get("status"),
+            "season_classification": payload_json.get("season_classification"),
             "phase_text": payload_json.get("phase_text"),
             "inning_number": payload_json.get("inning_number"),
             "inning_half": payload_json.get("inning_half"),

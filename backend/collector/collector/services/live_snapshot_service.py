@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
 import psycopg
 
@@ -10,6 +11,8 @@ from collector.utils.hash import (
     sha256_hexdigest,
     stable_json_dumps,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -43,6 +46,14 @@ class LiveSnapshotService:
                 previous_payload = NormalizedLiveGameState.change_detection_payload_from_payload_json(row["payload_json"])
                 previous_hash = sha256_hexdigest(stable_json_dumps(previous_payload))
                 if previous_hash == change_hash:
+                    logger.info(
+                        "live_snapshot_skipped_unchanged",
+                        extra={
+                            "game_id": game_id,
+                            "snapshot_status": state.status,
+                            "provider_game_ref": state.provider_game_ref,
+                        },
+                    )
                     return False
 
             cur.execute(
@@ -75,4 +86,12 @@ class LiveSnapshotService:
                     "payload_json": stable_json_dumps(payload_json),
                 },
             )
+        logger.info(
+            "live_snapshot_inserted",
+            extra={
+                "game_id": game_id,
+                "snapshot_status": state.status,
+                "provider_game_ref": state.provider_game_ref,
+            },
+        )
         return True

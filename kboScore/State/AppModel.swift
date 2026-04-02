@@ -50,6 +50,7 @@ enum ScheduleFilter: String, CaseIterable, Identifiable {
 
 enum AppTab: Hashable, Sendable {
     case home
+    case standings
     case myTeam
     case schedule
     case settings
@@ -66,6 +67,7 @@ final class AppModel {
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
+    private let localPostseasonQualificationCalculator = LocalPostseasonQualificationCalculator()
     private let calendar = Calendar(identifier: .gregorian)
     private let scheduleTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
     private(set) var hasLoaded = false
@@ -117,6 +119,7 @@ final class AppModel {
     private(set) var monthlyScheduleDebugSnapshots: [KBOMonthScheduleKey: RepositoryDebugSnapshot] = [:]
     private(set) var loadingScheduleMonths: Set<KBOMonthScheduleKey> = []
     private(set) var failedScheduleMonths: Set<KBOMonthScheduleKey> = []
+    private var localStandingsProbabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
 
     init(
         repository: any KBORepository = MockKBORepository(),
@@ -184,6 +187,7 @@ final class AppModel {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
         notifications = bootstrap.notifications.sorted { $0.sentAt > $1.sentAt }
+        refreshLocalStandingsProbabilitySignals()
         if !hasPersistedSettingsAtLaunch {
             settings = bootstrap.settings
         }
@@ -417,6 +421,33 @@ final class AppModel {
             .filter { $0.involves(teamID: favoriteTeamID) && $0.status.isFinishedLike && !calendar.isDateInToday($0.scheduledStart) }
             .sorted { $0.scheduledStart > $1.scheduledStart }
             .first
+    }
+
+    var regularSeasonGames: [GameDetail] {
+        games.filter(\.isRegularSeason)
+    }
+
+    var standingsSnapshots: [TeamStandingsSnapshot] {
+        let rankedSnapshots = teams
+            .map { makeStandingsSnapshot(for: $0, probabilitySignalsByTeamID: localStandingsProbabilitySignalsByTeamID) }
+            .sorted(by: standingsComparator)
+
+        return rankedSnapshots.enumerated().map { index, snapshot in
+            TeamStandingsSnapshot(
+                team: snapshot.team,
+                rank: index + 1,
+                wins: snapshot.wins,
+                losses: snapshot.losses,
+                ties: snapshot.ties,
+                remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
+                recentResults: snapshot.recentResults,
+                unknownClassificationGames: snapshot.unknownClassificationGames,
+                rankingResolution: snapshot.rankingResolution,
+                rankingResolutionPosition: snapshot.rankingResolutionPosition,
+                postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
+                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
+            )
+        }
     }
 
     func scheduleGames(on date: Date, filter: ScheduleFilter) -> [GameDetail] {
@@ -843,6 +874,7 @@ final class AppModel {
 
         do {
             games = try await repository.fetchGames()
+            refreshLocalStandingsProbabilitySignals()
             if repositoryRuntimeState == nil {
                 markRefreshSuccess(for: .games, at: Date(), isStale: false)
             }
@@ -1193,6 +1225,91 @@ final class AppModel {
             }
         }
         return nil
+    }
+
+    private func makeStandingsSnapshot(
+        for team: Team,
+        probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
+    ) -> TeamStandingsSnapshot {
+        let completedGames = regularSeasonGames
+            .filter { $0.involves(teamID: team.id) }
+            .filter(\.hasCompleteFinalScore)
+            .sorted { $0.scheduledStart > $1.scheduledStart }
+
+        let wins = completedGames.reduce(into: 0) { partialResult, game in
+            if game.finalResult(for: team.id) == .win {
+                partialResult += 1
+            }
+        }
+        let losses = completedGames.reduce(into: 0) { partialResult, game in
+            if game.finalResult(for: team.id) == .loss {
+                partialResult += 1
+            }
+        }
+        let ties = completedGames.reduce(into: 0) { partialResult, game in
+            if game.hasCompleteFinalScore,
+               let awayScore = game.awayScore,
+               let homeScore = game.homeScore,
+               awayScore == homeScore,
+               game.involves(teamID: team.id) {
+                partialResult += 1
+            }
+        }
+
+        let probabilitySignal: LocalStandingsProbabilitySignal? = {
+            guard let canonicalID = Self.canonicalTeamIdentifier(team.id) else {
+                return nil
+            }
+            return probabilitySignalsByTeamID[canonicalID]
+        }()
+
+        return TeamStandingsSnapshot(
+            team: team,
+            rank: 0,
+            wins: wins,
+            losses: losses,
+            ties: ties,
+            remainingRegularSeasonGames: max(0, 144 - (wins + losses + ties)),
+            recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(5)),
+            unknownClassificationGames: probabilitySignal?.unknownClassificationGames ?? 0,
+            rankingResolution: probabilitySignal?.rankingResolution ?? .resolved,
+            rankingResolutionPosition: probabilitySignal?.rankingResolutionPosition,
+            postseasonQualificationProbability: probabilitySignal?.postseasonQualificationProbability,
+            postseasonProbabilityUnavailableReason: probabilitySignal?.postseasonProbabilityUnavailableReason
+        )
+    }
+
+    private func refreshLocalStandingsProbabilitySignals() {
+        localStandingsProbabilitySignalsByTeamID = localPostseasonQualificationCalculator.makeSignals(
+            teams: teams,
+            games: games
+        )
+    }
+
+    private func standingsComparator(_ lhs: TeamStandingsSnapshot, _ rhs: TeamStandingsSnapshot) -> Bool {
+        // Standings are derived locally from the current games payload so the
+        // Standings tab stays aligned with the bundled bootstrap file.
+        switch (lhs.winPercentage, rhs.winPercentage) {
+        case let (left?, right?) where left != right:
+            return left > right
+        case (.some, nil):
+            return true
+        case (nil, .some):
+            return false
+        default:
+            break
+        }
+
+        if lhs.wins != rhs.wins {
+            return lhs.wins > rhs.wins
+        }
+        if lhs.losses != rhs.losses {
+            return lhs.losses < rhs.losses
+        }
+        if lhs.ties != rhs.ties {
+            return lhs.ties > rhs.ties
+        }
+        return lhs.team.name.localizedStandardCompare(rhs.team.name) == .orderedAscending
     }
 
     private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {

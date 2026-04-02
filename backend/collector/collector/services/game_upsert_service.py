@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from typing import Literal
 
 import psycopg
 
+from collector.services.game_event_service import GameEventService
 from collector.models.live_models import NormalizedLiveGameState
 from collector.models.schedule_models import NormalizedScheduleGame
+from collector.models.season_classification import GameSeasonClassification
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +58,8 @@ class GameUpsertService:
                         is_postponed,
                         source_updated_at,
                         official_provider_game_id,
-                        provider_game_id_kind
+                        provider_game_id_kind,
+                        season_classification
                     ) VALUES (
                         %(provider)s,
                         %(provider_game_id)s,
@@ -68,7 +74,8 @@ class GameUpsertService:
                         %(is_postponed)s,
                         %(source_updated_at)s,
                         %(official_provider_game_id)s,
-                        %(provider_game_id_kind)s
+                        %(provider_game_id_kind)s,
+                        %(season_classification)s
                     )
                     RETURNING id::text AS id
                     """,
@@ -87,12 +94,31 @@ class GameUpsertService:
                         "source_updated_at": observed_at,
                         "official_provider_game_id": game.official_provider_game_id,
                         "provider_game_id_kind": game.provider_game_id_kind,
+                        "season_classification": game.season_classification.value,
                     },
                 )
                 inserted = cur.fetchone()
+            if game.status == "postponed":
+                self._event_service().record_event(
+                    game_id=str(inserted["id"]),
+                    event_type="postponed_confirmed",
+                    confirmed=True,
+                    reason=None,
+                    source="schedule_bootstrap",
+                    recorded_at=observed_at,
+                    payload_json={
+                        "status": game.status,
+                        "provider_game_id": game.provider_game_id,
+                        "official_provider_game_id": game.official_provider_game_id,
+                    },
+                )
             return BootstrapUpsertResult(action="inserted", game_id=str(inserted["id"]))
 
         next_official_provider_game_id = existing["official_provider_game_id"] or game.official_provider_game_id
+        next_season_classification = self._merge_season_classification(
+            existing["season_classification"],
+            game.season_classification,
+        )
         next_values = {
             "official_provider_game_id": next_official_provider_game_id,
             "game_date": game.game_date,
@@ -104,11 +130,14 @@ class GameUpsertService:
             "away_team_id": away_team_id,
             "is_postponed": is_postponed,
             "is_cancelled": is_cancelled,
+            "season_classification": next_season_classification.value,
         }
 
         changed = any(existing[field] != value for field, value in next_values.items())
         if not changed:
             return BootstrapUpsertResult(action="unchanged", game_id=str(existing["id"]))
+
+        self._record_bootstrap_events(existing=existing, next_values=next_values, observed_at=observed_at)
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -125,6 +154,7 @@ class GameUpsertService:
                     away_team_id = %(away_team_id)s::uuid,
                     is_postponed = %(is_postponed)s,
                     is_cancelled = %(is_cancelled)s,
+                    season_classification = %(season_classification)s,
                     source_updated_at = %(source_updated_at)s
                 WHERE id = %(game_id)s::uuid
                 """,
@@ -151,7 +181,8 @@ class GameUpsertService:
                     status,
                     inning_state,
                     home_score,
-                    away_score
+                    away_score,
+                    season_classification
                 FROM games
                 WHERE id = %s::uuid
                 LIMIT 1
@@ -167,6 +198,10 @@ class GameUpsertService:
         next_inning_state = live_state.inning_state
         next_home_score = live_state.home_score
         next_away_score = live_state.away_score
+        next_season_classification = self._merge_season_classification(
+            existing["season_classification"],
+            live_state.season_classification,
+        )
 
         changed = any(
             [
@@ -174,9 +209,18 @@ class GameUpsertService:
                 existing["inning_state"] != next_inning_state,
                 existing["home_score"] != next_home_score,
                 existing["away_score"] != next_away_score,
+                existing["season_classification"] != next_season_classification.value,
             ]
         )
         if not changed:
+            logger.info(
+                "canonical_game_update_skipped",
+                extra={
+                    "game_id": game_id,
+                    "current_status": existing["status"],
+                    "snapshot_status": live_state.status,
+                },
+            )
             return False
 
         with self.conn.cursor() as cur:
@@ -188,6 +232,7 @@ class GameUpsertService:
                     inning_state = %(inning_state)s,
                     home_score = %(home_score)s,
                     away_score = %(away_score)s,
+                    season_classification = %(season_classification)s,
                     source_updated_at = %(source_updated_at)s
                 WHERE id = %(game_id)s::uuid
                 """,
@@ -196,16 +241,31 @@ class GameUpsertService:
                     "inning_state": next_inning_state,
                     "home_score": next_home_score,
                     "away_score": next_away_score,
+                    "season_classification": next_season_classification.value,
                     "source_updated_at": observed_at,
                     "game_id": game_id,
                 },
             )
+        logger.info(
+            "canonical_game_update_applied",
+            extra={
+                "game_id": game_id,
+                "previous_status": existing["status"],
+                "next_status": next_status,
+                "snapshot_status": live_state.status,
+                "promoted_to_live": existing["status"] != "live" and next_status == "live",
+            },
+        )
         return True
 
     def mark_game_postponed(
         self,
         game_id: str,
         observed_at: datetime,
+        *,
+        source: str = "canonical_status",
+        reason: str | None = None,
+        payload_json: dict | None = None,
     ) -> bool:
         """Set status=postponed, is_postponed=true, is_cancelled=false, and source_updated_at."""
         with self.conn.cursor() as cur:
@@ -228,7 +288,81 @@ class GameUpsertService:
                 (observed_at, game_id),
             )
             row = cur.fetchone()
+        if row is not None:
+            self._event_service().record_event(
+                game_id=game_id,
+                event_type="postponed_confirmed",
+                confirmed=True,
+                reason=reason,
+                source=source,
+                recorded_at=observed_at,
+                payload_json=payload_json,
+            )
         return row is not None
+
+    def _record_bootstrap_events(
+        self,
+        *,
+        existing: dict,
+        next_values: dict,
+        observed_at: datetime,
+    ) -> None:
+        event_service = self._event_service()
+        game_id = str(existing["id"])
+
+        if existing["scheduled_at"] != next_values["scheduled_at"]:
+            event_service.record_event(
+                game_id=game_id,
+                event_type="time_changed",
+                confirmed=True,
+                reason=None,
+                source="schedule_bootstrap",
+                recorded_at=observed_at,
+                payload_json={
+                    "old_scheduled_at": existing["scheduled_at"].isoformat() if existing["scheduled_at"] else None,
+                    "new_scheduled_at": next_values["scheduled_at"].isoformat() if next_values["scheduled_at"] else None,
+                },
+            )
+
+        venue_changed = any(
+            [
+                existing["stadium"] != next_values["stadium"],
+                existing["stadium_code"] != next_values["stadium_code"],
+            ]
+        )
+        if venue_changed:
+            event_service.record_event(
+                game_id=game_id,
+                event_type="venue_changed",
+                confirmed=True,
+                reason=None,
+                source="schedule_bootstrap",
+                recorded_at=observed_at,
+                payload_json={
+                    "old_stadium": existing["stadium"],
+                    "new_stadium": next_values["stadium"],
+                    "old_stadium_code": existing["stadium_code"],
+                    "new_stadium_code": next_values["stadium_code"],
+                },
+            )
+
+        if existing["status"] != next_values["status"]:
+            event_type = "postponed_confirmed" if next_values["status"] == "postponed" else "status_corrected"
+            event_service.record_event(
+                game_id=game_id,
+                event_type=event_type,
+                confirmed=True,
+                reason=None,
+                source="schedule_bootstrap",
+                recorded_at=observed_at,
+                payload_json={
+                    "old_status": existing["status"],
+                    "new_status": next_values["status"],
+                },
+            )
+
+    def _event_service(self) -> GameEventService:
+        return GameEventService(self.conn)
 
     def _find_existing_game(
         self,
@@ -248,6 +382,7 @@ class GameUpsertService:
                 stadium,
                 stadium_code,
                 status,
+                season_classification,
                 home_team_id::text AS home_team_id,
                 away_team_id::text AS away_team_id,
                 is_postponed,
@@ -328,3 +463,14 @@ class GameUpsertService:
                 return current_status
             return "scheduled"
         return current_status
+
+    @staticmethod
+    def _merge_season_classification(
+        existing_value: str | None,
+        incoming_value: GameSeasonClassification,
+    ) -> GameSeasonClassification:
+        if incoming_value != GameSeasonClassification.UNKNOWN:
+            return incoming_value
+        if existing_value:
+            return GameSeasonClassification(existing_value)
+        return GameSeasonClassification.UNKNOWN

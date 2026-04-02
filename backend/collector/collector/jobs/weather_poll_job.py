@@ -114,7 +114,19 @@ class WeatherPollJob:
                             (game["stadium_code"], game["home_team_code"], game["away_team_code"])
                         )
                         if official_status is not None and official_status.game_sc == "4":
-                            game_upsert_service.mark_game_postponed(game["game_id"], snapshot.source_observed_at)
+                            game_upsert_service.mark_game_postponed(
+                                game["game_id"],
+                                snapshot.source_observed_at,
+                                source="weather_official_status",
+                                reason=None,
+                                payload_json={
+                                    "stadium_code": game["stadium_code"],
+                                    "home_team_code": game["home_team_code"],
+                                    "away_team_code": game["away_team_code"],
+                                    "official_game_sc": official_status.game_sc,
+                                    "official_game_time": official_status.game_time,
+                                },
+                            )
                     except WeatherSourceError as error:
                         summary.parse_failures += 1
                         summary.errors.append(str(error))

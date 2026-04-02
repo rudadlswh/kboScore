@@ -90,171 +90,73 @@ struct AppRepositoryBundle {
     let runtimeState: RepositoryRuntimeState?
 }
 
-struct KBORepositoryConfiguration: Sendable {
-    let liveBaseURL: URL?
-    let timeout: TimeInterval
-    let useMockFallback: Bool
-    let cacheConfiguration: RepositoryCacheConfiguration
+struct AppRepositoryConfiguration: Sendable {
+    let backendBaseURL: URL?
 
-    nonisolated static func current(
+    nonisolated static func fromEnvironment(
         processInfo: ProcessInfo = .processInfo,
         bundle: Bundle = .main
-    ) -> KBORepositoryConfiguration {
-        let environmentURL = processInfo.environment["KBO_LIVE_API_BASE_URL"]
-        let bundleURL = bundle.object(forInfoDictionaryKey: "KBOLiveAPIBaseURL") as? String
-        let timeoutText = processInfo.environment["KBO_LIVE_API_TIMEOUT"] ??
-            (bundle.object(forInfoDictionaryKey: "KBOLiveAPITimeout") as? String)
-        let fallbackText = processInfo.environment["KBO_LIVE_USE_MOCK_FALLBACK"] ??
-            (bundle.object(forInfoDictionaryKey: "KBOLiveUseMockFallback") as? String)
-
-        return KBORepositoryConfiguration(
-            liveBaseURL: URL(string: environmentURL ?? bundleURL ?? ""),
-            timeout: TimeInterval(timeoutText ?? "") ?? 8,
-            useMockFallback: fallbackText.map(Self.parseBool) ?? true,
-            cacheConfiguration: .default
+    ) -> AppRepositoryConfiguration {
+        let environmentValue = processInfo.environment["KBO_BACKEND_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let infoDictionaryValue = (bundle.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawValue = environmentValue?.isEmpty == false ? environmentValue : infoDictionaryValue
+        return AppRepositoryConfiguration(
+            backendBaseURL: rawValue.flatMap(URL.init(string:))
         )
-    }
-
-    nonisolated private static func parseBool(_ value: String) -> Bool {
-        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "0", "false", "no", "off":
-            false
-        default:
-            true
-        }
-    }
-}
-
-struct StaticJSONBootstrapConfiguration: Sendable {
-    let bootstrapURL: URL?
-
-    nonisolated static func current(bundle: Bundle = .main) -> StaticJSONBootstrapConfiguration {
-        let bundleURL = bundle.object(forInfoDictionaryKey: "KBOStaticJSONBootstrapURL") as? String
-        return StaticJSONBootstrapConfiguration(
-            bootstrapURL: URL(string: bundleURL ?? "")
-        )
-    }
-}
-
-enum RemoteStaticJSONRepositoryError: LocalizedError, Sendable {
-    case missingBootstrapURL
-    case nonHTTPSURL(URL)
-    case invalidResponse
-    case httpStatus(Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .missingBootstrapURL:
-            "KBOStaticJSONBootstrapURL is not configured."
-        case .nonHTTPSURL(let url):
-            "KBOStaticJSONBootstrapURL must be HTTPS: \(url.absoluteString)"
-        case .invalidResponse:
-            "Invalid HTTP response while loading static bootstrap JSON."
-        case .httpStatus(let code):
-            "Static bootstrap JSON request failed with status code \(code)."
-        }
-    }
-}
-
-struct RemoteStaticJSONKBORepository: KBORepository, Sendable {
-    private let bootstrapURL: URL?
-    private let session: URLSession
-
-    nonisolated init(bootstrapURL: URL?, session: URLSession) {
-        self.bootstrapURL = bootstrapURL
-        self.session = session
-    }
-
-    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
-        let dto = try await fetchBootstrapDTO()
-        return KBODataMapper.mapBootstrap(dto)
-    }
-
-    nonisolated func fetchGames() async throws -> [GameDetail] {
-        try await fetchBootstrapData().games
-    }
-
-    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
-        try await fetchBootstrapData().notifications
-    }
-
-    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
-        let calendar = Calendar(identifier: .gregorian)
-        return try await fetchBootstrapData().games
-            .filter {
-                let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
-                return components.year == month.year && components.month == month.month
-            }
-            .sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    nonisolated private func fetchBootstrapDTO() async throws -> KBOBootstrapDTO {
-        guard let bootstrapURL else {
-            throw RemoteStaticJSONRepositoryError.missingBootstrapURL
-        }
-        guard bootstrapURL.scheme?.lowercased() == "https" else {
-            throw RemoteStaticJSONRepositoryError.nonHTTPSURL(bootstrapURL)
-        }
-
-        var request = URLRequest(url: bootstrapURL)
-        request.httpMethod = "GET"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw RemoteStaticJSONRepositoryError.invalidResponse
-        }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw RemoteStaticJSONRepositoryError.httpStatus(httpResponse.statusCode)
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(KBOBootstrapDTO.self, from: data)
     }
 }
 
 enum KBORepositoryFactory {
-    static func makeAppRepository(configuration: KBORepositoryConfiguration = .current()) -> any KBORepository {
-        makeAppRepositoryBundle(configuration: configuration).repository
+    static func makeAppRepository() -> any KBORepository {
+        makeAppRepositoryBundle().repository
     }
 
-    static func makeAppRepositoryBundle(configuration: KBORepositoryConfiguration = .current()) -> AppRepositoryBundle {
-        let staticConfiguration = StaticJSONBootstrapConfiguration.current()
+    static func makeAppRepositoryBundle(
+        configuration: AppRepositoryConfiguration = .fromEnvironment()
+    ) -> AppRepositoryBundle {
+        if let backendBaseURL = configuration.backendBaseURL {
+            let runtimeState = RepositoryRuntimeState(
+                activeSource: .live,
+                baseURL: backendBaseURL.absoluteString,
+                deliverySource: .live
+            )
+            let liveRepository = LiveKBORepository(
+                baseURL: backendBaseURL,
+                runtimeState: runtimeState
+            )
+            let cachedRepository = CachedKBORepository(
+                base: liveRepository,
+                configuration: .default,
+                runtimeState: runtimeState
+            )
+            let repository = FallbackKBORepository(
+                primary: cachedRepository,
+                fallback: BundledJSONKBORepository(),
+                runtimeState: runtimeState
+            )
+            return AppRepositoryBundle(
+                repository: repository,
+                runtimeState: runtimeState
+            )
+        }
+
         let runtimeState = RepositoryRuntimeState(
-            activeSource: .live,
-            baseURL: staticConfiguration.bootstrapURL?.absoluteString,
-            deliverySource: .live
+            activeSource: .mock,
+            baseURL: nil,
+            deliverySource: .mock
         )
-        let primary = CachedKBORepository(
-            base: AnyKBORepository(
-                RemoteStaticJSONKBORepository(
-                    bootstrapURL: staticConfiguration.bootstrapURL,
-                    session: Self.makeSession(timeout: configuration.timeout)
-                )
-            ),
-            configuration: configuration.cacheConfiguration,
+        let repository = RuntimeStateReportingRepository(
+            base: BundledJSONKBORepository(),
+            source: .mock,
+            delivery: .mock,
             runtimeState: runtimeState
         )
-        let fallback = BundledJSONKBORepository()
 
         return AppRepositoryBundle(
-            repository: FallbackKBORepository(
-                primary: primary,
-                fallback: fallback,
-                runtimeState: runtimeState
-            ),
+            repository: repository,
             runtimeState: runtimeState
         )
-    }
-
-    static func makeSession(timeout: TimeInterval) -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
     }
 }
 
@@ -348,6 +250,7 @@ private struct BootstrapCachePayload: Codable, Sendable {
             homeScore: game.homeScore,
             statusCode: statusCode(for: game.status),
             statusText: game.status.title,
+            seasonClassification: game.seasonClassification.rawValue,
             inningText: game.inningText,
             bases: game.bases.map { KBORunnerStateDTO(first: $0.first, second: $0.second, third: $0.third) },
             outs: game.outs,
@@ -870,12 +773,14 @@ struct AnyKBORepository: KBORepository, Sendable {
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
     private let fetchMonthlyScheduleBlock: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail]
+    private let fetchStandingsBlock: @Sendable () async throws -> [TeamStandingsSnapshot]
 
     init(_ base: any KBORepository) {
         fetchBootstrapDataBlock = { try await base.fetchBootstrapData() }
         fetchGamesBlock = { try await base.fetchGames() }
         fetchNotificationsBlock = { try await base.fetchNotifications() }
         fetchMonthlyScheduleBlock = { month in try await base.fetchMonthlySchedule(for: month) }
+        fetchStandingsBlock = { try await base.fetchStandings() }
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
@@ -892,6 +797,10 @@ struct AnyKBORepository: KBORepository, Sendable {
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleBlock(month)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await fetchStandingsBlock()
     }
 }
 
@@ -921,6 +830,12 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, Send
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         let value = try await base.fetchMonthlySchedule(for: month)
+        await runtimeState?.record(source: source, delivery: delivery)
+        return value
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        let value = try await base.fetchStandings()
         await runtimeState?.record(source: source, delivery: delivery)
         return value
     }
@@ -982,6 +897,10 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, Sendable {
             await runtimeState?.recordCacheHit(refreshedAt: result.cachedAt, isStale: result.isStale)
         }
         return result.value
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
     }
 }
 
@@ -1067,6 +986,19 @@ struct LiveKBORepository: KBORepository, Sendable {
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        let request = try makeRequest(for: .standings)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response, endpoint: .standings)
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(KBOStandingsResponseDTO.self, from: data)
+        let teams = try await fetchTeams()
+        await runtimeState?.record(source: .live, delivery: .live)
+        return KBODataMapper.mapStandings(payload, teams: teams)
+    }
+
     private func fetchTeams() async throws -> [Team] {
         let payload = try await fetchNormalizedPayload(.teams)
         return payload.teams.map(KBODataMapper.mapTeam)
@@ -1114,7 +1046,7 @@ struct LiveKBORepository: KBORepository, Sendable {
         }
     }
 
-    private func makeRequest(for endpoint: Endpoint) throws -> URLRequest {
+    nonisolated private func makeRequest(for endpoint: Endpoint) throws -> URLRequest {
         switch endpoint {
         case .games where isOfficialKBOHost:
             let contract = try OfficialKBOLiveGamesRequestContract(baseURL: baseURL, date: nowProvider())
@@ -1161,7 +1093,7 @@ struct LiveKBORepository: KBORepository, Sendable {
         baseURL.host?.contains("koreabaseball.com") == true
     }
 
-    private func validate(response: URLResponse, endpoint: Endpoint) throws {
+    nonisolated private func validate(response: URLResponse, endpoint: Endpoint) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LiveRepositoryError.invalidResponse(endpoint: endpoint.path)
         }
@@ -1174,6 +1106,7 @@ struct LiveKBORepository: KBORepository, Sendable {
         case bootstrap
         case games
         case notifications
+        case standings
         case teams
         case monthlySchedule(KBOMonthScheduleKey)
 
@@ -1185,6 +1118,8 @@ struct LiveKBORepository: KBORepository, Sendable {
                 "games"
             case .notifications:
                 "notifications"
+            case .standings:
+                "standings"
             case .teams:
                 "teams"
             case .monthlySchedule(let month):
@@ -1329,6 +1264,16 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
             return try await primary.fetchMonthlySchedule(for: month)
         } catch {
             let result = try await fallback.fetchMonthlySchedule(for: month)
+            await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
+            return result
+        }
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        do {
+            return try await primary.fetchStandings()
+        } catch {
+            let result = try await fallback.fetchStandings()
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
             return result
         }

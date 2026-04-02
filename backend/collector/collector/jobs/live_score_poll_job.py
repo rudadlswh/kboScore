@@ -133,15 +133,46 @@ class LiveScorePollJob:
                         )
                         continue
 
+                    logger.info(
+                        "live_poll_state_received",
+                        extra={
+                            "job_name": self.job_name,
+                            "game_id": game["game_id"],
+                            "provider_game_ref": state.provider_game_ref,
+                            "provider_raw_status": state.phase_text,
+                            "mapped_status": state.status,
+                            "inning_label": state.inning_label,
+                        },
+                    )
+
                     summary.polled_games += 1
                     inserted = live_snapshot_service.insert_if_changed(game["game_id"], state)
                     if inserted:
                         summary.inserted_snapshots += 1
                     else:
                         summary.skipped_unchanged += 1
+                    logger.info(
+                        "live_poll_snapshot_result",
+                        extra={
+                            "job_name": self.job_name,
+                            "game_id": game["game_id"],
+                            "snapshot_inserted": inserted,
+                            "snapshot_status": state.status,
+                        },
+                    )
 
                     if state.is_postponed():
-                        updated = game_upsert_service.mark_game_postponed(game["game_id"], state.source_observed_at)
+                        updated = game_upsert_service.mark_game_postponed(
+                            game["game_id"],
+                            state.source_observed_at,
+                            source=state.source_name,
+                            reason="rain" if state.cancel_reason_text and "우천" in state.cancel_reason_text else None,
+                            payload_json={
+                                "provider_game_ref": state.provider_game_ref,
+                                "cancel_reason_text": state.cancel_reason_text,
+                                "final_reason_text": state.final_reason_text,
+                            },
+                        )
                     else:
                         updated = game_upsert_service.apply_live_game_update(
                             game["game_id"],
@@ -150,6 +181,15 @@ class LiveScorePollJob:
                         )
                     if updated:
                         summary.canonical_updates += 1
+                    logger.info(
+                        "live_poll_canonical_status_result",
+                        extra={
+                            "job_name": self.job_name,
+                            "game_id": game["game_id"],
+                            "snapshot_status": state.status,
+                            "canonical_updated": updated,
+                        },
+                    )
 
                 conn.commit()
 

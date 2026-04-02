@@ -39,7 +39,17 @@ protocol KBOMonthScheduleDataSource: Sendable {
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail]
 }
 
-protocol KBORepository: KBOGameDataSource, KBONotificationDataSource, KBOMonthScheduleDataSource, Sendable {
+protocol KBOStandingsDataSource: Sendable {
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot]
+}
+
+extension KBOStandingsDataSource {
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        []
+    }
+}
+
+protocol KBORepository: KBOGameDataSource, KBONotificationDataSource, KBOMonthScheduleDataSource, KBOStandingsDataSource, Sendable {
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData
 }
 

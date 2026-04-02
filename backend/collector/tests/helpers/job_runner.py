@@ -11,6 +11,11 @@ from collector.jobs.confirmed_rainout_notify_job import (
     ConfirmedRainoutNotifyJobDependencies,
     ConfirmedRainoutNotifyJobInput,
 )
+from collector.jobs.notification_delivery_job import (
+    NotificationDeliveryJob,
+    NotificationDeliveryJobDependencies,
+    NotificationDeliveryJobInput,
+)
 from collector.jobs.live_score_poll_job import (
     LiveScorePollJob,
     LiveScorePollJobDependencies,
@@ -26,7 +31,8 @@ from collector.jobs.weather_poll_job import (
     WeatherPollJobDependencies,
     WeatherPollJobInput,
 )
-from collector.services.kbo_schedule_source import KBOScheduleSource
+from collector.services.apns_client import APNSClient
+from collector.services.kbo_schedule_source import KBOScheduleSource, ScheduleSourceRequest
 from collector.services.kbo_scoreboard_source import KBOScoreboardSource
 from collector.services.kbo_weather_source import KBOWeatherSource
 from collector.utils.http import HTTPResponse
@@ -67,7 +73,13 @@ def build_schedule_source(
     if primary_fixture is not None:
         http_client.add_json_response("POST", KBOScheduleSource.PRIMARY_URL, load_json_fixture(*primary_fixture.split("/")))
     if fallback_fixture is not None:
-        http_client.add_text_response("GET", KBOScheduleSource.FALLBACK_URL + "?seriesId=0,9&date=20260301", load_text_fixture(*fallback_fixture.split("/")))
+        request = ScheduleSourceRequest(season_id=2026, month=3)
+        series_id_list = KBOScheduleSource.series_id_list_for_request(request)
+        http_client.add_text_response(
+            "GET",
+            KBOScheduleSource.FALLBACK_URL + f"?seriesId={series_id_list}&date=20260301",
+            load_text_fixture(*fallback_fixture.split("/")),
+        )
     return KBOScheduleSource(http_client=http_client)
 
 
@@ -104,6 +116,7 @@ def run_schedule_bootstrap_job(
     db_connection_factory,
     logger: logging.Logger,
     schedule_source: KBOScheduleSource,
+    scoreboard_source: KBOScoreboardSource | None = None,
     season_id: int,
     months: list[int],
 ):
@@ -112,6 +125,7 @@ def run_schedule_bootstrap_job(
             logger=logger,
             db_connection_factory=db_connection_factory,
             schedule_source=schedule_source,
+            scoreboard_source=scoreboard_source,
         )
     )
     return job.execute(ScheduleBootstrapJobInput(season_id=season_id, months=months))
@@ -166,3 +180,30 @@ def run_confirmed_rainout_notify_job(
         )
     )
     return job.execute(ConfirmedRainoutNotifyJobInput(now_at=now_at))
+
+
+def run_notification_delivery_job(
+    *,
+    db_connection_factory,
+    logger: logging.Logger,
+    apns_client: APNSClient,
+    now_at: datetime,
+    batch_size: int = 100,
+    max_attempts: int = 3,
+    retry_delays_seconds: tuple[int, ...] = (60, 300),
+):
+    job = NotificationDeliveryJob(
+        NotificationDeliveryJobDependencies(
+            logger=logger,
+            db_connection_factory=db_connection_factory,
+            apns_client=apns_client,
+        )
+    )
+    return job.execute(
+        NotificationDeliveryJobInput(
+            now_at=now_at,
+            batch_size=batch_size,
+            max_attempts=max_attempts,
+            retry_delays_seconds=retry_delays_seconds,
+        )
+    )
