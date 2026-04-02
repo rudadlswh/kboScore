@@ -111,14 +111,9 @@
       </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
-            key = "KBO_LIVE_API_BASE_URL"
-            value = "http://192.168.45.57:8080"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "KBO_LIVE_USE_MOCK_FALLBACK"
-            value = "false"
-            isEnabled = "YES">
+            key = "KBO_BACKEND_BASE_URL"
+            value = ""
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>

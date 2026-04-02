@@ -143,6 +143,245 @@ struct kboScoreTests {
         #expect(favoriteDay.favoriteTeamResult == .win)
     }
 
+    @Test func standingsExcludeExhibitionGamesAndRankByWinPercentage() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let samsung = try #require(base.teams.first(where: { $0.id == "samsung" }))
+
+        let exhibition = makeGameDetail(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-15T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 3,
+            homeScore: 8,
+            status: .final,
+            seasonClassification: .exhibitionPreseason,
+            note: "db_export provider_game_id=kbo_pre_20260315_doosan_lg"
+        )
+        let regularOne = makeGameDetail(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "db_export provider_game_id=20260328_doosan_lg"
+        )
+        let regularTwo = makeGameDetail(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-03-29T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: samsung,
+            homeTeam: doosan,
+            awayScore: 1,
+            homeScore: 4,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "db_export provider_game_id=20260329_samsung_doosan"
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan, samsung],
+                games: [exhibition, regularOne, regularTwo],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let standings = model.standingsSnapshots
+
+        #expect(standings.first?.team.id == "lg")
+        #expect(standings.first?.recordText == "1승 0패 0무")
+        #expect(standings.first?.winPercentageText == "1.000")
+        #expect(standings[1].team.id == "doosan")
+        #expect(standings[1].recordText == "1승 1패 0무")
+        #expect(standings[1].winPercentageText == "0.500")
+        #expect(model.regularSeasonGames.count == 2)
+    }
+
+    @Test func standingsRecentResultsAreLimitedToFiveMostRecentFinalGames() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-10T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+
+        let games = (0..<6).map { index in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "20000000-0000-0000-0000-%012d", index + 1))!,
+                scheduledStart: isoDate(String(format: "2026-04-%02dT18:30:00+09:00", 10 - index)),
+                venue: "잠실",
+                awayTeam: doosan,
+                homeTeam: lg,
+                awayScore: index.isMultiple(of: 2) ? 1 : 6,
+                homeScore: index.isMultiple(of: 2) ? 5 : 2,
+                status: .final,
+                seasonClassification: .regularSeason,
+                note: String(format: "db_export provider_game_id=202604%02d_doosan_lg", 10 - index)
+            )
+        }
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: games,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "lg" }))
+
+        #expect(lgSnapshot.recentResults.count == 5)
+        #expect(lgSnapshot.recentResultsText == "승 패 승 패 승")
+    }
+
+    @Test func standingsDeriveRemainingRegularSeasonGamesFromStructuredClassification() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+
+        let finished = makeGameDetail(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let exhibition = makeGameDetail(
+            id: UUID(uuidString: "30000000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-03-15T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 1,
+            homeScore: 0,
+            status: .final,
+            seasonClassification: .exhibitionPreseason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [finished, exhibition],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "lg" }))
+        let doosanSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "doosan" }))
+
+        #expect(lgSnapshot.gamesPlayed == 1)
+        #expect(lgSnapshot.remainingRegularSeasonGames == 143)
+        #expect(doosanSnapshot.gamesPlayed == 1)
+        #expect(doosanSnapshot.remainingRegularSeasonGames == 143)
+    }
+
+    @Test func standingsUseLocalProbabilityUnavailableReasonWhenScheduleIsIncomplete() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+
+        let regularSeasonGame = makeGameDetail(
+            id: UUID(uuidString: "31000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 1,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [regularSeasonGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let standings = model.standingsSnapshots
+
+        #expect(standings.first?.team.id == "lg")
+        #expect(standings.first?.wins == 1)
+        #expect(standings.first?.losses == 0)
+        #expect(standings.first?.postseasonQualificationProbability == nil)
+        #expect(standings.first?.postseasonProbabilityUnavailableReason == .incompleteRegularSeasonSchedule)
+    }
+
+    @Test func bundledBootstrapCompatibilityInfersRegularSeasonFromProviderGameIdentifier() async throws {
+        let lg = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let kt = Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT")
+        let unknownGame = makeGameDetail(
+            id: UUID(uuidString: "41000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: kt,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .unknown,
+            note: "db_export provider_game_id=20260328KTLG0"
+        )
+
+        let normalized = BundledJSONKBORepository.normalizeBundledSeasonClassification(
+            in: KBOBootstrapData(
+                teams: [lg, kt],
+                games: [unknownGame],
+                notifications: [],
+                settings: .default
+            )
+        )
+        let game = try #require(normalized.games.first)
+
+        #expect(game.seasonClassification == .regularSeason)
+    }
+
+    @Test func uploadedLocalBootstrapProducesNonZeroStandingsRecords() async throws {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let projectRoot = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bootstrapURL = projectRoot.appendingPathComponent("kboScore/LocalBootstrapData.json")
+        let data = try Data(contentsOf: bootstrapURL)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(KBOBootstrapDTO.self, from: data)
+        let bootstrap = BundledJSONKBORepository.normalizeBundledSeasonClassification(
+            in: KBODataMapper.mapBootstrap(payload)
+        )
+        let model = AppModel(bootstrap: bootstrap, usePersistedSettings: false)
+
+        let standings = model.standingsSnapshots
+        let ktSnapshot = try #require(standings.first(where: { $0.team.id == "kt" }))
+        let totalGamesPlayed = standings.reduce(0) { $0 + $1.gamesPlayed }
+
+        #expect(totalGamesPlayed > 0)
+        #expect(ktSnapshot.recordText == "4승 0패 0무")
+        #expect(ktSnapshot.postseasonQualificationProbability == nil)
+        #expect(ktSnapshot.postseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
+        #expect(ktSnapshot.postseasonQualificationText == nil)
+        #expect(ktSnapshot.visiblePostseasonProbabilityUnavailableReason == nil)
+    }
+
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
@@ -160,6 +399,34 @@ struct kboScoreTests {
         #expect(mapped.notifications.isEmpty == false)
         #expect(mapped.games.contains { $0.status == .rainDelay })
         #expect(mapped.games.contains { $0.status == .upcoming && $0.awayScore == nil && $0.homeScore == nil })
+    }
+
+    @Test func mapperUsesStructuredSeasonClassificationWhenAvailable() async throws {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let opponent = Team(id: "doosan", name: "두산 베어스", shortName: "두산", englishName: "Doosan Bears", markText: "DOO")
+        let dto = KBOGameDTO(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeamID: opponent.id,
+            homeTeamID: team.id,
+            awayScore: 2,
+            homeScore: 5,
+            statusCode: "FINAL",
+            statusText: "경기 종료",
+            seasonClassification: "regular_season",
+            inningText: "종료",
+            bases: nil,
+            outs: nil,
+            highlightText: nil,
+            events: [],
+            note: "db_export provider_game_id=kbo_pre_20260328_doosan_lg"
+        )
+
+        let mapped = KBODataMapper.mapGames([dto], teams: [team, opponent])
+        let game = try #require(mapped.first)
+
+        #expect(game.seasonClassification == .regularSeason)
     }
 
     @Test func scoreNotificationPayloadDecodesFromJSON() async throws {
@@ -784,6 +1051,278 @@ struct kboScoreTests {
         #expect(body?.contains("teamId=") == true)
     }
 
+    @Test func liveRepositoryMapsBackendStandingsPayload() async throws {
+        let session = makeStubSession()
+        let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/v1/")!, session: session)
+        let standingsPayload = """
+        {
+          "seasonId": 2026,
+          "generatedAt": "2026-04-02T09:00:00+09:00",
+          "hasUnknownClassificationGames": false,
+          "standings": [
+            {
+              "team": { "teamId": "LG", "nameKo": "LG 트윈스" },
+              "rank": 1,
+              "wins": 5,
+              "losses": 1,
+              "ties": 0,
+              "gamesPlayed": 6,
+              "remainingRegularSeasonGames": 138,
+              "winPercentage": 0.833,
+              "recentResults": ["win", "win", "loss"],
+              "unknownClassificationGames": 0,
+              "rankingResolution": "resolved",
+              "rankingResolutionPosition": null
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let teamsPayload = """
+        {
+          "teams": [
+            { "teamId": "LG", "nameKo": "LG 트윈스", "nameEn": "LG Twins", "shortName": "LG" }
+          ]
+        }
+        """.data(using: .utf8)!
+        URLProtocolStub.testResponses = [
+            "https://example.com/v1/standings": StubResponse(statusCode: 200, data: standingsPayload),
+            "https://example.com/v1/teams": StubResponse(statusCode: 200, data: teamsPayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let standings = try await repository.fetchStandings()
+
+        #expect(standings.count == 1)
+        #expect(standings[0].team.id == "lg")
+        #expect(standings[0].rank == 1)
+        #expect(standings[0].recentResults == [.win, .win, .loss])
+        #expect(standings[0].rankingResolution == .resolved)
+        #expect(standings[0].postseasonQualificationProbability == 0.84)
+    }
+
+    @Test func liveRepositoryMapsBackendStandingsUnavailableProbabilityState() async throws {
+        let session = makeStubSession()
+        let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/v1/")!, session: session)
+        let standingsPayload = """
+        {
+          "seasonId": 2026,
+          "generatedAt": "2026-04-02T09:00:00+09:00",
+          "hasUnknownClassificationGames": true,
+          "standings": [
+            {
+              "team": { "teamId": "LG", "nameKo": "LG 트윈스" },
+              "rank": 1,
+              "wins": 5,
+              "losses": 1,
+              "ties": 0,
+              "gamesPlayed": 6,
+              "remainingRegularSeasonGames": 138,
+              "winPercentage": 0.833,
+              "recentResults": ["win"],
+              "unknownClassificationGames": 1,
+              "rankingResolution": "resolved",
+              "rankingResolutionPosition": null,
+              "postseasonQualificationProbability": null,
+              "postseasonProbabilityUnavailableReason": "unknown_classification_games"
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let teamsPayload = """
+        {
+          "teams": [
+            { "teamId": "LG", "nameKo": "LG 트윈스", "nameEn": "LG Twins", "shortName": "LG" }
+          ]
+        }
+        """.data(using: .utf8)!
+        URLProtocolStub.testResponses = [
+            "https://example.com/v1/standings": StubResponse(statusCode: 200, data: standingsPayload),
+            "https://example.com/v1/teams": StubResponse(statusCode: 200, data: teamsPayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let standings = try await repository.fetchStandings()
+
+        #expect(standings.count == 1)
+        #expect(standings[0].postseasonQualificationProbability == nil)
+        #expect(standings[0].postseasonProbabilityUnavailableReason == .unknownClassificationGames)
+        #expect(standings[0].postseasonQualificationText == "산출 불가")
+    }
+
+    @Test func repositoryFactoryUsesBundledModeWhenBackendURLIsMissing() async throws {
+        let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
+            configuration: AppRepositoryConfiguration(backendBaseURL: nil)
+        )
+
+        let snapshot = await bundle.runtimeState?.snapshot()
+
+        #expect(snapshot?.activeSource == .mock)
+        #expect(snapshot?.baseURL == nil)
+    }
+
+    @Test func repositoryFactoryUsesLiveModeWhenBackendURLIsProvided() async throws {
+        let backendURL = try #require(URL(string: "http://127.0.0.1:8080"))
+        let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
+            configuration: AppRepositoryConfiguration(backendBaseURL: backendURL)
+        )
+
+        let snapshot = await bundle.runtimeState?.snapshot()
+
+        #expect(snapshot?.activeSource == .live)
+        #expect(snapshot?.baseURL == backendURL.absoluteString)
+    }
+
+    @Test func appModelKeepsProbabilityUnavailableBeforeThirtyPercentSeasonProgress() async throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 43,
+            seasonLength: 144
+        )
+        let model = AppModel(
+            repository: StubRepository(fetchStandings: { fatalError("standings fetch should not be required") }),
+            bootstrap: KBOBootstrapData(
+                teams: teams,
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        let snapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "team1" }))
+
+        #expect(snapshot.postseasonQualificationProbability == nil)
+        #expect(snapshot.postseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
+        #expect(snapshot.postseasonQualificationText == nil)
+        #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == nil)
+    }
+
+    @Test func localProbabilityCalculatorMakesProbabilityAvailableAtThirtyPercentSeasonProgress() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 44,
+            seasonLength: 144
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 400
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+        let team1Probability = try #require(signals["team1"]?.postseasonQualificationProbability)
+
+        #expect(team1Probability > 0)
+        #expect(signals["team1"]?.postseasonProbabilityUnavailableReason == nil)
+    }
+
+    @Test func localProbabilityCalculatorMakesProbabilityAvailableAboveThirtyPercentSeasonProgress() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 45,
+            seasonLength: 144
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 400
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+        let team1Probability = try #require(signals["team1"]?.postseasonQualificationProbability)
+        let team10Probability = try #require(signals["team10"]?.postseasonQualificationProbability)
+
+        #expect(signals["team1"]?.postseasonProbabilityUnavailableReason == nil)
+        #expect(team1Probability > 0)
+        #expect(team1Probability < 1)
+        #expect(team1Probability > team10Probability)
+    }
+
+    @Test func localProbabilityCalculatorReturnsDeterministicProbabilitiesForSameSnapshot() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 44,
+            seasonLength: 144
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 400
+        )
+
+        let first = calculator.makeSignals(teams: teams, games: games)
+        let second = calculator.makeSignals(teams: teams, games: games)
+
+        #expect(first == second)
+    }
+
+    @Test func localProbabilityCalculatorUsesUnavailableReasonForUnknownClassificationGames() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = [
+            makeGameDetail(
+                id: UUID(uuidString: "52000000-0000-0000-0000-000000000001")!,
+                scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+                venue: "잠실",
+                awayTeam: teams[0],
+                homeTeam: teams[1],
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .unknown,
+                note: "classification pending"
+            )
+        ]
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 1,
+            simulationCount: 100
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+
+        #expect(signals["team1"]?.postseasonQualificationProbability == nil)
+        #expect(signals["team1"]?.postseasonProbabilityUnavailableReason == .unknownClassificationGames)
+        #expect(signals["team2"]?.unknownClassificationGames == 1)
+    }
+
+    @Test func snapshotHidesPostseasonProbabilityBeforeThreshold() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 4,
+            losses: 0,
+            ties: 0,
+            remainingRegularSeasonGames: 140,
+            recentResults: [.win, .win, .win, .win],
+            postseasonQualificationProbability: nil,
+            postseasonProbabilityUnavailableReason: .seasonProgressBelowThreshold
+        )
+
+        #expect(snapshot.shouldShowPostseasonProbability == false)
+        #expect(snapshot.postseasonQualificationText == nil)
+        #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == nil)
+    }
+
+    @Test func snapshotKeepsUnavailablePostseasonStateVisibleAfterThresholdForRealDataIssues() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 44,
+            losses: 10,
+            ties: 0,
+            remainingRegularSeasonGames: 90,
+            recentResults: [.win, .loss, .win, .win, .loss],
+            postseasonQualificationProbability: nil,
+            postseasonProbabilityUnavailableReason: .unknownClassificationGames
+        )
+
+        #expect(snapshot.shouldShowPostseasonProbability == true)
+        #expect(snapshot.postseasonQualificationText == "산출 불가")
+        #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == .unknownClassificationGames)
+    }
+
     @Test func fallbackRepositoryUsesMockWhenLiveRequestFails() async throws {
         let session = makeStubSession()
         let live = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
@@ -1279,17 +1818,22 @@ private struct StubRepository: KBORepository {
     var fetchMonthlyScheduleHandler: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in
         stubGames()
     }
+    var fetchStandingsHandler: @Sendable () async throws -> [TeamStandingsSnapshot] = {
+        []
+    }
 
     init(
         fetchBootstrapData: @escaping @Sendable () async throws -> KBOBootstrapData = { stubBootstrap() },
         fetchGames: @escaping @Sendable () async throws -> [GameDetail] = { stubGames() },
         fetchNotifications: @escaping @Sendable () async throws -> [NotificationItem] = { stubNotifications() },
-        fetchMonthlySchedule: @escaping @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in stubGames() }
+        fetchMonthlySchedule: @escaping @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in stubGames() },
+        fetchStandings: @escaping @Sendable () async throws -> [TeamStandingsSnapshot] = { [] }
     ) {
         self.fetchBootstrapDataHandler = fetchBootstrapData
         self.fetchGamesHandler = fetchGames
         self.fetchNotificationsHandler = fetchNotifications
         self.fetchMonthlyScheduleHandler = fetchMonthlySchedule
+        self.fetchStandingsHandler = fetchStandings
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
@@ -1306,6 +1850,10 @@ private struct StubRepository: KBORepository {
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleHandler(month)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await fetchStandingsHandler()
     }
 }
 
@@ -1333,7 +1881,9 @@ private func makeGameDetail(
     homeTeam: Team,
     awayScore: Int?,
     homeScore: Int?,
-    status: GameStatus
+    status: GameStatus,
+    seasonClassification: GameSeasonClassification = .unknown,
+    note: String? = nil
 ) -> GameDetail {
     GameDetail(
         id: id,
@@ -1344,11 +1894,96 @@ private func makeGameDetail(
         awayScore: awayScore,
         homeScore: homeScore,
         status: status,
+        seasonClassification: seasonClassification,
         inningText: status.title,
         bases: nil,
         outs: nil,
         highlightText: nil,
         events: [],
-        note: nil
+        note: note
+    )
+}
+
+private func makeProbabilityTestTeams() -> [Team] {
+    (1...10).map { index in
+        Team(
+            id: "team\(index)",
+            name: "팀\(index)",
+            shortName: "T\(index)",
+            englishName: "Team \(index)",
+            markText: "T\(index)"
+        )
+    }
+}
+
+private func makeProbabilityThresholdSchedule(
+    teams: [Team],
+    completedGamesPerTeam: Int,
+    seasonLength: Int
+) -> [GameDetail] {
+    precondition(teams.count == 10)
+    precondition((0...seasonLength).contains(completedGamesPerTeam))
+
+    let pairings = [(0, 9), (1, 8), (2, 7), (3, 6), (4, 5)]
+    var games: [GameDetail] = []
+    var identifierIndex = 1
+
+    for _ in 0..<completedGamesPerTeam {
+        for (winnerIndex, loserIndex) in pairings {
+            let identifier = String(format: "63000000-0000-0000-0000-%012d", identifierIndex)
+            games.append(
+                completedProbabilityGame(
+                    id: identifier,
+                    awayTeam: teams[loserIndex],
+                    homeTeam: teams[winnerIndex],
+                    awayScore: 2,
+                    homeScore: 5
+                )
+            )
+            identifierIndex += 1
+        }
+    }
+
+    for _ in completedGamesPerTeam..<seasonLength {
+        for (winnerIndex, loserIndex) in pairings {
+            let identifier = String(format: "64000000-0000-0000-0000-%012d", identifierIndex)
+            games.append(
+                makeGameDetail(
+                    id: UUID(uuidString: identifier)!,
+                    scheduledStart: isoDate("2026-09-20T18:30:00+09:00"),
+                    venue: "잠실",
+                    awayTeam: teams[winnerIndex],
+                    homeTeam: teams[loserIndex],
+                    awayScore: nil,
+                    homeScore: nil,
+                    status: .upcoming,
+                    seasonClassification: .regularSeason
+                )
+            )
+            identifierIndex += 1
+        }
+    }
+
+    return games
+}
+
+private func completedProbabilityGame(
+    id: String,
+    awayTeam: Team,
+    homeTeam: Team,
+    awayScore: Int,
+    homeScore: Int
+) -> GameDetail {
+    makeGameDetail(
+        id: UUID(uuidString: id)!,
+        scheduledStart: isoDate("2026-09-19T18:30:00+09:00"),
+        venue: "잠실",
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: awayScore,
+        homeScore: homeScore,
+        status: .final,
+        seasonClassification: .regularSeason,
+        note: "db_export provider_game_id=20260919\(awayTeam.shortName)\(homeTeam.shortName)0"
     )
 }

@@ -8,6 +8,7 @@ from html import unescape
 from html.parser import HTMLParser
 from typing import Protocol
 
+from collector.models.season_classification import GameSeasonClassification, classify_game_season_text
 from collector.models.schedule_models import NormalizedScheduleGame
 from collector.services.team_mapping_service import TeamMappingService
 from collector.utils.http import HTTPClient
@@ -138,18 +139,17 @@ class KBOScheduleSource:
 
     PRIMARY_URL = "https://www.koreabaseball.com/ws/Schedule.asmx/GetScheduleList"
     FALLBACK_URL = "https://www.koreabaseball.com/Schedule/Schedule.aspx"
-    SERIES_ID_LIST = "0,9"
-
     def __init__(self, http_client: HTTPClient | None = None) -> None:
         self.http_client = http_client or HTTPClient()
 
     def fetch_month_schedule(self, request: ScheduleSourceRequest) -> list[NormalizedScheduleGame]:
+        series_id_list = self.series_id_list_for_request(request)
         try:
             response = self.http_client.post(
                 self.PRIMARY_URL,
                 form_data={
                     "leId": "1",
-                    "srIdList": self.SERIES_ID_LIST,
+                    "srIdList": series_id_list,
                     "seasonId": str(request.season_id),
                     "gameMonth": f"{request.month:02d}",
                     "teamId": "",
@@ -169,10 +169,16 @@ class KBOScheduleSource:
                 ) from fallback_error
 
     def fetch_month_schedule_html(self, request: ScheduleSourceRequest) -> str:
+        series_id_list = self.series_id_list_for_request(request)
         response = self.http_client.get(
-            f"{self.FALLBACK_URL}?seriesId={self.SERIES_ID_LIST}&date={request.season_id}{request.month:02d}01"
+            f"{self.FALLBACK_URL}?seriesId={series_id_list}&date={request.season_id}{request.month:02d}01"
         )
         return response.text
+
+    @staticmethod
+    def series_id_list_for_request(request: ScheduleSourceRequest) -> str:
+        # Verified source behavior: March mixes preseason and opening regular-season rows.
+        return "0,9" if request.month == 3 else "0"
 
     def parse_month_schedule_html(self, html: str, request: ScheduleSourceRequest) -> list[NormalizedScheduleGame]:
         parser = _ScheduleTableParser()
@@ -291,6 +297,12 @@ class KBOScheduleSource:
         note_text = self._strip_html(note_html)
         official_game_id = self._extract_game_id(relay_html)
         status = self._normalize_status(play_html=play_html, relay_text=relay_text, note_text=note_text)
+        season_classification = self._derive_season_classification(
+            request=request,
+            play_html=play_html,
+            relay_text=relay_text,
+            note_text=note_text,
+        )
 
         if official_game_id:
             provider_game_id = official_game_id
@@ -319,6 +331,7 @@ class KBOScheduleSource:
             home_team_code=home_team_code,
             away_team_code=away_team_code,
             status=status,
+            season_classification=season_classification,
             source_name=source_name,
         )
 
@@ -408,6 +421,28 @@ class KBOScheduleSource:
         if "프리뷰" in relay_text or "START_PIT" in relay_text.upper():
             return "scheduled"
         return "scheduled"
+
+    @staticmethod
+    def _derive_season_classification(
+        *,
+        request: ScheduleSourceRequest,
+        play_html: str,
+        relay_text: str,
+        note_text: str,
+    ) -> GameSeasonClassification:
+        for candidate in (
+            KBOScheduleSource._strip_html(play_html),
+            relay_text,
+            note_text,
+        ):
+            classification = classify_game_season_text(candidate)
+            if classification != GameSeasonClassification.UNKNOWN:
+                return classification
+
+        if request.month != 3:
+            return GameSeasonClassification.REGULAR_SEASON
+
+        return GameSeasonClassification.UNKNOWN
 
     @staticmethod
     def _strip_html(value: str) -> str:

@@ -126,7 +126,7 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             throw error
         }
 
-        let mapped = KBODataMapper.mapBootstrap(payload)
+        let mapped = Self.normalizeBundledSeasonClassification(in: KBODataMapper.mapBootstrap(payload))
 #if DEBUG
         print(
             "[BundledJSONKBORepository] Mapping success: " +
@@ -154,6 +154,84 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
         @unknown default:
             return "unknown DecodingError: \(decodingError)"
         }
+    }
+
+    nonisolated static func normalizeBundledSeasonClassification(
+        in bootstrap: KBOBootstrapData
+    ) -> KBOBootstrapData {
+        KBOBootstrapData(
+            teams: bootstrap.teams,
+            games: bootstrap.games.map(normalizeBundledGame),
+            notifications: bootstrap.notifications,
+            settings: bootstrap.settings
+        )
+    }
+
+    nonisolated static func normalizeBundledGame(_ game: GameDetail) -> GameDetail {
+        guard game.seasonClassification == .unknown else {
+            return game
+        }
+        guard let inferredClassification = bundledSeasonClassification(from: game.note) else {
+            return game
+        }
+
+        return GameDetail(
+            id: game.id,
+            scheduledStart: game.scheduledStart,
+            venue: game.venue,
+            awayTeam: game.awayTeam,
+            homeTeam: game.homeTeam,
+            awayScore: game.awayScore,
+            homeScore: game.homeScore,
+            status: game.status,
+            seasonClassification: inferredClassification,
+            inningText: game.inningText,
+            bases: game.bases,
+            outs: game.outs,
+            highlightText: game.highlightText,
+            events: game.events,
+            note: game.note
+        )
+    }
+
+    nonisolated static func bundledSeasonClassification(from note: String?) -> GameSeasonClassification? {
+        guard let normalizedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              normalizedNote.isEmpty == false else {
+            return nil
+        }
+
+        if normalizedNote.contains("provider_game_id=kbo_pre_") ||
+            normalizedNote.contains("시범경기") ||
+            normalizedNote.contains("preseason") ||
+            normalizedNote.contains("exhibition") {
+            return .exhibitionPreseason
+        }
+
+        if normalizedNote.contains("포스트시즌") ||
+            normalizedNote.contains("와일드카드") ||
+            normalizedNote.contains("준플레이오프") ||
+            normalizedNote.contains("플레이오프") ||
+            normalizedNote.contains("한국시리즈") ||
+            normalizedNote.contains("postseason") ||
+            normalizedNote.contains("wildcard") ||
+            normalizedNote.contains("playoff") {
+            return .postseason
+        }
+
+        guard let providerIDRange = normalizedNote.range(of: "provider_game_id=") else {
+            return nil
+        }
+        let suffix = normalizedNote[providerIDRange.upperBound...]
+        let token = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
+        let providerID = String(token)
+        guard providerID.count >= 8 else {
+            return nil
+        }
+        let leadingDateToken = providerID.prefix(8)
+        guard leadingDateToken.allSatisfy(\.isNumber) else {
+            return nil
+        }
+        return .regularSeason
     }
 }
 

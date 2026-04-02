@@ -12,41 +12,13 @@ protocol NotificationRegistrationClient: Sendable {
     nonisolated var debugEndpointDescription: String? { get }
 }
 
-struct NotificationRegistrationConfiguration: Sendable {
-    let endpointURL: URL?
-    let timeout: TimeInterval
-
-    static func current(
-        processInfo: ProcessInfo = .processInfo,
-        bundle: Bundle = .main
-    ) -> NotificationRegistrationConfiguration {
-        let environmentURL = processInfo.environment["KBO_NOTIFICATION_REGISTRATION_URL"]
-        let bundleURL = bundle.object(forInfoDictionaryKey: "KBONotificationRegistrationURL") as? String
-        let timeoutText = processInfo.environment["KBO_NOTIFICATION_REGISTRATION_TIMEOUT"] ??
-            (bundle.object(forInfoDictionaryKey: "KBONotificationRegistrationTimeout") as? String)
-
-        return NotificationRegistrationConfiguration(
-            endpointURL: URL(string: environmentURL ?? bundleURL ?? ""),
-            timeout: TimeInterval(timeoutText ?? "") ?? 8
-        )
-    }
+enum RemoteNotificationRegistrationClientError: Error, Sendable {
+    case unexpectedStatusCode(Int)
 }
 
 enum NotificationRegistrationClientFactory {
-    static func makeAppClient(
-        configuration: NotificationRegistrationConfiguration = .current()
-    ) -> any NotificationRegistrationClient {
-        // Backend notification registration is intentionally disabled in JSON-only mode.
-        let _ = configuration
+    static func makeAppClient() -> any NotificationRegistrationClient {
         return NoOpNotificationRegistrationClient()
-    }
-
-    static func makeSession(timeout: TimeInterval) -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        configuration.waitsForConnectivity = false
-        return URLSession(configuration: configuration)
     }
 }
 
@@ -64,7 +36,10 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
     let endpointURL: URL
     let session: URLSession
 
-    nonisolated init(endpointURL: URL, session: URLSession) {
+    nonisolated init(
+        endpointURL: URL,
+        session: URLSession = .shared
+    ) {
         self.endpointURL = endpointURL
         self.session = session
     }
@@ -77,15 +52,15 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (_, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
-
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
+        }
         return .synced
     }
 }

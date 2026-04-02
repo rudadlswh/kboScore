@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
     name_ko character varying(50) NOT NULL,
     name_en character varying(50),
     short_name character varying(30) NOT NULL,
+    previous_regular_season_rank integer,
     theme_color character varying(16),
     logo_asset_name character varying(100),
     sort_order integer NOT NULL,
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS public.games (
     scheduled_at timestamptz,
     stadium character varying(100),
     status character varying(30) NOT NULL DEFAULT 'unknown',
+    season_classification varchar(32) NOT NULL DEFAULT 'unknown',
     home_team_id uuid NOT NULL REFERENCES public.teams(id),
     away_team_id uuid NOT NULL REFERENCES public.teams(id),
     home_score integer NOT NULL DEFAULT 0,
@@ -108,6 +110,11 @@ CREATE TABLE IF NOT EXISTS public.notification_events (
     payload_json jsonb,
     sent_at timestamptz,
     delivery_status character varying(30) NOT NULL DEFAULT 'pending',
+    attempted_at timestamptz,
+    failed_at timestamptz,
+    failure_reason character varying(255),
+    attempt_count integer NOT NULL DEFAULT 0,
+    next_attempt_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -125,7 +132,8 @@ BEGIN;
 ALTER TABLE public.games
     ADD COLUMN IF NOT EXISTS stadium_code varchar(8),
     ADD COLUMN IF NOT EXISTS official_provider_game_id varchar(64),
-    ADD COLUMN IF NOT EXISTS provider_game_id_kind varchar(16) NOT NULL DEFAULT 'official';
+    ADD COLUMN IF NOT EXISTS provider_game_id_kind varchar(16) NOT NULL DEFAULT 'official',
+    ADD COLUMN IF NOT EXISTS season_classification varchar(32) NOT NULL DEFAULT 'unknown';
 
 DO $$
 BEGIN
@@ -138,6 +146,25 @@ BEGIN
         ALTER TABLE public.games
             ADD CONSTRAINT chk_games_provider_game_id_kind
             CHECK (provider_game_id_kind IN ('official', 'derived'));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_games_season_classification'
+          AND conrelid = 'public.games'::regclass
+    ) THEN
+        ALTER TABLE public.games
+            ADD CONSTRAINT chk_games_season_classification
+            CHECK (season_classification IN (
+                'unknown',
+                'regular_season',
+                'exhibition_preseason',
+                'postseason'
+            ));
     END IF;
 END $$;
 
@@ -197,6 +224,99 @@ COMMIT;
 """
 
 
+EVENT_HISTORY_MIGRATION_SQL = """
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.game_schedule_events (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    game_id uuid NOT NULL REFERENCES public.games(id) ON DELETE CASCADE,
+    event_type varchar(64) NOT NULL,
+    confirmed boolean NOT NULL DEFAULT false,
+    reason varchar(64),
+    source varchar(64) NOT NULL,
+    recorded_at timestamptz NOT NULL,
+    payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+    event_key char(64) NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_game_schedule_events_event_type'
+          AND conrelid = 'public.game_schedule_events'::regclass
+    ) THEN
+        ALTER TABLE public.game_schedule_events
+            ADD CONSTRAINT chk_game_schedule_events_event_type
+            CHECK (event_type IN (
+                'postponed_candidate',
+                'postponed_confirmed',
+                'doubleheader_announced',
+                'makeup_scheduled',
+                'venue_changed',
+                'time_changed',
+                'status_corrected'
+            ));
+    END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_game_schedule_events_event_key
+    ON public.game_schedule_events (event_key);
+
+CREATE INDEX IF NOT EXISTS idx_game_schedule_events_game_id_recorded_at
+    ON public.game_schedule_events (game_id, recorded_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_game_schedule_events_recorded_at
+    ON public.game_schedule_events (recorded_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_game_schedule_events_event_type
+    ON public.game_schedule_events (event_type, recorded_at DESC);
+
+COMMIT;
+"""
+
+
+NOTIFICATION_DELIVERY_MIGRATION_SQL = """
+BEGIN;
+
+UPDATE public.notification_events
+SET delivery_status = 'queued'
+WHERE delivery_status = 'pending';
+
+ALTER TABLE public.notification_events
+    ALTER COLUMN delivery_status SET DEFAULT 'queued',
+    ADD COLUMN IF NOT EXISTS attempted_at timestamptz,
+    ADD COLUMN IF NOT EXISTS failed_at timestamptz,
+    ADD COLUMN IF NOT EXISTS failure_reason varchar(255),
+    ADD COLUMN IF NOT EXISTS attempt_count integer NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_notification_events_delivery_status'
+          AND conrelid = 'public.notification_events'::regclass
+    ) THEN
+        ALTER TABLE public.notification_events
+            ADD CONSTRAINT chk_notification_events_delivery_status
+            CHECK (delivery_status IN ('queued', 'sent', 'failed'));
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_notification_events_delivery_status_created_at
+    ON public.notification_events (delivery_status, created_at ASC, id ASC);
+
+CREATE INDEX IF NOT EXISTS idx_notification_events_delivery_retry
+    ON public.notification_events (delivery_status, next_attempt_at ASC, created_at ASC, id ASC);
+
+COMMIT;
+"""
+
+
 @pytest.fixture(scope="session")
 def test_database_url() -> str:
     return os.getenv("TEST_DATABASE_URL", "postgresql://admin:adminkbo@postgres:5432/kbo_test")
@@ -226,6 +346,8 @@ def ensure_test_database(test_database_url: str):
         with conn.cursor() as cur:
             cur.execute(BASE_SCHEMA_SQL)
             cur.execute(MVP_MIGRATION_SQL)
+            cur.execute(EVENT_HISTORY_MIGRATION_SQL)
+            cur.execute(NOTIFICATION_DELIVERY_MIGRATION_SQL)
         conn.commit()
     yield
 
@@ -258,6 +380,7 @@ def clean_database(db_connection_factory):
             cur.execute(
                 """
                 TRUNCATE TABLE
+                    game_schedule_events,
                     notification_events,
                     weather_snapshots,
                     game_snapshots,

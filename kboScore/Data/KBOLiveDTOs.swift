@@ -98,6 +98,7 @@ struct KBOGameDTO: Codable, Sendable {
     let homeScore: Int?
     let statusCode: String?
     let statusText: String?
+    let seasonClassification: String?
     let inningText: String?
     let bases: KBORunnerStateDTO?
     let outs: Int?
@@ -117,6 +118,8 @@ struct KBOGameDTO: Codable, Sendable {
         case homeScore
         case statusCode
         case statusText
+        case seasonClassification
+        case seasonType
         case inningText
         case bases
         case outs
@@ -135,6 +138,7 @@ struct KBOGameDTO: Codable, Sendable {
         homeScore: Int?,
         statusCode: String?,
         statusText: String?,
+        seasonClassification: String? = nil,
         inningText: String?,
         bases: KBORunnerStateDTO?,
         outs: Int?,
@@ -151,6 +155,7 @@ struct KBOGameDTO: Codable, Sendable {
         self.homeScore = homeScore
         self.statusCode = statusCode
         self.statusText = statusText
+        self.seasonClassification = seasonClassification
         self.inningText = inningText
         self.bases = bases
         self.outs = outs
@@ -178,6 +183,8 @@ struct KBOGameDTO: Codable, Sendable {
         homeScore = try container.decodeIfPresent(Int.self, forKey: .homeScore)
         statusCode = try container.decodeIfPresent(String.self, forKey: .statusCode)
         statusText = try container.decodeIfPresent(String.self, forKey: .statusText)
+        seasonClassification = try container.decodeIfPresent(String.self, forKey: .seasonClassification) ??
+            (try container.decodeIfPresent(String.self, forKey: .seasonType))
         inningText = try container.decodeIfPresent(String.self, forKey: .inningText)
         bases = try container.decodeIfPresent(KBORunnerStateDTO.self, forKey: .bases)
         outs = try container.decodeIfPresent(Int.self, forKey: .outs)
@@ -230,12 +237,97 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(homeScore, forKey: .homeScore)
         try container.encodeIfPresent(statusCode, forKey: .statusCode)
         try container.encodeIfPresent(statusText, forKey: .statusText)
+        try container.encodeIfPresent(seasonClassification, forKey: .seasonClassification)
         try container.encodeIfPresent(inningText, forKey: .inningText)
         try container.encodeIfPresent(bases, forKey: .bases)
         try container.encodeIfPresent(outs, forKey: .outs)
         try container.encodeIfPresent(highlightText, forKey: .highlightText)
         try container.encode(events, forKey: .events)
         try container.encodeIfPresent(note, forKey: .note)
+    }
+}
+
+struct KBOStandingsTeamDTO: Decodable, Sendable {
+    let teamID: String
+    let nameKo: String
+
+    private enum CodingKeys: String, CodingKey {
+        case teamID
+        case teamId
+        case nameKo
+        case name_ko
+    }
+
+    nonisolated init(teamID: String, nameKo: String) {
+        self.teamID = teamID
+        self.nameKo = nameKo
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        teamID = try container.decodeIfPresent(String.self, forKey: .teamID) ??
+            container.decode(String.self, forKey: .teamId)
+        nameKo = try container.decodeIfPresent(String.self, forKey: .nameKo) ??
+            container.decode(String.self, forKey: .name_ko)
+    }
+}
+
+struct KBOStandingsItemDTO: Decodable, Sendable {
+    let team: KBOStandingsTeamDTO
+    let rank: Int
+    let wins: Int
+    let losses: Int
+    let ties: Int
+    let remainingRegularSeasonGames: Int
+    let recentResults: [String]
+    let unknownClassificationGames: Int
+    let rankingResolution: String
+    let rankingResolutionPosition: Int?
+    let postseasonQualificationProbability: Double?
+    let postseasonProbabilityUnavailableReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case team
+        case rank
+        case wins
+        case losses
+        case ties
+        case remainingRegularSeasonGames
+        case recentResults
+        case unknownClassificationGames
+        case rankingResolution
+        case rankingResolutionPosition
+        case postseasonQualificationProbability
+        case postseasonProbabilityUnavailableReason
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        team = try container.decode(KBOStandingsTeamDTO.self, forKey: .team)
+        rank = try container.decode(Int.self, forKey: .rank)
+        wins = try container.decode(Int.self, forKey: .wins)
+        losses = try container.decode(Int.self, forKey: .losses)
+        ties = try container.decodeIfPresent(Int.self, forKey: .ties) ?? 0
+        remainingRegularSeasonGames = try container.decodeIfPresent(Int.self, forKey: .remainingRegularSeasonGames) ?? 0
+        recentResults = try container.decodeIfPresent([String].self, forKey: .recentResults) ?? []
+        unknownClassificationGames = try container.decodeIfPresent(Int.self, forKey: .unknownClassificationGames) ?? 0
+        rankingResolution = try container.decodeIfPresent(String.self, forKey: .rankingResolution) ?? "resolved"
+        rankingResolutionPosition = try container.decodeIfPresent(Int.self, forKey: .rankingResolutionPosition)
+        postseasonQualificationProbability = try container.decodeIfPresent(Double.self, forKey: .postseasonQualificationProbability)
+        postseasonProbabilityUnavailableReason = try container.decodeIfPresent(String.self, forKey: .postseasonProbabilityUnavailableReason)
+    }
+}
+
+struct KBOStandingsResponseDTO: Decodable, Sendable {
+    let standings: [KBOStandingsItemDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case standings
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        standings = try container.decodeIfPresent([KBOStandingsItemDTO].self, forKey: .standings) ?? []
     }
 }
 
@@ -335,6 +427,29 @@ enum KBODataMapper {
             .sorted { $0.sentAt > $1.sentAt }
     }
 
+    nonisolated static func mapStandings(_ payload: KBOStandingsResponseDTO, teams: [Team]) -> [TeamStandingsSnapshot] {
+        let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
+        return payload.standings.compactMap { item in
+            guard let team = resolvedTeam(id: item.team.teamID, teamsByID: teamsByID) else {
+                return nil
+            }
+            return TeamStandingsSnapshot(
+                team: team,
+                rank: item.rank,
+                wins: item.wins,
+                losses: item.losses,
+                ties: item.ties,
+                remainingRegularSeasonGames: item.remainingRegularSeasonGames,
+                recentResults: item.recentResults.compactMap(mapRecentResult),
+                unknownClassificationGames: item.unknownClassificationGames,
+                rankingResolution: StandingsRankingResolution(rawValue: item.rankingResolution) ?? .resolved,
+                rankingResolutionPosition: item.rankingResolutionPosition,
+                postseasonQualificationProbability: item.postseasonQualificationProbability,
+                postseasonProbabilityUnavailableReason: item.postseasonProbabilityUnavailableReason.flatMap(PostseasonProbabilityUnavailableReason.init(rawValue:))
+            )
+        }
+    }
+
     nonisolated static func mapGameStatus(code: String?, text: String?, inningText: String? = nil) -> GameStatus {
         let normalized = [code, text, inningText]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
@@ -380,6 +495,7 @@ enum KBODataMapper {
         let inningText = dto.inningText?.nilIfBlank
         let note = sanitizedNote(dto.note)
         let highlight = dto.highlightText?.nilIfBlank
+        let seasonClassification = mapSeasonClassification(dto.seasonClassification, note: note)
 
         return GameDetail(
             id: dto.id,
@@ -390,6 +506,7 @@ enum KBODataMapper {
             awayScore: status == .upcoming ? nil : dto.awayScore,
             homeScore: status == .upcoming ? nil : dto.homeScore,
             status: status,
+            seasonClassification: seasonClassification,
             inningText: inningText,
             bases: dto.bases.map { RunnerState(first: $0.first, second: $0.second, third: $0.third) },
             outs: dto.outs,
@@ -397,6 +514,19 @@ enum KBODataMapper {
             events: dto.events.map(mapEvent).sorted { $0.timestamp > $1.timestamp },
             note: note
         )
+    }
+
+    nonisolated private static func mapRecentResult(_ rawValue: String) -> TeamGameResult? {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "win":
+            .win
+        case "loss":
+            .loss
+        case "tie":
+            .tie
+        default:
+            nil
+        }
     }
 
     nonisolated private static func mapEvent(_ dto: KBOGameEventDTO) -> GameEvent {
@@ -436,6 +566,17 @@ enum KBODataMapper {
 
     nonisolated private static func normalizedTeamID(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    nonisolated private static func mapSeasonClassification(
+        _ rawValue: String?,
+        note: String?
+    ) -> GameSeasonClassification {
+        guard let normalized = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let classification = GameSeasonClassification(rawValue: normalized) else {
+            return GameSeasonClassification.inferred(from: note)
+        }
+        return classification
     }
 
     nonisolated private static func sanitizedNote(

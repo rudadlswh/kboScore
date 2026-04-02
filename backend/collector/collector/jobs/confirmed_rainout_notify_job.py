@@ -20,7 +20,7 @@ class ConfirmedRainoutNotifyJobInput:
 
 @dataclass(slots=True)
 class ConfirmedRainoutNotifyJobSummary:
-    candidate_games: int = 0
+    candidate_events: int = 0
     target_devices: int = 0
     inserted_notification_events: int = 0
     skipped_duplicates: int = 0
@@ -34,6 +34,8 @@ class ConfirmedRainoutNotifyJobDependencies:
 
 
 class ConfirmedRainoutNotifyJob:
+    """Legacy job name kept for compatibility while notifications now derive from canonical game events."""
+
     job_name = "confirmed_rainout_notify_job"
 
     def __init__(self, deps: ConfirmedRainoutNotifyJobDependencies) -> None:
@@ -56,8 +58,8 @@ class ConfirmedRainoutNotifyJob:
                     return summary
 
                 notification_service = NotificationService(conn)
-                service_summary = notification_service.create_confirmed_rainout_notification_events(now_at)
-                summary.candidate_games = service_summary.candidate_games
+                service_summary = notification_service.create_game_event_notification_events(now_at)
+                summary.candidate_events = service_summary.candidate_events
                 summary.target_devices = service_summary.target_devices
                 summary.inserted_notification_events = service_summary.inserted_notification_events
                 summary.skipped_duplicates = service_summary.skipped_duplicates
@@ -67,7 +69,7 @@ class ConfirmedRainoutNotifyJob:
             "job_finished",
             extra={
                 "job_name": self.job_name,
-                "candidate_games": summary.candidate_games,
+                "candidate_events": summary.candidate_events,
                 "target_devices": summary.target_devices,
                 "inserted_notification_events": summary.inserted_notification_events,
                 "skipped_duplicates": summary.skipped_duplicates,

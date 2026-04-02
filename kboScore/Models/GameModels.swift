@@ -7,6 +7,28 @@
 
 import Foundation
 
+enum GameSeasonClassification: String, CaseIterable, Codable, Hashable, Sendable {
+    case unknown
+    case regularSeason = "regular_season"
+    case exhibitionPreseason = "exhibition_preseason"
+    case postseason
+
+    nonisolated var isRegularSeason: Bool {
+        self == .regularSeason
+    }
+
+    nonisolated static func inferred(from note: String?) -> GameSeasonClassification {
+        guard let normalizedNote = note?.lowercased() else { return .unknown }
+        if normalizedNote.contains("provider_game_id=kbo_pre_") ||
+            normalizedNote.contains("시범경기") ||
+            normalizedNote.contains("preseason") ||
+            normalizedNote.contains("exhibition") {
+            return .exhibitionPreseason
+        }
+        return .unknown
+    }
+}
+
 enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
     case upcoming
     case live
@@ -75,6 +97,7 @@ struct GameEvent: Identifiable, Hashable, Codable, Sendable {
 enum TeamGameResult: Hashable, Sendable {
     case win
     case loss
+    case tie
 }
 
 struct GameDetail: Identifiable, Hashable, Codable, Sendable {
@@ -86,12 +109,17 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let awayScore: Int?
     let homeScore: Int?
     let status: GameStatus
+    let seasonClassification: GameSeasonClassification
     let inningText: String?
     let bases: RunnerState?
     let outs: Int?
     let highlightText: String?
     let events: [GameEvent]
     let note: String?
+
+    var isRegularSeason: Bool {
+        seasonClassification.isRegularSeason
+    }
 
     func involves(teamID: String?) -> Bool {
         guard let teamID else { return false }
@@ -144,11 +172,16 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
     func finalResult(for teamID: String?) -> TeamGameResult? {
         guard hasCompleteFinalScore,
-              let winningTeam = finalWinningTeam,
               let teamID,
-              involves(teamID: teamID) else {
+              involves(teamID: teamID),
+              let awayScore,
+              let homeScore else {
             return nil
         }
+        if awayScore == homeScore {
+            return .tie
+        }
+        guard let winningTeam = finalWinningTeam else { return nil }
         return winningTeam.id == teamID ? .win : .loss
     }
 }
