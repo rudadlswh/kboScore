@@ -299,7 +299,11 @@ enum KBOExternalResponseAdapter {
             name: name,
             shortName: shortName ?? name,
             englishName: stringValue(for: ["englishName", "enName"], in: dictionary) ?? name,
-            markText: stringValue(for: ["markText", "symbol", "emblemText"], in: dictionary) ?? String((shortName ?? id).prefix(3)).uppercased()
+            markText: stringValue(for: ["markText", "symbol", "emblemText"], in: dictionary) ?? String((shortName ?? id).prefix(3)).uppercased(),
+            previousRegularSeasonRank: intValue(
+                for: ["previousRegularSeasonRank", "previous_regular_season_rank"],
+                in: dictionary
+            )
         )
     }
 

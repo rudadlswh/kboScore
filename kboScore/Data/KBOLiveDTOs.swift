@@ -13,28 +13,60 @@ struct KBOTeamDTO: Codable, Sendable {
     let shortName: String
     let englishName: String
     let markText: String
+    let previousRegularSeasonRank: Int?
 
     nonisolated init(
         id: String,
         name: String,
         shortName: String,
         englishName: String,
-        markText: String
+        markText: String,
+        previousRegularSeasonRank: Int? = nil
     ) {
         self.id = id
         self.name = name
         self.shortName = shortName
         self.englishName = englishName
         self.markText = markText
+        self.previousRegularSeasonRank = previousRegularSeasonRank
     }
 
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? id.uppercased()
-        shortName = try container.decodeIfPresent(String.self, forKey: .shortName) ?? name
-        englishName = try container.decodeIfPresent(String.self, forKey: .englishName) ?? name
-        markText = try container.decodeIfPresent(String.self, forKey: .markText) ?? String(shortName.prefix(3)).uppercased()
+        shortName = try container.decodeIfPresent(String.self, forKey: .shortName) ??
+            container.decodeIfPresent(String.self, forKey: .short_name) ?? name
+        englishName = try container.decodeIfPresent(String.self, forKey: .englishName) ??
+            container.decodeIfPresent(String.self, forKey: .english_name) ?? name
+        markText = try container.decodeIfPresent(String.self, forKey: .markText) ??
+            container.decodeIfPresent(String.self, forKey: .mark_text) ??
+            String(shortName.prefix(3)).uppercased()
+        previousRegularSeasonRank = try container.decodeIfPresent(Int.self, forKey: .previousRegularSeasonRank) ??
+            container.decodeIfPresent(Int.self, forKey: .previous_regular_season_rank)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(shortName, forKey: .shortName)
+        try container.encode(englishName, forKey: .englishName)
+        try container.encode(markText, forKey: .markText)
+        try container.encodeIfPresent(previousRegularSeasonRank, forKey: .previousRegularSeasonRank)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case shortName
+        case short_name
+        case englishName
+        case english_name
+        case markText
+        case mark_text
+        case previousRegularSeasonRank
+        case previous_regular_season_rank
     }
 }
 
@@ -481,7 +513,8 @@ enum KBODataMapper {
             name: dto.name,
             shortName: dto.shortName,
             englishName: dto.englishName,
-            markText: dto.markText
+            markText: dto.markText,
+            previousRegularSeasonRank: dto.previousRegularSeasonRank
         )
     }
 

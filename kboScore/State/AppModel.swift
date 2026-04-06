@@ -62,6 +62,18 @@ final class AppModel {
     private static let settingsStorageKey = "kbo_live_app_settings"
     private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
     private static let staleThreshold: TimeInterval = 90
+    private static let previousRegularSeasonRankByTeamID: [String: Int] = [
+        "lg": 1,
+        "hanwha": 2,
+        "ssg": 3,
+        "samsung": 4,
+        "nc": 5,
+        "kt": 6,
+        "lotte": 7,
+        "kia": 8,
+        "doosan": 9,
+        "kiwoom": 10
+    ]
 
     private let repository: any KBORepository
     private let repositoryRuntimeState: RepositoryRuntimeState?
@@ -292,6 +304,55 @@ final class AppModel {
             .sorted(by: homeSummaryComparator)
     }
 
+    var homeFallbackStandingsSnapshots: [TeamStandingsSnapshot] {
+        let cutoffDate = calendar.startOfDay(for: Date())
+        let rankedSnapshots = teams
+            .map { team in
+                let completedGames = regularSeasonGames
+                    .filter { $0.scheduledStart < cutoffDate }
+                    .filter { $0.involves(teamID: team.id) }
+                    .filter(\.hasCompleteFinalScore)
+                    .sorted { $0.scheduledStart > $1.scheduledStart }
+                return makeStandingsSnapshot(
+                    for: team,
+                    completedGames: Array(completedGames.prefix(6)),
+                    recentResultsLimit: 6
+                )
+            }
+            .sorted(by: standingsComparator)
+
+        return rankedSnapshots.enumerated().map { index, snapshot in
+            TeamStandingsSnapshot(
+                team: snapshot.team,
+                rank: index + 1,
+                wins: snapshot.wins,
+                losses: snapshot.losses,
+                ties: snapshot.ties,
+                remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
+                recentResults: snapshot.recentResults,
+                unknownClassificationGames: snapshot.unknownClassificationGames,
+                rankingResolution: snapshot.rankingResolution,
+                rankingResolutionPosition: snapshot.rankingResolutionPosition,
+                postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
+                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
+            )
+        }
+    }
+
+    var homeFallbackTitleText: String {
+        guard let weekNumber = homeFallbackWeekNumber else {
+            return "직전 6경기 승률 기준 순위"
+        }
+        return "\(weekNumber)주차 순위"
+    }
+
+    var homeFallbackSubtitleText: String {
+        guard let weekNumber = homeFallbackWeekNumber else {
+            return "오늘 경기가 없어 기준일 이전 완료 경기로 표시합니다."
+        }
+        return "오늘 경기가 없어 \(weekNumber)주차 기준 순위를 표시합니다."
+    }
+
     var todayGamesCount: Int {
         todayGames.count
     }
@@ -306,6 +367,28 @@ final class AppModel {
 
     var myTeamTodayGame: GameDetail? {
         todayGames.first { $0.involves(teamID: settings.favoriteTeamID) }
+    }
+
+    private var homeFallbackWeekNumber: Int? {
+        let cutoffDate = calendar.startOfDay(for: Date())
+        let completedGames = regularSeasonGames
+            .filter { $0.scheduledStart < cutoffDate }
+            .filter(\.hasCompleteFinalScore)
+        guard let latestCompletedGameDate = completedGames.map(\.scheduledStart).max(),
+              let latestWeekStart = homeFallbackWeekStart(for: latestCompletedGameDate) else {
+            return nil
+        }
+
+        let orderedWeekStarts = Array(
+            Set(
+                completedGames.compactMap { homeFallbackWeekStart(for: $0.scheduledStart) }
+            )
+        ).sorted()
+
+        guard let weekIndex = orderedWeekStarts.firstIndex(of: latestWeekStart) else {
+            return nil
+        }
+        return weekIndex + 1
     }
 
     var favoriteTeamLiveGame: GameDetail? {
@@ -405,6 +488,14 @@ final class AppModel {
             return "\(awayTeam.shortName) vs \(homeTeam.shortName) · \(status.title)"
         }
         return trimmed
+    }
+
+    private func homeFallbackWeekStart(for date: Date) -> Date? {
+        var weekCalendar = calendar
+        weekCalendar.timeZone = scheduleTimeZone
+        weekCalendar.firstWeekday = 2
+        weekCalendar.minimumDaysInFirstWeek = 1
+        return weekCalendar.dateInterval(of: .weekOfYear, for: date)?.start
     }
 
     var myTeamNextGame: GameDetail? {
@@ -1235,7 +1326,20 @@ final class AppModel {
             .filter { $0.involves(teamID: team.id) }
             .filter(\.hasCompleteFinalScore)
             .sorted { $0.scheduledStart > $1.scheduledStart }
+        return makeStandingsSnapshot(
+            for: team,
+            completedGames: completedGames,
+            probabilitySignalsByTeamID: probabilitySignalsByTeamID,
+            recentResultsLimit: 5
+        )
+    }
 
+    private func makeStandingsSnapshot(
+        for team: Team,
+        completedGames: [GameDetail],
+        probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:],
+        recentResultsLimit: Int = 5
+    ) -> TeamStandingsSnapshot {
         let wins = completedGames.reduce(into: 0) { partialResult, game in
             if game.finalResult(for: team.id) == .win {
                 partialResult += 1
@@ -1270,7 +1374,7 @@ final class AppModel {
             losses: losses,
             ties: ties,
             remainingRegularSeasonGames: max(0, 144 - (wins + losses + ties)),
-            recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(5)),
+            recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(recentResultsLimit)),
             unknownClassificationGames: probabilitySignal?.unknownClassificationGames ?? 0,
             rankingResolution: probabilitySignal?.rankingResolution ?? .resolved,
             rankingResolutionPosition: probabilitySignal?.rankingResolutionPosition,
@@ -1300,6 +1404,12 @@ final class AppModel {
             break
         }
 
+        if let leftPreviousRank = previousRegularSeasonRank(for: lhs.team),
+           let rightPreviousRank = previousRegularSeasonRank(for: rhs.team),
+           leftPreviousRank != rightPreviousRank {
+            return leftPreviousRank < rightPreviousRank
+        }
+
         if lhs.wins != rhs.wins {
             return lhs.wins > rhs.wins
         }
@@ -1310,6 +1420,16 @@ final class AppModel {
             return lhs.ties > rhs.ties
         }
         return lhs.team.name.localizedStandardCompare(rhs.team.name) == .orderedAscending
+    }
+
+    private func previousRegularSeasonRank(for team: Team) -> Int? {
+        if let previousRegularSeasonRank = team.previousRegularSeasonRank {
+            return previousRegularSeasonRank
+        }
+        guard let teamID = Self.canonicalTeamIdentifier(team.id) else {
+            return nil
+        }
+        return Self.previousRegularSeasonRankByTeamID[teamID]
     }
 
     private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {

@@ -31,7 +31,21 @@ struct HomeView: View {
 //                        .padding(.horizontal, 1)
 //                    }
 
-                    if appModel.filteredHomeGames.isEmpty {
+                    if appModel.todayGames.isEmpty {
+                        if appModel.homeFallbackStandingsSnapshots.isEmpty {
+                            EmptyStateView(
+                                systemImage: "sportscourt",
+                                title: "표시할 경기가 없습니다",
+                                message: "오늘 경기가 없고 최근 완료 경기 데이터도 없습니다."
+                            )
+                        } else {
+                            HomeFallbackStandingsSection(
+                                title: appModel.homeFallbackTitleText,
+                                subtitle: appModel.homeFallbackSubtitleText,
+                                snapshots: appModel.homeFallbackStandingsSnapshots
+                            )
+                        }
+                    } else if appModel.filteredHomeGames.isEmpty {
                         EmptyStateView(
                             systemImage: "sportscourt",
                             title: "표시할 경기가 없습니다",
@@ -61,6 +75,84 @@ struct HomeView: View {
             .navigationDestination(for: UUID.self) { gameID in
                 GameDetailView(gameID: gameID)
             }
+        }
+    }
+}
+
+private struct HomeFallbackStandingsSection: View {
+    let title: String
+    let subtitle: String
+    let snapshots: [TeamStandingsSnapshot]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline.weight(.bold))
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVStack(spacing: 8) {
+                ForEach(snapshots) { snapshot in
+                    HomeFallbackStandingsRow(snapshot: snapshot)
+                }
+            }
+        }
+    }
+}
+
+private struct HomeFallbackStandingsRow: View {
+    @Environment(AppModel.self) private var appModel
+
+    let snapshot: TeamStandingsSnapshot
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("\(snapshot.rank)")
+                .font(.headline.weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(appModel.currentTheme.accent)
+                .frame(width: 28)
+
+            TeamMarkView(team: snapshot.team, size: 42)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(snapshot.team.name)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                    Text(snapshot.recordText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 10) {
+                    metric(title: "승률", value: snapshot.winPercentageText)
+                    metric(title: "최근 6", value: snapshot.recentResultsText)
+                }
+            }
+
+            Spacer(minLength: 8)
+        }
+        .cardSurface(padding: 12, cornerRadius: 18, fillColor: Color(.secondarySystemBackground))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(appModel.currentTheme.accent.opacity(0.9))
+                .frame(width: 4)
+        }
+    }
+
+    private func metric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
         }
     }
 }
