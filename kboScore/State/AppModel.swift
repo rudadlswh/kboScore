@@ -9,6 +9,9 @@ import Foundation
 import Observation
 import UIKit
 import UserNotifications
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 enum RefreshScope: Hashable, Sendable {
     case home
@@ -116,6 +119,7 @@ final class AppModel {
                 oldValue.favoriteTeamID != settings.favoriteTeamID {
                 Task { [weak self] in
                     await self?.syncFavoriteTeamLiveActivity()
+                    await self?.syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
                 }
             }
         }
@@ -163,6 +167,7 @@ final class AppModel {
         self.notificationRegistrationEndpointDescription = notificationRegistrationClient.debugEndpointDescription
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
+        FavoriteTeamScheduleWidgetShared.saveFavoriteTeamID(initialSettings.favoriteTeamID)
         if let bootstrap {
             apply(bootstrap)
             hasLoaded = true
@@ -188,6 +193,7 @@ final class AppModel {
             markRefreshSuccess(for: .notifications, at: refreshedAt, isStale: false)
             await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
             await syncFavoriteTeamLiveActivity()
+            await syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
         } catch {
             loadErrorMessage = "데이터를 불러오지 못했습니다."
         }
@@ -936,6 +942,7 @@ final class AppModel {
             monthlyScheduleGames[key] = schedule.sorted { $0.scheduledStart < $1.scheduledStart }
             failedScheduleMonths.remove(key)
             await refreshMonthlyScheduleDebugInfo(for: key)
+            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         } catch {
             failedScheduleMonths.insert(key)
             await refreshMonthlyScheduleDebugInfo(for: key)
@@ -943,6 +950,7 @@ final class AppModel {
                 let fallback = fallbackMonthSchedule(for: key)
                 if fallback.isEmpty == false {
                     monthlyScheduleGames[key] = fallback
+                    await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
                 }
             }
         }
@@ -971,6 +979,7 @@ final class AppModel {
             }
             await refreshRepositoryDebugInfo(dataSets: [.games])
             await syncFavoriteTeamLiveActivity()
+            await syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
         } catch {
             markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
         }
@@ -1087,7 +1096,153 @@ final class AppModel {
         return lowered
     }
 
+    private func syncFavoriteTeamWidgetSnapshot(includePrefetch: Bool) async {
+        guard settings.favoriteTeamID != nil else {
+            FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+            reloadFavoriteTeamWidgetTimelines()
+            return
+        }
+
+        if includePrefetch {
+            await prepareFavoriteTeamWidgetScheduleIfNeeded()
+        }
+
+        FavoriteTeamScheduleWidgetShared.saveState(
+            favoriteTeamID: settings.favoriteTeamID,
+            snapshot: makeFavoriteTeamWidgetSnapshot()
+        )
+        reloadFavoriteTeamWidgetTimelines()
+    }
+
+    private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
+        guard settings.favoriteTeamID != nil else { return }
+
+        let scheduleCalendar = widgetScheduleCalendar()
+        let today = scheduleCalendar.startOfDay(for: Date())
+        let requestedMonth = startOfMonth(for: today)
+
+        await loadMyTeamSchedule(for: requestedMonth, forceRefresh: false)
+
+        if let resolvedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam),
+           scheduleCalendar.isDate(resolvedMonth, equalTo: requestedMonth, toGranularity: .month) == false {
+            await loadMyTeamSchedule(for: resolvedMonth, forceRefresh: false)
+        }
+    }
+
+    private func makeFavoriteTeamWidgetSnapshot(referenceDate: Date = Date()) -> FavoriteTeamScheduleWidgetSnapshot? {
+        guard let favoriteTeam = favoriteTeamWidgetMetadata() else { return nil }
+
+        let scheduleCalendar = widgetScheduleCalendar()
+        let requestedMonth = startOfMonth(for: referenceDate)
+        let hasAnyMyTeamGames = knownScheduleGames(filter: .myTeam).isEmpty == false
+        let displayedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam) ?? requestedMonth
+        let calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
+        let displayedMonthDays = calendarDays.filter(\.isInDisplayedMonth)
+
+        if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty {
+            return nil
+        }
+
+        let days = calendarDays.map { day in
+            FavoriteTeamScheduleWidgetSnapshot.Day(
+                date: day.date,
+                isInDisplayedMonth: day.isInDisplayedMonth,
+                isToday: day.isToday,
+                gameCount: day.gameCount,
+                dominantStatus: favoriteTeamWidgetGameStatus(day.dominantStatus),
+                opponentTeamID: day.opponentTeam?.id,
+                favoriteTeamResult: favoriteTeamWidgetTeamResult(day.favoriteTeamResult)
+            )
+        }
+        let displayedMonthGameCount = displayedMonthDays.reduce(0) { partialResult, day in
+            partialResult + day.gameCount
+        }
+
+        return FavoriteTeamScheduleWidgetSnapshot(
+            generatedAt: referenceDate,
+            refreshAfter: nextFavoriteTeamWidgetRefreshDate(from: referenceDate, calendar: scheduleCalendar),
+            teamID: favoriteTeam.id,
+            teamName: favoriteTeam.name,
+            teamShortName: favoriteTeam.shortName,
+            displayedMonth: displayedMonth,
+            monthTitle: calendarMonthTitle(for: displayedMonth),
+            monthSummaryText: displayedMonthGameCount == 0 ? "등록 경기 없음" : "이달 경기 \(displayedMonthGameCount)",
+            state: displayedMonthGameCount == 0 ? .emptySchedule : .ready,
+            days: days
+        )
+    }
+
+    private func favoriteTeamWidgetMetadata() -> (id: String, name: String, shortName: String)? {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
+
+        if let team = teams.first(where: { $0.id == favoriteTeamID }) {
+            return (team.id, team.name, team.shortName)
+        }
+
+        if let identity = TeamIdentity.catalog[favoriteTeamID] {
+            return (identity.id, identity.displayName, identity.shortLabel)
+        }
+
+        return (favoriteTeamID, favoriteTeamID.uppercased(), favoriteTeamID.uppercased())
+    }
+
+    private func favoriteTeamWidgetGameStatus(_ status: GameStatus?) -> FavoriteTeamScheduleWidgetGameStatus? {
+        switch status {
+        case .upcoming:
+            .upcoming
+        case .live:
+            .live
+        case .final:
+            .final
+        case .rainDelay:
+            .rainDelay
+        case .cancelled:
+            .cancelled
+        case .none:
+            nil
+        }
+    }
+
+    private func favoriteTeamWidgetTeamResult(_ result: TeamGameResult?) -> FavoriteTeamScheduleWidgetTeamResult? {
+        switch result {
+        case .win:
+            .win
+        case .loss:
+            .loss
+        case .tie:
+            .tie
+        case .none:
+            nil
+        }
+    }
+
+    private func nextFavoriteTeamWidgetRefreshDate(from startDate: Date, calendar: Calendar) -> Date {
+        let nextMorning = calendar.nextDate(
+            after: startDate,
+            matching: DateComponents(hour: 6, minute: 0),
+            matchingPolicy: .nextTime
+        )
+        return nextMorning ?? startDate.addingTimeInterval(60 * 60 * 6)
+    }
+
+    private func widgetScheduleCalendar() -> Calendar {
+        var scheduleCalendar = calendar
+        scheduleCalendar.timeZone = scheduleTimeZone
+        return scheduleCalendar
+    }
+
+    private func reloadFavoriteTeamWidgetTimelines() {
+        #if canImport(WidgetKit)
+        WidgetCenter.shared.reloadTimelines(ofKind: FavoriteTeamScheduleWidgetShared.widgetKind)
+        WidgetCenter.shared.reloadAllTimelines()
+        #endif
+    }
+
     private func persistSettings() {
+        FavoriteTeamScheduleWidgetShared.saveState(
+            favoriteTeamID: settings.favoriteTeamID,
+            snapshot: FavoriteTeamScheduleWidgetShared.loadSnapshot()
+        )
         guard usesPersistedSettings else { return }
         guard let encoded = try? JSONEncoder().encode(settings) else { return }
         UserDefaults.standard.set(encoded, forKey: Self.settingsStorageKey)

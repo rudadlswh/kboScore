@@ -11,6 +11,7 @@ import WidgetKit
 @main
 struct KBOScoreLiveActivityWidgetBundle: WidgetBundle {
     var body: some Widget {
+        FavoriteTeamScheduleWidgetV2()
         KBOScoreLiveActivityWidget()
     }
 }
