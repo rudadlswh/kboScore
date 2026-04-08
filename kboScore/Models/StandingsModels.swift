@@ -32,18 +32,77 @@ enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable
     }
 }
 
+enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
+    case clinched
+    case eliminated
+}
+
+enum StandingsMetrics {
+    nonisolated static let pythagoreanExponent = 1.83
+    nonisolated static let postseasonQualifierCount = 5
+    nonisolated static let homeFieldAdvantageMultiplier = 1.02
+    nonisolated static let awayFieldAdjustmentMultiplier = 0.98
+    //nonisolated static let postseasonStrengthCredibilityGames = 52.0
+    nonisolated static let postseasonStrengthCredibilityGames = 88.0
+    //nonisolated static let postseasonStrengthOfScheduleAdjustment = 0.25
+    nonisolated static let postseasonStrengthOfScheduleAdjustment = 0.12
+    //nonisolated static let postseasonStrengthLogitNoiseSigma = 0.14
+    nonisolated static let postseasonStrengthLogitNoiseSigma = 0.20
+    //nonisolated static let postseasonPriorRankStrengthSpread = 0.045
+    nonisolated static let postseasonPriorRankStrengthSpread = 0.028
+    nonisolated static let postseasonStrengthFloor = 0.001
+    nonisolated static let postseasonStrengthCeiling = 0.999
+    nonisolated static let postseasonDisplayFloor = 0.001
+    nonisolated static let postseasonDisplayCeiling = 0.999
+    //nonisolated static let postseasonSimulationPseudoCount = 0.5
+    nonisolated static let postseasonSimulationPseudoCount = 1.0
+    nonisolated static let postseasonHomeFieldLogitAdjustment = log(homeFieldAdvantageMultiplier / awayFieldAdjustmentMultiplier)
+    nonisolated static let defaultPostseasonSimulationCount: Int = {
+#if DEBUG
+        4_000
+#else
+        10_000
+#endif
+    }()
+
+    nonisolated static func pythagoreanWinningPercentage(runsScored: Int, runsAllowed: Int) -> Double {
+        let scored = max(0, Double(runsScored))
+        let allowed = max(0, Double(runsAllowed))
+
+        guard scored > 0 || allowed > 0 else {
+            return 0.5
+        }
+
+        let scoredPower = pow(scored, pythagoreanExponent)
+        let allowedPower = pow(allowed, pythagoreanExponent)
+        let denominator = scoredPower + allowedPower
+        guard denominator.isFinite, denominator > 0 else {
+            return 0.5
+        }
+
+        let winningPercentage = scoredPower / denominator
+        guard winningPercentage.isFinite else {
+            return 0.5
+        }
+        return winningPercentage
+    }
+}
+
 struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let team: Team
     let rank: Int
     let wins: Int
     let losses: Int
     let ties: Int
+    let runsScored: Int?
+    let runsAllowed: Int?
     let remainingRegularSeasonGames: Int
     let recentResults: [TeamGameResult]
     let unknownClassificationGames: Int
     let rankingResolution: StandingsRankingResolution
     let rankingResolutionPosition: Int?
     let postseasonQualificationProbability: Double?
+    let postseasonQualificationStatus: PostseasonQualificationStatus?
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
 
     nonisolated init(
@@ -52,12 +111,15 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         wins: Int,
         losses: Int,
         ties: Int,
+        runsScored: Int? = nil,
+        runsAllowed: Int? = nil,
         remainingRegularSeasonGames: Int,
         recentResults: [TeamGameResult],
         unknownClassificationGames: Int = 0,
         rankingResolution: StandingsRankingResolution = .resolved,
         rankingResolutionPosition: Int? = nil,
         postseasonQualificationProbability: Double? = nil,
+        postseasonQualificationStatus: PostseasonQualificationStatus? = nil,
         postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason? = nil
     ) {
         self.team = team
@@ -65,12 +127,15 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.wins = wins
         self.losses = losses
         self.ties = ties
+        self.runsScored = runsScored
+        self.runsAllowed = runsAllowed
         self.remainingRegularSeasonGames = remainingRegularSeasonGames
         self.recentResults = recentResults
         self.unknownClassificationGames = unknownClassificationGames
         self.rankingResolution = rankingResolution
         self.rankingResolutionPosition = rankingResolutionPosition
         self.postseasonQualificationProbability = postseasonQualificationProbability
+        self.postseasonQualificationStatus = postseasonQualificationStatus
         self.postseasonProbabilityUnavailableReason = postseasonProbabilityUnavailableReason
     }
 
@@ -91,6 +156,19 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         return String(format: "%.3f", winPercentage)
     }
 
+    var pythagoreanWinningPercentage: Double? {
+        guard let runsScored, let runsAllowed else { return nil }
+        return StandingsMetrics.pythagoreanWinningPercentage(
+            runsScored: runsScored,
+            runsAllowed: runsAllowed
+        )
+    }
+
+    var pythagoreanWinningPercentageText: String {
+        guard let pythagoreanWinningPercentage else { return "---" }
+        return String(format: "%.3f", pythagoreanWinningPercentage)
+    }
+
     var recordText: String {
         "\(wins)승 \(losses)패 \(ties)무"
     }
@@ -105,17 +183,28 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     }
 
     var shouldShowPostseasonProbability: Bool {
-        if postseasonQualificationProbability != nil {
-            return true
-        }
-        guard let postseasonProbabilityUnavailableReason else { return false }
-        return postseasonProbabilityUnavailableReason != .seasonProgressBelowThreshold
+        postseasonQualificationProbability != nil || postseasonProbabilityUnavailableReason != nil
     }
 
     var postseasonQualificationText: String? {
         guard shouldShowPostseasonProbability else { return nil }
+        if postseasonQualificationStatus == .clinched {
+            return "100.0%"
+        }
+        if postseasonQualificationStatus == .eliminated {
+            return "0.0%"
+        }
         if let postseasonQualificationProbability {
-            return "\(Int((postseasonQualificationProbability * 100).rounded()))%"
+            let displayProbability: Double
+            if remainingRegularSeasonGames == 0 {
+                displayProbability = min(max(postseasonQualificationProbability, 0), 1)
+            } else {
+                displayProbability = min(
+                    max(postseasonQualificationProbability, StandingsMetrics.postseasonDisplayFloor),
+                    StandingsMetrics.postseasonDisplayCeiling
+                )
+            }
+            return String(format: "%.1f%%", displayProbability * 100)
         }
         if postseasonProbabilityUnavailableReason != nil {
             return "산출 불가"
@@ -147,26 +236,42 @@ struct LocalStandingsProbabilitySignal: Hashable, Sendable {
     let rankingResolution: StandingsRankingResolution
     let rankingResolutionPosition: Int?
     let postseasonQualificationProbability: Double?
+    let postseasonQualificationStatus: PostseasonQualificationStatus?
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
 }
 
 // Uses only local regular-season games. Unknown-classification rows or an
 // incomplete 144-game schedule make the result unavailable. When the schedule
 // is complete, remaining games are simulated with a deterministic seed from the
-// current snapshot, and top-5 qualification is evaluated by win-percentage
+// current snapshot, and postseason qualification is evaluated by win-percentage
 // groups with equal sharing at the cutoff.
 struct LocalPostseasonQualificationCalculator: Sendable {
+    nonisolated private static let fallbackPreviousRegularSeasonRankByTeamID: [String: Int] = [
+        "lg": 1,
+        "hanwha": 2,
+        "ssg": 3,
+        "samsung": 4,
+        "nc": 5,
+        "kt": 6,
+        "lotte": 7,
+        "kia": 8,
+        "doosan": 9,
+        "kiwoom": 10
+    ]
+
     let regularSeasonLength: Int
+    let postseasonQualifierCount: Int
     let simulationCount: Int
     let minimumCompletedGamesPerTeam: Int
-    private let shrinkageGames = 6.0
 
     nonisolated init(
         regularSeasonLength: Int = 144,
-        simulationCount: Int = 2_000,
+        postseasonQualifierCount: Int = StandingsMetrics.postseasonQualifierCount,
+        simulationCount: Int = StandingsMetrics.defaultPostseasonSimulationCount,
         minimumCompletedGamesPerTeam: Int? = nil
     ) {
         self.regularSeasonLength = regularSeasonLength
+        self.postseasonQualifierCount = postseasonQualifierCount
         self.simulationCount = simulationCount
         self.minimumCompletedGamesPerTeam = minimumCompletedGamesPerTeam ?? Int((Double(regularSeasonLength) * 0.3).rounded(.up))
     }
@@ -180,8 +285,6 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         let remainingRegularSeasonGames = games.filter { $0.isRegularSeason && !$0.hasCompleteFinalScore }
         let unknownClassificationCounts = unknownClassificationCountsByTeamID(teams: teams, games: games)
         let rankingSignals = currentRankingSignals(teams: teams, games: completedRegularSeasonGames)
-        let completedGameCounts = completedRegularSeasonGameCountsByTeamID(teams: teams, games: completedRegularSeasonGames)
-
         if unknownClassificationCounts.values.contains(where: { $0 > 0 }) {
             return makeUnavailableSignals(
                 teams: teams,
@@ -201,15 +304,6 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             )
         }
 
-        if completedGameCounts.values.min() ?? 0 < minimumCompletedGamesPerTeam {
-            return makeUnavailableSignals(
-                teams: teams,
-                rankingSignals: rankingSignals,
-                unknownClassificationCounts: unknownClassificationCounts,
-                reason: .seasonProgressBelowThreshold
-            )
-        }
-
         guard completedRegularSeasonGames.isEmpty == false else {
             return makeUnavailableSignals(
                 teams: teams,
@@ -220,12 +314,18 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
 
         let records = currentRecords(teams: teams, games: completedRegularSeasonGames)
+        let qualificationStatuses = qualificationStatuses(
+            teams: teams,
+            currentRecords: records,
+            remainingGames: remainingRegularSeasonGames
+        )
         let probabilities = qualificationProbabilities(
             teams: teams,
             teamsByID: teamsByID,
             currentRecords: records,
             completedGames: completedRegularSeasonGames,
-            remainingGames: remainingRegularSeasonGames
+            remainingGames: remainingRegularSeasonGames,
+            qualificationStatuses: qualificationStatuses
         )
 
         return teams.reduce(into: [:]) { partialResult, team in
@@ -236,28 +336,38 @@ struct LocalPostseasonQualificationCalculator: Sendable {
                 rankingResolution: rankingSignal?.rankingResolution ?? .resolved,
                 rankingResolutionPosition: rankingSignal?.rankingResolutionPosition,
                 postseasonQualificationProbability: probabilities[teamID],
+                postseasonQualificationStatus: qualificationStatuses[teamID],
                 postseasonProbabilityUnavailableReason: nil
             )
         }
     }
 
-    private func qualificationProbabilities(
+    nonisolated private func qualificationProbabilities(
         teams: [Team],
         teamsByID: [String: Team],
         currentRecords: [String: _ProbabilityRecord],
         completedGames: [GameDetail],
-        remainingGames: [GameDetail]
+        remainingGames: [GameDetail],
+        qualificationStatuses: [String: PostseasonQualificationStatus]
     ) -> [String: Double] {
         guard remainingGames.isEmpty == false else {
             return qualificationShares(for: Array(currentRecords.values))
         }
 
-        let scoringRates = scoringRatesByTeamID(teams: teams, completedGames: completedGames)
+        let strengths = strengthByTeamID(
+            teams: teams,
+            currentRecords: currentRecords,
+            completedGames: completedGames
+        )
         var qualificationTotals = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), 0.0) })
         var generator = SplitMix64(state: deterministicSeed(teams: teams, games: completedGames + remainingGames))
 
         for _ in 0..<simulationCount {
             var simulatedRecords = currentRecords
+            var simulatedStrengths: [String: Double] = [:]
+            for (teamID, strength) in strengths {
+                simulatedStrengths[teamID] = simulatedStrength(from: strength, generator: &generator)
+            }
 
             for game in remainingGames {
                 let awayID = Self.canonicalTeamIdentifier(game.awayTeam.id)
@@ -269,25 +379,14 @@ struct LocalPostseasonQualificationCalculator: Sendable {
                     continue
                 }
 
-                let awayRuns = generator.samplePoisson(
-                    lambda: matchupRunExpectation(
-                        offense: scoringRates[awayID]?.offense ?? scoringRates.leagueAverageRuns,
-                        defense: scoringRates[homeID]?.defense ?? scoringRates.leagueAverageRuns,
-                        homeFieldMultiplier: 0.98
-                    )
-                )
-                let homeRuns = generator.samplePoisson(
-                    lambda: matchupRunExpectation(
-                        offense: scoringRates[homeID]?.offense ?? scoringRates.leagueAverageRuns,
-                        defense: scoringRates[awayID]?.defense ?? scoringRates.leagueAverageRuns,
-                        homeFieldMultiplier: 1.02
-                    )
+                let awayStrength = simulatedStrengths[awayID] ?? 0.5
+                let homeStrength = simulatedStrengths[homeID] ?? 0.5
+                let awayWinProbability = matchupWinProbability(
+                    awayStrength: awayStrength,
+                    homeStrength: homeStrength
                 )
 
-                if awayRuns == homeRuns {
-                    awayRecord.ties += 1
-                    homeRecord.ties += 1
-                } else if awayRuns > homeRuns {
+                if generator.nextUnitInterval() < awayWinProbability {
                     awayRecord.wins += 1
                     homeRecord.losses += 1
                 } else {
@@ -305,10 +404,22 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             }
         }
 
-        return qualificationTotals.mapValues { $0 / Double(simulationCount) }
+        let posteriorDenominator = Double(simulationCount) + (StandingsMetrics.postseasonSimulationPseudoCount * 2)
+        var probabilities = qualificationTotals.mapValues {
+            ($0 + StandingsMetrics.postseasonSimulationPseudoCount) / posteriorDenominator
+        }
+        for (teamID, status) in qualificationStatuses {
+            switch status {
+            case .clinched:
+                probabilities[teamID] = 1
+            case .eliminated:
+                probabilities[teamID] = 0
+            }
+        }
+        return probabilities
     }
 
-    private func makeUnavailableSignals(
+    nonisolated private func makeUnavailableSignals(
         teams: [Team],
         rankingSignals: [String: LocalStandingsProbabilitySignal],
         unknownClassificationCounts: [String: Int],
@@ -322,12 +433,13 @@ struct LocalPostseasonQualificationCalculator: Sendable {
                 rankingResolution: rankingSignal?.rankingResolution ?? .resolved,
                 rankingResolutionPosition: rankingSignal?.rankingResolutionPosition,
                 postseasonQualificationProbability: nil,
+                postseasonQualificationStatus: nil,
                 postseasonProbabilityUnavailableReason: reason
             )
         }
     }
 
-    private func currentRankingSignals(
+    nonisolated private func currentRankingSignals(
         teams: [Team],
         games: [GameDetail]
     ) -> [String: LocalStandingsProbabilitySignal] {
@@ -336,13 +448,14 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         var currentRank = 1
 
         for group in groupedRecords {
-            let requiresTiebreak = group.count == 2 && (currentRank == 1 || currentRank == 5)
+            let requiresTiebreak = group.count == 2 && (currentRank == 1 || currentRank == postseasonQualifierCount)
             for record in group {
                 signals[record.teamID] = LocalStandingsProbabilitySignal(
                     unknownClassificationGames: 0,
                     rankingResolution: requiresTiebreak ? .tiebreakGameRequired : .resolved,
                     rankingResolutionPosition: requiresTiebreak ? currentRank : nil,
                     postseasonQualificationProbability: nil,
+                    postseasonQualificationStatus: nil,
                     postseasonProbabilityUnavailableReason: nil
                 )
             }
@@ -352,7 +465,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return signals
     }
 
-    private func currentRecords(
+    nonisolated private func currentRecords(
         teams: [Team],
         games: [GameDetail]
     ) -> [String: _ProbabilityRecord] {
@@ -388,7 +501,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return records
     }
 
-    private func groupedRecordsByWinPercentage(
+    nonisolated private func groupedRecordsByWinPercentage(
         for records: [_ProbabilityRecord]
     ) -> [[_ProbabilityRecord]] {
         let orderedRecords = records.sorted(by: recordSortComparator)
@@ -405,7 +518,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return groups
     }
 
-    private func qualificationShares(for records: [_ProbabilityRecord]) -> [String: Double] {
+    nonisolated private func qualificationShares(for records: [_ProbabilityRecord]) -> [String: Double] {
         let groups = groupedRecordsByWinPercentage(for: records)
         var shares: [String: Double] = [:]
         var currentRank = 1
@@ -413,15 +526,15 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         for group in groups {
             let groupEndRank = currentRank + group.count - 1
             let share: Double
-            if groupEndRank <= 5 {
+            if groupEndRank <= postseasonQualifierCount {
                 share = 1
-            } else if currentRank > 5 {
+            } else if currentRank > postseasonQualifierCount {
                 share = 0
-            } else if group.count == 2 && currentRank == 5 {
-                // The local model approximates a deciding 5th-place tiebreak as 50/50.
+            } else if group.count == 2 && currentRank == postseasonQualifierCount {
+                // The local model approximates a deciding cutoff-position tiebreak as 50/50.
                 share = 0.5
             } else {
-                let remainingSpots = max(0, 5 - (currentRank - 1))
+                let remainingSpots = max(0, postseasonQualifierCount - (currentRank - 1))
                 share = Double(remainingSpots) / Double(group.count)
             }
 
@@ -434,7 +547,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return shares
     }
 
-    private func scheduledRegularSeasonGameCountsByTeamID(
+    nonisolated private func scheduledRegularSeasonGameCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
     ) -> [String: Int] {
@@ -446,7 +559,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
-    private func completedRegularSeasonGameCountsByTeamID(
+    nonisolated private func completedRegularSeasonGameCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
     ) -> [String: Int] {
@@ -458,7 +571,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
-    private func unknownClassificationCountsByTeamID(
+    nonisolated private func unknownClassificationCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
     ) -> [String: Int] {
@@ -470,15 +583,75 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
-    private func scoringRatesByTeamID(
+    nonisolated private func qualificationStatuses(
         teams: [Team],
+        currentRecords: [String: _ProbabilityRecord],
+        remainingGames: [GameDetail]
+    ) -> [String: PostseasonQualificationStatus] {
+        let remainingGamesByTeamID = remainingRegularSeasonGameCountsByTeamID(
+            teams: teams,
+            games: remainingGames
+        )
+        let teamIDs = teams.map { Self.canonicalTeamIdentifier($0.id) }
+
+        return teamIDs.reduce(into: [:]) { partialResult, teamID in
+            guard let teamRecord = currentRecords[teamID] else { return }
+            let teamMinimum = minimumPossibleWinPercentage(
+                for: teamRecord,
+                remainingGames: remainingGamesByTeamID[teamID, default: 0]
+            )
+            let teamMaximum = maximumPossibleWinPercentage(
+                for: teamRecord,
+                remainingGames: remainingGamesByTeamID[teamID, default: 0]
+            )
+
+            let otherMaximums = teamIDs
+                .filter { $0 != teamID }
+                .compactMap { otherID -> Double? in
+                    guard let otherRecord = currentRecords[otherID] else { return nil }
+                    return maximumPossibleWinPercentage(
+                        for: otherRecord,
+                        remainingGames: remainingGamesByTeamID[otherID, default: 0]
+                    )
+                }
+                .sorted(by: >)
+
+            if otherMaximums.count < postseasonQualifierCount {
+                partialResult[teamID] = .clinched
+                return
+            }
+
+            if teamMinimum > otherMaximums[postseasonQualifierCount - 1] {
+                partialResult[teamID] = .clinched
+                return
+            }
+
+            let otherMinimums = teamIDs
+                .filter { $0 != teamID }
+                .compactMap { otherID -> Double? in
+                    guard let otherRecord = currentRecords[otherID] else { return nil }
+                    return minimumPossibleWinPercentage(
+                        for: otherRecord,
+                        remainingGames: remainingGamesByTeamID[otherID, default: 0]
+                    )
+                }
+                .sorted(by: >)
+
+            guard otherMinimums.count >= postseasonQualifierCount else { return }
+            if teamMaximum < otherMinimums[postseasonQualifierCount - 1] {
+                partialResult[teamID] = .eliminated
+            }
+        }
+    }
+
+    nonisolated private func strengthByTeamID(
+        teams: [Team],
+        currentRecords: [String: _ProbabilityRecord],
         completedGames: [GameDetail]
-    ) -> [String: _ScoringRate] {
+    ) -> [String: Double] {
         var aggregateByTeamID = Dictionary(uniqueKeysWithValues: teams.map {
             (Self.canonicalTeamIdentifier($0.id), _ScoringAggregate())
         })
-        var totalRuns = 0.0
-        var totalTeamGames = 0.0
 
         for game in completedGames {
             let awayID = Self.canonicalTeamIdentifier(game.awayTeam.id)
@@ -490,40 +663,169 @@ struct LocalPostseasonQualificationCalculator: Sendable {
 
             aggregateByTeamID[awayID, default: _ScoringAggregate()].record(scored: awayScore, allowed: homeScore)
             aggregateByTeamID[homeID, default: _ScoringAggregate()].record(scored: homeScore, allowed: awayScore)
-            totalRuns += Double(awayScore + homeScore)
-            totalTeamGames += 2
         }
 
-        let leagueAverageRuns = totalTeamGames > 0 ? totalRuns / totalTeamGames : 4.5
-        var rates: [String: _ScoringRate] = [:]
-
-        for (teamID, aggregate) in aggregateByTeamID {
-            let gamesPlayed = Double(aggregate.gamesPlayed)
-            let offense = (
-                Double(aggregate.runsScored) + (leagueAverageRuns * shrinkageGames)
-            ) / max(1, gamesPlayed + shrinkageGames)
-            let defense = (
-                Double(aggregate.runsAllowed) + (leagueAverageRuns * shrinkageGames)
-            ) / max(1, gamesPlayed + shrinkageGames)
-            rates[teamID] = _ScoringRate(
-                offense: max(0.25, offense),
-                defense: max(0.25, defense)
+        let priorStrengths: [String: Double] = Dictionary(uniqueKeysWithValues: teams.map { team in
+            let teamID = Self.canonicalTeamIdentifier(team.id)
+            return (teamID, priorStrength(for: team, teamCount: teams.count))
+        })
+        let observedStrengths = aggregateByTeamID.mapValues { aggregate in
+            StandingsMetrics.pythagoreanWinningPercentage(
+                runsScored: aggregate.runsScored,
+                runsAllowed: aggregate.runsAllowed
+            )
+        }
+        let blendedStrengths = teams.reduce(into: [String: Double]()) { partialResult, team in
+            let teamID = Self.canonicalTeamIdentifier(team.id)
+            let priorStrength = priorStrengths[teamID] ?? 0.5
+            let observedStrength = observedStrengths[teamID] ?? 0.5
+            let gamesPlayed = Double(currentRecords[teamID]?.wins ?? 0)
+                + Double(currentRecords[teamID]?.losses ?? 0)
+                + Double(currentRecords[teamID]?.ties ?? 0)
+            let credibility = credibilityWeight(gamesPlayed: gamesPlayed)
+            partialResult[teamID] = boundedStrength(
+                ((1 - credibility) * priorStrength) + (credibility * observedStrength)
             )
         }
 
-        rates.leagueAverageRuns = max(0.25, leagueAverageRuns)
-        return rates
+        let averageOpponentStrengths = averageOpponentStrengthByTeamID(
+            teams: teams,
+            completedGames: completedGames,
+            baselineStrengths: blendedStrengths
+        )
+        let sosAdjustedStrengths = blendedStrengths.reduce(into: [String: Double]()) { partialResult, item in
+            let averageOpponentStrength = averageOpponentStrengths[item.key] ?? 0.5
+            partialResult[item.key] = boundedStrength(
+                item.value + (StandingsMetrics.postseasonStrengthOfScheduleAdjustment * (averageOpponentStrength - 0.5))
+            )
+        }
+
+        let leagueAverageStrength = sosAdjustedStrengths.isEmpty
+            ? 0.5
+            : sosAdjustedStrengths.values.reduce(0, +) / Double(sosAdjustedStrengths.count)
+        let calibrationOffset = 0.5 - leagueAverageStrength
+
+        return sosAdjustedStrengths.mapValues { strength in
+            boundedStrength(strength + calibrationOffset)
+        }
     }
 
-    private func matchupRunExpectation(
-        offense: Double,
-        defense: Double,
-        homeFieldMultiplier: Double
+    nonisolated private func averageOpponentStrengthByTeamID(
+        teams: [Team],
+        completedGames: [GameDetail],
+        baselineStrengths: [String: Double]
+    ) -> [String: Double] {
+        var opponentStrengthTotals = Dictionary(uniqueKeysWithValues: teams.map {
+            (Self.canonicalTeamIdentifier($0.id), 0.0)
+        })
+        var opponentGameCounts = Dictionary(uniqueKeysWithValues: teams.map {
+            (Self.canonicalTeamIdentifier($0.id), 0)
+        })
+
+        for game in completedGames {
+            let awayID = Self.canonicalTeamIdentifier(game.awayTeam.id)
+            let homeID = Self.canonicalTeamIdentifier(game.homeTeam.id)
+            let awayStrength = baselineStrengths[awayID] ?? 0.5
+            let homeStrength = baselineStrengths[homeID] ?? 0.5
+
+            opponentStrengthTotals[awayID, default: 0] += homeStrength
+            opponentGameCounts[awayID, default: 0] += 1
+            opponentStrengthTotals[homeID, default: 0] += awayStrength
+            opponentGameCounts[homeID, default: 0] += 1
+        }
+
+        return opponentStrengthTotals.reduce(into: [String: Double]()) { partialResult, item in
+            let teamID = item.key
+            let gameCount = opponentGameCounts[teamID, default: 0]
+            partialResult[teamID] = gameCount > 0 ? (item.value / Double(gameCount)) : 0.5
+        }
+    }
+
+    nonisolated private func priorStrength(for team: Team, teamCount: Int) -> Double {
+        let fallbackRank = Self.fallbackPreviousRegularSeasonRankByTeamID[Self.canonicalTeamIdentifier(team.id)]
+        guard let rawRank = team.previousRegularSeasonRank ?? fallbackRank,
+              teamCount > 1 else {
+            return 0.5
+        }
+
+        let clampedRank = min(max(rawRank, 1), teamCount)
+        let centerRank = Double(teamCount + 1) / 2
+        let normalizedRank = (centerRank - Double(clampedRank)) / max(1.0, Double(teamCount - 1) / 2)
+        return boundedStrength(
+            0.5 + (normalizedRank * StandingsMetrics.postseasonPriorRankStrengthSpread)
+        )
+    }
+
+    nonisolated private func credibilityWeight(gamesPlayed: Double) -> Double {
+        guard gamesPlayed > 0 else { return 0 }
+        return gamesPlayed / (gamesPlayed + StandingsMetrics.postseasonStrengthCredibilityGames)
+    }
+
+    nonisolated private func simulatedStrength(
+        from effectiveStrength: Double,
+        generator: inout SplitMix64
     ) -> Double {
-        max(0.25, sqrt(offense * defense) * homeFieldMultiplier)
+        let shock = generator.sampleStandardNormal() * StandingsMetrics.postseasonStrengthLogitNoiseSigma
+        return boundedStrength(logistic(logit(boundedStrength(effectiveStrength)) + shock))
     }
 
-    private func deterministicSeed(teams: [Team], games: [GameDetail]) -> UInt64 {
+    nonisolated private func matchupWinProbability(
+        awayStrength: Double,
+        homeStrength: Double
+    ) -> Double {
+        boundedStrength(
+            logistic(
+                logit(boundedStrength(awayStrength))
+                - logit(boundedStrength(homeStrength))
+                - StandingsMetrics.postseasonHomeFieldLogitAdjustment
+            )
+        )
+    }
+
+    nonisolated private func minimumPossibleWinPercentage(
+        for record: _ProbabilityRecord,
+        remainingGames: Int
+    ) -> Double {
+        let decisions = record.wins + record.losses + remainingGames
+        guard decisions > 0 else { return 0.5 }
+        return Double(record.wins) / Double(decisions)
+    }
+
+    nonisolated private func maximumPossibleWinPercentage(
+        for record: _ProbabilityRecord,
+        remainingGames: Int
+    ) -> Double {
+        let decisions = record.wins + record.losses + remainingGames
+        guard decisions > 0 else { return 0.5 }
+        return Double(record.wins + remainingGames) / Double(decisions)
+    }
+
+    nonisolated private func remainingRegularSeasonGameCountsByTeamID(
+        teams: [Team],
+        games: [GameDetail]
+    ) -> [String: Int] {
+        var counts = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), 0) })
+        for game in games {
+            counts[Self.canonicalTeamIdentifier(game.awayTeam.id), default: 0] += 1
+            counts[Self.canonicalTeamIdentifier(game.homeTeam.id), default: 0] += 1
+        }
+        return counts
+    }
+
+    nonisolated private func boundedStrength(_ value: Double) -> Double {
+        min(max(value, StandingsMetrics.postseasonStrengthFloor), StandingsMetrics.postseasonStrengthCeiling)
+    }
+
+    nonisolated private func logit(_ value: Double) -> Double {
+        let bounded = boundedStrength(value)
+        return log(bounded / (1 - bounded))
+    }
+
+    nonisolated private func logistic(_ value: Double) -> Double {
+        1 / (1 + exp(-value))
+    }
+
+    nonisolated private func deterministicSeed(teams: [Team], games: [GameDetail]) -> UInt64 {
         var hash: UInt64 = 1_469_598_103_934_665_603
 
         func mix(_ string: String) {
@@ -555,7 +857,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return hash == 0 ? 0x9E37_79B9_7F4A_7C15 : hash
     }
 
-    private func recordSortComparator(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
+    nonisolated private func recordSortComparator(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
         switch (lhs.winPercentage, rhs.winPercentage) {
         case let (left?, right?) where left != right:
             return left > right
@@ -577,7 +879,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
-    private func hasSameWinPercentage(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
+    nonisolated private func hasSameWinPercentage(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
         let lhsDecisions = lhs.wins + lhs.losses
         let rhsDecisions = rhs.wins + rhs.losses
         if lhsDecisions == 0 || rhsDecisions == 0 {
@@ -586,7 +888,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return lhs.wins * rhsDecisions == rhs.wins * lhsDecisions
     }
 
-    private static func canonicalTeamIdentifier(_ rawValue: String) -> String {
+    nonisolated private static func canonicalTeamIdentifier(_ rawValue: String) -> String {
         rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
@@ -597,7 +899,7 @@ private struct _ProbabilityRecord: Hashable, Sendable {
     var losses = 0
     var ties = 0
 
-    var winPercentage: Double? {
+    nonisolated var winPercentage: Double? {
         let decisions = wins + losses
         guard decisions > 0 else { return nil }
         return Double(wins) / Double(decisions)
@@ -609,7 +911,13 @@ private struct _ScoringAggregate: Hashable, Sendable {
     var runsAllowed = 0
     var gamesPlayed = 0
 
-    mutating func record(scored: Int, allowed: Int) {
+    nonisolated init(runsScored: Int = 0, runsAllowed: Int = 0, gamesPlayed: Int = 0) {
+        self.runsScored = runsScored
+        self.runsAllowed = runsAllowed
+        self.gamesPlayed = gamesPlayed
+    }
+
+    nonisolated mutating func record(scored: Int, allowed: Int) {
         runsScored += scored
         runsAllowed += allowed
         gamesPlayed += 1
@@ -624,7 +932,7 @@ private struct _ScoringRate: Hashable, Sendable {
 private struct SplitMix64: Sendable {
     var state: UInt64
 
-    mutating func next() -> UInt64 {
+    nonisolated mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
         var z = state
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
@@ -632,11 +940,17 @@ private struct SplitMix64: Sendable {
         return z ^ (z >> 31)
     }
 
-    mutating func nextUnitInterval() -> Double {
+    nonisolated mutating func nextUnitInterval() -> Double {
         Double(next() >> 11) / Double(1 << 53)
     }
 
-    mutating func samplePoisson(lambda: Double) -> Int {
+    nonisolated mutating func sampleStandardNormal() -> Double {
+        let u1 = max(nextUnitInterval(), Double.leastNonzeroMagnitude)
+        let u2 = nextUnitInterval()
+        return sqrt(-2 * log(u1)) * cos(2 * Double.pi * u2)
+    }
+
+    nonisolated mutating func samplePoisson(lambda: Double) -> Int {
         guard lambda > 0 else { return 0 }
         let threshold = exp(-lambda)
         var product = 1.0
@@ -652,7 +966,7 @@ private struct SplitMix64: Sendable {
 }
 
 private extension Dictionary where Key == String, Value == _ScoringRate {
-    var leagueAverageRuns: Double {
+    nonisolated var leagueAverageRuns: Double {
         get { self["__league_average__", default: _ScoringRate(offense: 4.5, defense: 4.5)].offense }
         set { self["__league_average__"] = _ScoringRate(offense: newValue, defense: newValue) }
     }

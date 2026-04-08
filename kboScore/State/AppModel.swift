@@ -99,6 +99,16 @@ final class AppModel {
     var debugActiveDataSource: String
     var debugDeliverySource: String
     var debugBaseURL: String?
+    var debugBootstrapAPIEnabled: String
+    var debugBootstrapETag: String
+    var debugBootstrapLastFetchAt: Date?
+    var debugBootstrapLastWriteAt: Date?
+    var debugBootstrapLastResult: String
+    var debugLocalBootstrapSource: String
+    var debugLocalBootstrapMessage: String?
+    let debugLocalBootstrapPath: String
+    var debugLocalBootstrapResolvedPath: String?
+    var debugLocalBootstrapLoadedAt: Date?
     var isShowingStaleData = false
     var teams: [Team] = []
     var games: [GameDetail] = []
@@ -136,6 +146,9 @@ final class AppModel {
     private(set) var loadingScheduleMonths: Set<KBOMonthScheduleKey> = []
     private(set) var failedScheduleMonths: Set<KBOMonthScheduleKey> = []
     private var localStandingsProbabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
+    private var localStandingsProbabilityRefreshTask: Task<Void, Never>?
+    private var localStandingsProbabilityGeneration = 0
+    private let isRunningTests: Bool
 
     init(
         repository: any KBORepository = MockKBORepository(),
@@ -163,13 +176,24 @@ final class AppModel {
         self.debugActiveDataSource = "목 데이터"
         self.debugDeliverySource = "목 데이터"
         self.debugBaseURL = nil
+        self.debugBootstrapAPIEnabled = "비활성"
+        self.debugBootstrapETag = "없음"
+        self.debugBootstrapLastFetchAt = nil
+        self.debugBootstrapLastWriteAt = nil
+        self.debugBootstrapLastResult = "비활성"
+        self.debugLocalBootstrapSource = "확인 전"
+        self.debugLocalBootstrapMessage = nil
+        self.debugLocalBootstrapPath = Self.localBootstrapDocumentsPath() ?? "확인 불가"
+        self.debugLocalBootstrapResolvedPath = nil
+        self.debugLocalBootstrapLoadedAt = nil
         self.apnsDeviceToken = persistedDeviceToken
         self.notificationRegistrationEndpointDescription = notificationRegistrationClient.debugEndpointDescription
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
+        self.isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         FavoriteTeamScheduleWidgetShared.saveFavoriteTeamID(initialSettings.favoriteTeamID)
         if let bootstrap {
-            apply(bootstrap)
+            apply(bootstrap, refreshProbabilitySignalsSynchronously: isRunningTests)
             hasLoaded = true
             let now = Date()
             lastSuccessfulRefresh[.games] = now
@@ -201,11 +225,18 @@ final class AppModel {
         isLoading = false
     }
 
-    private func apply(_ bootstrap: KBOBootstrapData) {
+    private func apply(
+        _ bootstrap: KBOBootstrapData,
+        refreshProbabilitySignalsSynchronously: Bool = false
+    ) {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
         notifications = bootstrap.notifications.sorted { $0.sentAt > $1.sentAt }
-        refreshLocalStandingsProbabilitySignals()
+        if refreshProbabilitySignalsSynchronously {
+            refreshLocalStandingsProbabilitySignalsSynchronously()
+        } else {
+            scheduleLocalStandingsProbabilityRefresh()
+        }
         if !hasPersistedSettingsAtLaunch {
             settings = bootstrap.settings
         }
@@ -264,6 +295,21 @@ final class AppModel {
     var debugLastRefreshText: String {
         guard let lastUpdatedAt else { return "없음" }
         return lastUpdatedAt.formatted(date: .omitted, time: .shortened)
+    }
+
+    var debugBootstrapLastFetchText: String {
+        guard let debugBootstrapLastFetchAt else { return "없음" }
+        return debugBootstrapLastFetchAt.formatted(date: .omitted, time: .standard)
+    }
+
+    var debugBootstrapLastWriteText: String {
+        guard let debugBootstrapLastWriteAt else { return "없음" }
+        return debugBootstrapLastWriteAt.formatted(date: .omitted, time: .standard)
+    }
+
+    var debugLocalBootstrapLoadedText: String {
+        guard let debugLocalBootstrapLoadedAt else { return "없음" }
+        return debugLocalBootstrapLoadedAt.formatted(date: .omitted, time: .standard)
     }
 
     var notificationRegistrationLastAttemptText: String {
@@ -334,12 +380,15 @@ final class AppModel {
                 wins: snapshot.wins,
                 losses: snapshot.losses,
                 ties: snapshot.ties,
+                runsScored: snapshot.runsScored,
+                runsAllowed: snapshot.runsAllowed,
                 remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
                 recentResults: snapshot.recentResults,
                 unknownClassificationGames: snapshot.unknownClassificationGames,
                 rankingResolution: snapshot.rankingResolution,
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
+                postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
                 postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
             )
         }
@@ -536,12 +585,15 @@ final class AppModel {
                 wins: snapshot.wins,
                 losses: snapshot.losses,
                 ties: snapshot.ties,
+                runsScored: snapshot.runsScored,
+                runsAllowed: snapshot.runsAllowed,
                 remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
                 recentResults: snapshot.recentResults,
                 unknownClassificationGames: snapshot.unknownClassificationGames,
                 rankingResolution: snapshot.rankingResolution,
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
+                postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
                 postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
             )
         }
@@ -960,9 +1012,7 @@ final class AppModel {
         guard let repositoryRuntimeState else { return }
         let snapshot = await repositoryRuntimeState.snapshot()
         monthlyScheduleDebugSnapshots[key] = snapshot
-        debugActiveDataSource = snapshot.activeSource.rawValue
-        debugDeliverySource = snapshot.deliverySource.rawValue
-        debugBaseURL = snapshot.baseURL
+        applyRepositoryDebugSnapshot(snapshot)
         lastUpdatedAt = snapshot.lastRefreshAt ?? lastUpdatedAt
     }
 
@@ -972,12 +1022,22 @@ final class AppModel {
         defer { activeRefreshScopes.subtract(scopes) }
 
         do {
-            games = try await repository.fetchGames()
-            refreshLocalStandingsProbabilitySignals()
-            if repositoryRuntimeState == nil {
-                markRefreshSuccess(for: .games, at: Date(), isStale: false)
+            if await shouldReloadBootstrapForLocalData() {
+                try await reloadBootstrapFromRepository()
+                if repositoryRuntimeState == nil {
+                    let refreshedAt = Date()
+                    markRefreshSuccess(for: .games, at: refreshedAt, isStale: false)
+                    markRefreshSuccess(for: .notifications, at: refreshedAt, isStale: false)
+                }
+                await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
+            } else {
+                games = try await repository.fetchGames()
+                scheduleLocalStandingsProbabilityRefresh()
+                if repositoryRuntimeState == nil {
+                    markRefreshSuccess(for: .games, at: Date(), isStale: false)
+                }
+                await refreshRepositoryDebugInfo(dataSets: [.games])
             }
-            await refreshRepositoryDebugInfo(dataSets: [.games])
             await syncFavoriteTeamLiveActivity()
             await syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
         } catch {
@@ -991,11 +1051,21 @@ final class AppModel {
         defer { activeRefreshScopes.subtract(scopes) }
 
         do {
-            notifications = try await repository.fetchNotifications()
-            if repositoryRuntimeState == nil {
-                markRefreshSuccess(for: .notifications, at: Date(), isStale: false)
+            if await shouldReloadBootstrapForLocalData() {
+                try await reloadBootstrapFromRepository()
+                if repositoryRuntimeState == nil {
+                    let refreshedAt = Date()
+                    markRefreshSuccess(for: .games, at: refreshedAt, isStale: false)
+                    markRefreshSuccess(for: .notifications, at: refreshedAt, isStale: false)
+                }
+                await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
+            } else {
+                notifications = try await repository.fetchNotifications()
+                if repositoryRuntimeState == nil {
+                    markRefreshSuccess(for: .notifications, at: Date(), isStale: false)
+                }
+                await refreshRepositoryDebugInfo(dataSets: [.notifications])
             }
-            await refreshRepositoryDebugInfo(dataSets: [.notifications])
         } catch {
             markRefreshFailure(for: .notifications, hasUsableData: !notifications.isEmpty)
         }
@@ -1004,9 +1074,7 @@ final class AppModel {
     private func refreshRepositoryDebugInfo(dataSets: Set<RefreshDataSet>) async {
         guard let repositoryRuntimeState else { return }
         let snapshot = await repositoryRuntimeState.snapshot()
-        debugActiveDataSource = snapshot.activeSource.rawValue
-        debugDeliverySource = snapshot.deliverySource.rawValue
-        debugBaseURL = snapshot.baseURL
+        applyRepositoryDebugSnapshot(snapshot)
         lastUpdatedAt = snapshot.lastRefreshAt ?? lastUpdatedAt
 
         if let lastRefreshAt = snapshot.lastRefreshAt {
@@ -1019,6 +1087,49 @@ final class AppModel {
         }
 
         isShowingStaleData = snapshot.isUsingStaleCache || isGamesStale || isNotificationsStale
+    }
+
+    private func applyRepositoryDebugSnapshot(_ snapshot: RepositoryDebugSnapshot) {
+        debugActiveDataSource = snapshot.activeSource.rawValue
+        debugDeliverySource = snapshot.deliverySource.rawValue
+        debugBaseURL = snapshot.baseURL
+        debugBootstrapAPIEnabled = snapshot.bootstrapAPIEnabled ? "사용" : "비활성"
+        debugBootstrapETag = snapshot.bootstrapRefreshETag ?? "없음"
+        debugBootstrapLastFetchAt = snapshot.bootstrapLastFetchAt
+        debugBootstrapLastWriteAt = snapshot.bootstrapLastWriteAt
+        debugBootstrapLastResult = snapshot.bootstrapLastResult.rawValue
+        debugLocalBootstrapSource = snapshot.localBootstrapSource?.rawValue ?? "사용 안 함"
+        debugLocalBootstrapMessage = snapshot.localBootstrapMessage
+        debugLocalBootstrapResolvedPath = snapshot.localBootstrapResolvedPath
+        debugLocalBootstrapLoadedAt = snapshot.localBootstrapLoadedAt
+    }
+
+    private func shouldReloadBootstrapForLocalData() async -> Bool {
+        if repository is BundledJSONKBORepository {
+            return true
+        }
+
+        guard let repositoryRuntimeState else { return false }
+        let snapshot = await repositoryRuntimeState.snapshot()
+        return snapshot.localBootstrapSource != nil ||
+            (snapshot.activeSource == .mock && snapshot.baseURL == nil)
+    }
+
+    private func reloadBootstrapFromRepository() async throws {
+        let bootstrap = try await repository.fetchBootstrapData()
+        if hasLoaded,
+           let repositoryRuntimeState,
+           (await repositoryRuntimeState.snapshot()).bootstrapLastResult == .notModified {
+            return
+        }
+        apply(bootstrap)
+        invalidateMonthlyScheduleCache()
+    }
+
+    private func invalidateMonthlyScheduleCache() {
+        monthlyScheduleGames = [:]
+        monthlyScheduleDebugSnapshots = [:]
+        failedScheduleMonths = []
     }
 
     private var isGamesStale: Bool {
@@ -1065,6 +1176,12 @@ final class AppModel {
         case .notifications:
             loadErrorMessage = "최신 알림 데이터를 가져오지 못했습니다."
         }
+    }
+
+    private static func localBootstrapDocumentsPath() -> String? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("LocalBootstrapData.json", isDirectory: false)
+            .path
     }
 
     private func staleStatusMessage(lastRefreshAt: Date?) -> String {
@@ -1495,6 +1612,9 @@ final class AppModel {
         probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:],
         recentResultsLimit: Int = 5
     ) -> TeamStandingsSnapshot {
+        let seasonCompletedGames = regularSeasonGames
+            .filter { $0.involves(teamID: team.id) }
+            .filter(\.hasCompleteFinalScore)
         let wins = completedGames.reduce(into: 0) { partialResult, game in
             if game.finalResult(for: team.id) == .win {
                 partialResult += 1
@@ -1514,6 +1634,30 @@ final class AppModel {
                 partialResult += 1
             }
         }
+        let runsScored = seasonCompletedGames.reduce(into: 0) { partialResult, game in
+            guard let awayScore = game.awayScore,
+                  let homeScore = game.homeScore else {
+                return
+            }
+
+            if game.awayTeam.id == team.id {
+                partialResult += awayScore
+            } else if game.homeTeam.id == team.id {
+                partialResult += homeScore
+            }
+        }
+        let runsAllowed = seasonCompletedGames.reduce(into: 0) { partialResult, game in
+            guard let awayScore = game.awayScore,
+                  let homeScore = game.homeScore else {
+                return
+            }
+
+            if game.awayTeam.id == team.id {
+                partialResult += homeScore
+            } else if game.homeTeam.id == team.id {
+                partialResult += awayScore
+            }
+        }
 
         let probabilitySignal: LocalStandingsProbabilitySignal? = {
             guard let canonicalID = Self.canonicalTeamIdentifier(team.id) else {
@@ -1528,21 +1672,50 @@ final class AppModel {
             wins: wins,
             losses: losses,
             ties: ties,
+            runsScored: runsScored,
+            runsAllowed: runsAllowed,
             remainingRegularSeasonGames: max(0, 144 - (wins + losses + ties)),
             recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(recentResultsLimit)),
             unknownClassificationGames: probabilitySignal?.unknownClassificationGames ?? 0,
             rankingResolution: probabilitySignal?.rankingResolution ?? .resolved,
             rankingResolutionPosition: probabilitySignal?.rankingResolutionPosition,
             postseasonQualificationProbability: probabilitySignal?.postseasonQualificationProbability,
+            postseasonQualificationStatus: probabilitySignal?.postseasonQualificationStatus,
             postseasonProbabilityUnavailableReason: probabilitySignal?.postseasonProbabilityUnavailableReason
         )
     }
 
-    private func refreshLocalStandingsProbabilitySignals() {
+    private func refreshLocalStandingsProbabilitySignalsSynchronously() {
+        localStandingsProbabilityRefreshTask?.cancel()
         localStandingsProbabilitySignalsByTeamID = localPostseasonQualificationCalculator.makeSignals(
             teams: teams,
             games: games
         )
+    }
+
+    private func scheduleLocalStandingsProbabilityRefresh() {
+        localStandingsProbabilityRefreshTask?.cancel()
+        localStandingsProbabilityGeneration += 1
+        let generation = localStandingsProbabilityGeneration
+        let teams = teams
+        let games = games
+        let calculator = localPostseasonQualificationCalculator
+
+        localStandingsProbabilitySignalsByTeamID = [:]
+        localStandingsProbabilityRefreshTask = Task(priority: .utility) { [weak self] in
+            let signals = await Task.detached(priority: .utility) {
+                calculator.makeSignals(teams: teams, games: games)
+            }.value
+
+            await MainActor.run {
+                guard let self,
+                      self.localStandingsProbabilityGeneration == generation else {
+                    return
+                }
+                self.localStandingsProbabilitySignalsByTeamID = signals
+                self.localStandingsProbabilityRefreshTask = nil
+            }
+        }
     }
 
     private func standingsComparator(_ lhs: TeamStandingsSnapshot, _ rhs: TeamStandingsSnapshot) -> Bool {

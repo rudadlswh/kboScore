@@ -310,6 +310,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
     let wins: Int
     let losses: Int
     let ties: Int
+    let runsScored: Int?
+    let runsAllowed: Int?
     let remainingRegularSeasonGames: Int
     let recentResults: [String]
     let unknownClassificationGames: Int
@@ -324,6 +326,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
         case wins
         case losses
         case ties
+        case runsScored
+        case runsAllowed
         case remainingRegularSeasonGames
         case recentResults
         case unknownClassificationGames
@@ -340,6 +344,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
         wins = try container.decode(Int.self, forKey: .wins)
         losses = try container.decode(Int.self, forKey: .losses)
         ties = try container.decodeIfPresent(Int.self, forKey: .ties) ?? 0
+        runsScored = try container.decodeIfPresent(Int.self, forKey: .runsScored)
+        runsAllowed = try container.decodeIfPresent(Int.self, forKey: .runsAllowed)
         remainingRegularSeasonGames = try container.decodeIfPresent(Int.self, forKey: .remainingRegularSeasonGames) ?? 0
         recentResults = try container.decodeIfPresent([String].self, forKey: .recentResults) ?? []
         unknownClassificationGames = try container.decodeIfPresent(Int.self, forKey: .unknownClassificationGames) ?? 0
@@ -471,6 +477,8 @@ enum KBODataMapper {
                 wins: item.wins,
                 losses: item.losses,
                 ties: item.ties,
+                runsScored: item.runsScored,
+                runsAllowed: item.runsAllowed,
                 remainingRegularSeasonGames: item.remainingRegularSeasonGames,
                 recentResults: item.recentResults.compactMap(mapRecentResult),
                 unknownClassificationGames: item.unknownClassificationGames,
