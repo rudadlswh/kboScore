@@ -55,7 +55,7 @@ struct HomeView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(appModel.filteredHomeGames) { game in
                                 NavigationLink(value: game.id) {
-                                    GameCardView(summary: game)
+                                    GameCardView(summary: game, showsHomeTeamBadge: true)
                                 }
                                 .buttonStyle(.plain)
                             }

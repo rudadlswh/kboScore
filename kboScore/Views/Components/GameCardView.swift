@@ -10,6 +10,12 @@ import SwiftUI
 struct GameCardView: View {
     @Environment(AppModel.self) private var appModel
     let summary: GameSummary
+    let showsHomeTeamBadge: Bool
+
+    init(summary: GameSummary, showsHomeTeamBadge: Bool = false) {
+        self.summary = summary
+        self.showsHomeTeamBadge = showsHomeTeamBadge
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -38,7 +44,7 @@ struct GameCardView: View {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
                     TeamRow(team: summary.awayTeam, score: summary.awayScore, status: summary.status)
-                    TeamRow(team: summary.homeTeam, score: summary.homeScore, status: summary.status)
+                    TeamRow(team: summary.homeTeam, score: summary.homeScore, status: summary.status, showsHomeBadge: showsHomeTeamBadge)
                 }
 
                 Spacer(minLength: 6)
@@ -86,13 +92,21 @@ private struct TeamRow: View {
     let team: Team
     let score: Int?
     let status: GameStatus
+    var showsHomeBadge: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
             TeamMarkView(team: team, size: 28)
-            Text(team.name)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+            HStack(spacing: 4) {
+                Text(team.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                if showsHomeBadge {
+                    HomeTeamBadge()
+                }
+            }
             Spacer(minLength: 8)
             if status != .upcoming, let score {
                 Text("\(score)")
@@ -100,6 +114,25 @@ private struct TeamRow: View {
                     .monospacedDigit()
             }
         }
+    }
+}
+
+private struct HomeTeamBadge: View {
+    var body: some View {
+        Text("홈")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(Color.secondary.opacity(0.14))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
+            )
+            .accessibilityLabel("홈팀")
     }
 }
 

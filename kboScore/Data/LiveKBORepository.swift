@@ -397,6 +397,7 @@ private struct BootstrapCachePayload: Codable, Sendable {
     nonisolated fileprivate static func makeGameDTO(from game: GameDetail) -> KBOGameDTO {
         KBOGameDTO(
             id: game.id,
+            providerGameID: game.providerGameID,
             scheduledStart: game.scheduledStart,
             venue: game.venue,
             awayTeamID: game.awayTeam.id,

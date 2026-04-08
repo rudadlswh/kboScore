@@ -82,6 +82,7 @@ final class AppModel {
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
+    private let officialGameCenterClient = OfficialKBOGameCenterClient()
     private let localPostseasonQualificationCalculator = LocalPostseasonQualificationCalculator()
     private let calendar = Calendar(identifier: .gregorian)
     private let scheduleTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
@@ -210,7 +211,12 @@ final class AppModel {
 
         do {
             let bootstrap = try await repository.fetchBootstrapData()
-            apply(bootstrap)
+            let snapshot = await repositoryRuntimeState?.snapshot()
+            let normalizedBootstrap = await reconcileOfficialScheduleStartTimesIfNeeded(
+                in: bootstrap,
+                snapshot: snapshot
+            )
+            apply(normalizedBootstrap)
             hasLoaded = true
             let refreshedAt = Date()
             markRefreshSuccess(for: .games, at: refreshedAt, isStale: false)
@@ -691,6 +697,7 @@ final class AppModel {
                     gameCount: dayGames.count,
                     dominantStatus: dominantStatus(for: dayGames),
                     opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
+                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter),
                     favoriteTeamResult: calendarFavoriteTeamResult(for: dayGames)
                 )
             )
@@ -991,29 +998,38 @@ final class AppModel {
 
         do {
             let schedule = try await repository.fetchMonthlySchedule(for: key)
-            monthlyScheduleGames[key] = schedule.sorted { $0.scheduledStart < $1.scheduledStart }
+            let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
+            let normalizedSchedule = await reconcileOfficialScheduleStartTimesIfNeeded(
+                in: schedule,
+                snapshot: snapshot
+            )
+            monthlyScheduleGames[key] = normalizedSchedule.sorted { $0.scheduledStart < $1.scheduledStart }
             failedScheduleMonths.remove(key)
-            await refreshMonthlyScheduleDebugInfo(for: key)
             await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         } catch {
             failedScheduleMonths.insert(key)
-            await refreshMonthlyScheduleDebugInfo(for: key)
+            let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
             if monthlyScheduleGames[key] == nil {
                 let fallback = fallbackMonthSchedule(for: key)
                 if fallback.isEmpty == false {
-                    monthlyScheduleGames[key] = fallback
+                    let normalizedFallback = await reconcileOfficialScheduleStartTimesIfNeeded(
+                        in: fallback,
+                        snapshot: snapshot
+                    )
+                    monthlyScheduleGames[key] = normalizedFallback
                     await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
                 }
             }
         }
     }
 
-    private func refreshMonthlyScheduleDebugInfo(for key: KBOMonthScheduleKey) async {
-        guard let repositoryRuntimeState else { return }
+    private func refreshMonthlyScheduleDebugInfo(for key: KBOMonthScheduleKey) async -> RepositoryDebugSnapshot? {
+        guard let repositoryRuntimeState else { return nil }
         let snapshot = await repositoryRuntimeState.snapshot()
         monthlyScheduleDebugSnapshots[key] = snapshot
         applyRepositoryDebugSnapshot(snapshot)
         lastUpdatedAt = snapshot.lastRefreshAt ?? lastUpdatedAt
+        return snapshot
     }
 
     private func refreshGames(for scopes: Set<RefreshScope>) async {
@@ -1031,7 +1047,12 @@ final class AppModel {
                 }
                 await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
             } else {
-                games = try await repository.fetchGames()
+                let fetchedGames = try await repository.fetchGames()
+                let snapshot = await repositoryRuntimeState?.snapshot()
+                games = await reconcileOfficialScheduleStartTimesIfNeeded(
+                    in: fetchedGames,
+                    snapshot: snapshot
+                )
                 scheduleLocalStandingsProbabilityRefresh()
                 if repositoryRuntimeState == nil {
                     markRefreshSuccess(for: .games, at: Date(), isStale: false)
@@ -1122,7 +1143,12 @@ final class AppModel {
            (await repositoryRuntimeState.snapshot()).bootstrapLastResult == .notModified {
             return
         }
-        apply(bootstrap)
+        let snapshot = await repositoryRuntimeState?.snapshot()
+        let normalizedBootstrap = await reconcileOfficialScheduleStartTimesIfNeeded(
+            in: bootstrap,
+            snapshot: snapshot
+        )
+        apply(normalizedBootstrap)
         invalidateMonthlyScheduleCache()
     }
 
@@ -1268,6 +1294,7 @@ final class AppModel {
                 gameCount: day.gameCount,
                 dominantStatus: favoriteTeamWidgetGameStatus(day.dominantStatus),
                 opponentTeamID: day.opponentTeam?.id,
+                favoriteTeamIsHome: day.favoriteTeamIsHome,
                 favoriteTeamResult: favoriteTeamWidgetTeamResult(day.favoriteTeamResult)
             )
         }
@@ -1590,6 +1617,21 @@ final class AppModel {
         return nil
     }
 
+    private func calendarFavoriteTeamIsHome(for games: [GameDetail], filter: ScheduleFilter) -> Bool? {
+        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
+
+        for game in games {
+            if game.homeTeam.id == favoriteTeamID {
+                return true
+            }
+            if game.awayTeam.id == favoriteTeamID {
+                return false
+            }
+        }
+
+        return nil
+    }
+
     private func makeStandingsSnapshot(
         for team: Team,
         probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
@@ -1813,6 +1855,50 @@ final class AppModel {
                 return components.year == key.year && components.month == key.month
             }
             .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    private func reconcileOfficialScheduleStartTimesIfNeeded(
+        in games: [GameDetail],
+        snapshot: RepositoryDebugSnapshot?
+    ) async -> [GameDetail] {
+        guard shouldReconcileOfficialScheduleStartTimes(snapshot: snapshot, games: games) else {
+            return games
+        }
+
+        return await officialGameCenterClient.reconcileScheduledStartTimes(in: games)
+    }
+
+    private func reconcileOfficialScheduleStartTimesIfNeeded(
+        in bootstrap: KBOBootstrapData,
+        snapshot: RepositoryDebugSnapshot?
+    ) async -> KBOBootstrapData {
+        let normalizedGames = await reconcileOfficialScheduleStartTimesIfNeeded(
+            in: bootstrap.games,
+            snapshot: snapshot
+        )
+        return KBOBootstrapData(
+            teams: bootstrap.teams,
+            games: normalizedGames,
+            notifications: bootstrap.notifications,
+            settings: bootstrap.settings
+        )
+    }
+
+    private func shouldReconcileOfficialScheduleStartTimes(
+        snapshot: RepositoryDebugSnapshot?,
+        games: [GameDetail]
+    ) -> Bool {
+        guard isRunningTests == false,
+              games.isEmpty == false,
+              let snapshot else {
+            return false
+        }
+
+        if snapshot.activeSource != .live {
+            return true
+        }
+
+        return snapshot.deliverySource != .live
     }
 
     private func scheduleDayKey(for date: Date) -> String {

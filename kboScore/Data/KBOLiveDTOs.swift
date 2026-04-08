@@ -122,6 +122,7 @@ struct KBOGameEventDTO: Codable, Sendable {
 
 struct KBOGameDTO: Codable, Sendable {
     let id: UUID
+    let providerGameID: String?
     let scheduledStart: Date
     let venue: String?
     let awayTeamID: String
@@ -140,6 +141,10 @@ struct KBOGameDTO: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case providerGameID
+        case provider_game_id
+        case officialProviderGameID
+        case official_provider_game_id
         case scheduledStart
         case venue
         case awayTeamID
@@ -162,6 +167,7 @@ struct KBOGameDTO: Codable, Sendable {
 
     nonisolated init(
         id: UUID,
+        providerGameID: String? = nil,
         scheduledStart: Date,
         venue: String?,
         awayTeamID: String,
@@ -179,6 +185,7 @@ struct KBOGameDTO: Codable, Sendable {
         note: String?
     ) {
         self.id = id
+        self.providerGameID = providerGameID
         self.scheduledStart = scheduledStart
         self.venue = venue
         self.awayTeamID = awayTeamID
@@ -199,9 +206,19 @@ struct KBOGameDTO: Codable, Sendable {
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        let decodedOfficialProviderGameID = try container.decodeIfPresent(String.self, forKey: .officialProviderGameID)
+        let decodedOfficialProviderGameIDSnake = try container.decodeIfPresent(String.self, forKey: .official_provider_game_id)
+        let decodedProviderGameID = try container.decodeIfPresent(String.self, forKey: .providerGameID)
+        let decodedProviderGameIDSnake = try container.decodeIfPresent(String.self, forKey: .provider_game_id)
+        let decodedNote = try container.decodeIfPresent(String.self, forKey: .note)
+        providerGameID = decodedOfficialProviderGameID?.nilIfBlank ??
+            decodedOfficialProviderGameIDSnake?.nilIfBlank ??
+            decodedProviderGameID?.nilIfBlank ??
+            decodedProviderGameIDSnake?.nilIfBlank ??
+            Self.providerGameID(from: decodedNote)
         scheduledStart = try container.decodeFlexibleDate(forKey: .scheduledStart) ?? .distantPast
         venue = try container.decodeIfPresent(String.self, forKey: .venue)
-        note = try container.decodeIfPresent(String.self, forKey: .note)
+        note = decodedNote
         let providerTeamIDs = Self.providerTeamIDs(from: note)
         let decodedAwayTeamID = (try container.decodeIfPresent(String.self, forKey: .awayTeamID))?.nilIfBlank
         let decodedAwayTeamId = (try container.decodeIfPresent(String.self, forKey: .awayTeamId))?.nilIfBlank
@@ -261,6 +278,7 @@ struct KBOGameDTO: Codable, Sendable {
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(providerGameID, forKey: .providerGameID)
         try container.encode(scheduledStart, forKey: .scheduledStart)
         try container.encodeIfPresent(venue, forKey: .venue)
         try container.encode(awayTeamID, forKey: .awayTeamID)
@@ -276,6 +294,20 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(highlightText, forKey: .highlightText)
         try container.encode(events, forKey: .events)
         try container.encodeIfPresent(note, forKey: .note)
+    }
+
+    private nonisolated static func providerGameID(from note: String?) -> String? {
+        guard let note,
+              let range = note.range(of: "provider_game_id=") else {
+            return nil
+        }
+
+        let suffix = note[range.upperBound...]
+        let token = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first
+        guard let token, token.isEmpty == false else {
+            return nil
+        }
+        return String(token)
     }
 }
 
@@ -553,7 +585,8 @@ enum KBODataMapper {
             outs: dto.outs,
             highlightText: highlight,
             events: dto.events.map(mapEvent).sorted { $0.timestamp > $1.timestamp },
-            note: note
+            note: note,
+            providerGameID: dto.providerGameID
         )
     }
 

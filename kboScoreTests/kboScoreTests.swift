@@ -998,6 +998,61 @@ struct kboScoreTests {
         #expect(body?.contains("date=20260323") == true)
     }
 
+    @Test func officialGameCenterClientReconcilesScheduleStartTimeFromOfficialGameList() async throws {
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328LGNC0",
+              "G_TM": "17:00",
+              "S_NM": "창원",
+              "AWAY_ID": "LG",
+              "HOME_ID": "NC",
+              "AWAY_NM": "LG",
+              "HOME_NM": "NC",
+              "GAME_STATE_SC": "1",
+              "CANCEL_SC_NM": "",
+              "T_SCORE_CN": "0",
+              "B_SCORE_CN": "0"
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "창원",
+            awayTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            homeTeam: Team(id: "nc", name: "NC 다이노스", shortName: "NC", englishName: "NC Dinos", markText: "NC"),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+
+        let reconciled = await client.reconcileScheduledStartTimes(in: [game])
+
+        #expect(reconciled.count == 1)
+        #expect(reconciled[0].scheduledStart == isoDate("2026-03-28T17:00:00+09:00"))
+    }
+
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
@@ -3008,7 +3063,8 @@ private func makeGameDetail(
         outs: nil,
         highlightText: nil,
         events: [],
-        note: note
+        note: note,
+        providerGameID: nil
     )
 }
 
