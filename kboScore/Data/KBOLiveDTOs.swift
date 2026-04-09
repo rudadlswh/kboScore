@@ -13,28 +13,60 @@ struct KBOTeamDTO: Codable, Sendable {
     let shortName: String
     let englishName: String
     let markText: String
+    let previousRegularSeasonRank: Int?
 
     nonisolated init(
         id: String,
         name: String,
         shortName: String,
         englishName: String,
-        markText: String
+        markText: String,
+        previousRegularSeasonRank: Int? = nil
     ) {
         self.id = id
         self.name = name
         self.shortName = shortName
         self.englishName = englishName
         self.markText = markText
+        self.previousRegularSeasonRank = previousRegularSeasonRank
     }
 
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? id.uppercased()
-        shortName = try container.decodeIfPresent(String.self, forKey: .shortName) ?? name
-        englishName = try container.decodeIfPresent(String.self, forKey: .englishName) ?? name
-        markText = try container.decodeIfPresent(String.self, forKey: .markText) ?? String(shortName.prefix(3)).uppercased()
+        shortName = try container.decodeIfPresent(String.self, forKey: .shortName) ??
+            container.decodeIfPresent(String.self, forKey: .short_name) ?? name
+        englishName = try container.decodeIfPresent(String.self, forKey: .englishName) ??
+            container.decodeIfPresent(String.self, forKey: .english_name) ?? name
+        markText = try container.decodeIfPresent(String.self, forKey: .markText) ??
+            container.decodeIfPresent(String.self, forKey: .mark_text) ??
+            String(shortName.prefix(3)).uppercased()
+        previousRegularSeasonRank = try container.decodeIfPresent(Int.self, forKey: .previousRegularSeasonRank) ??
+            container.decodeIfPresent(Int.self, forKey: .previous_regular_season_rank)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(shortName, forKey: .shortName)
+        try container.encode(englishName, forKey: .englishName)
+        try container.encode(markText, forKey: .markText)
+        try container.encodeIfPresent(previousRegularSeasonRank, forKey: .previousRegularSeasonRank)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case shortName
+        case short_name
+        case englishName
+        case english_name
+        case markText
+        case mark_text
+        case previousRegularSeasonRank
+        case previous_regular_season_rank
     }
 }
 
@@ -90,6 +122,7 @@ struct KBOGameEventDTO: Codable, Sendable {
 
 struct KBOGameDTO: Codable, Sendable {
     let id: UUID
+    let providerGameID: String?
     let scheduledStart: Date
     let venue: String?
     let awayTeamID: String
@@ -108,6 +141,10 @@ struct KBOGameDTO: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case providerGameID
+        case provider_game_id
+        case officialProviderGameID
+        case official_provider_game_id
         case scheduledStart
         case venue
         case awayTeamID
@@ -130,6 +167,7 @@ struct KBOGameDTO: Codable, Sendable {
 
     nonisolated init(
         id: UUID,
+        providerGameID: String? = nil,
         scheduledStart: Date,
         venue: String?,
         awayTeamID: String,
@@ -147,6 +185,7 @@ struct KBOGameDTO: Codable, Sendable {
         note: String?
     ) {
         self.id = id
+        self.providerGameID = providerGameID
         self.scheduledStart = scheduledStart
         self.venue = venue
         self.awayTeamID = awayTeamID
@@ -167,9 +206,19 @@ struct KBOGameDTO: Codable, Sendable {
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        let decodedOfficialProviderGameID = try container.decodeIfPresent(String.self, forKey: .officialProviderGameID)
+        let decodedOfficialProviderGameIDSnake = try container.decodeIfPresent(String.self, forKey: .official_provider_game_id)
+        let decodedProviderGameID = try container.decodeIfPresent(String.self, forKey: .providerGameID)
+        let decodedProviderGameIDSnake = try container.decodeIfPresent(String.self, forKey: .provider_game_id)
+        let decodedNote = try container.decodeIfPresent(String.self, forKey: .note)
+        providerGameID = decodedOfficialProviderGameID?.nilIfBlank ??
+            decodedOfficialProviderGameIDSnake?.nilIfBlank ??
+            decodedProviderGameID?.nilIfBlank ??
+            decodedProviderGameIDSnake?.nilIfBlank ??
+            Self.providerGameID(from: decodedNote)
         scheduledStart = try container.decodeFlexibleDate(forKey: .scheduledStart) ?? .distantPast
         venue = try container.decodeIfPresent(String.self, forKey: .venue)
-        note = try container.decodeIfPresent(String.self, forKey: .note)
+        note = decodedNote
         let providerTeamIDs = Self.providerTeamIDs(from: note)
         let decodedAwayTeamID = (try container.decodeIfPresent(String.self, forKey: .awayTeamID))?.nilIfBlank
         let decodedAwayTeamId = (try container.decodeIfPresent(String.self, forKey: .awayTeamId))?.nilIfBlank
@@ -229,6 +278,7 @@ struct KBOGameDTO: Codable, Sendable {
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(providerGameID, forKey: .providerGameID)
         try container.encode(scheduledStart, forKey: .scheduledStart)
         try container.encodeIfPresent(venue, forKey: .venue)
         try container.encode(awayTeamID, forKey: .awayTeamID)
@@ -244,6 +294,20 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(highlightText, forKey: .highlightText)
         try container.encode(events, forKey: .events)
         try container.encodeIfPresent(note, forKey: .note)
+    }
+
+    private nonisolated static func providerGameID(from note: String?) -> String? {
+        guard let note,
+              let range = note.range(of: "provider_game_id=") else {
+            return nil
+        }
+
+        let suffix = note[range.upperBound...]
+        let token = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first
+        guard let token, token.isEmpty == false else {
+            return nil
+        }
+        return String(token)
     }
 }
 
@@ -278,6 +342,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
     let wins: Int
     let losses: Int
     let ties: Int
+    let runsScored: Int?
+    let runsAllowed: Int?
     let remainingRegularSeasonGames: Int
     let recentResults: [String]
     let unknownClassificationGames: Int
@@ -292,6 +358,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
         case wins
         case losses
         case ties
+        case runsScored
+        case runsAllowed
         case remainingRegularSeasonGames
         case recentResults
         case unknownClassificationGames
@@ -308,6 +376,8 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
         wins = try container.decode(Int.self, forKey: .wins)
         losses = try container.decode(Int.self, forKey: .losses)
         ties = try container.decodeIfPresent(Int.self, forKey: .ties) ?? 0
+        runsScored = try container.decodeIfPresent(Int.self, forKey: .runsScored)
+        runsAllowed = try container.decodeIfPresent(Int.self, forKey: .runsAllowed)
         remainingRegularSeasonGames = try container.decodeIfPresent(Int.self, forKey: .remainingRegularSeasonGames) ?? 0
         recentResults = try container.decodeIfPresent([String].self, forKey: .recentResults) ?? []
         unknownClassificationGames = try container.decodeIfPresent(Int.self, forKey: .unknownClassificationGames) ?? 0
@@ -439,6 +509,8 @@ enum KBODataMapper {
                 wins: item.wins,
                 losses: item.losses,
                 ties: item.ties,
+                runsScored: item.runsScored,
+                runsAllowed: item.runsAllowed,
                 remainingRegularSeasonGames: item.remainingRegularSeasonGames,
                 recentResults: item.recentResults.compactMap(mapRecentResult),
                 unknownClassificationGames: item.unknownClassificationGames,
@@ -481,7 +553,8 @@ enum KBODataMapper {
             name: dto.name,
             shortName: dto.shortName,
             englishName: dto.englishName,
-            markText: dto.markText
+            markText: dto.markText,
+            previousRegularSeasonRank: dto.previousRegularSeasonRank
         )
     }
 
@@ -512,7 +585,8 @@ enum KBODataMapper {
             outs: dto.outs,
             highlightText: highlight,
             events: dto.events.map(mapEvent).sorted { $0.timestamp > $1.timestamp },
-            note: note
+            note: note,
+            providerGameID: dto.providerGameID
         )
     }
 

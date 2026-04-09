@@ -116,8 +116,9 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let highlightText: String?
     let events: [GameEvent]
     let note: String?
+    let providerGameID: String?
 
-    var isRegularSeason: Bool {
+    nonisolated var isRegularSeason: Bool {
         seasonClassification.isRegularSeason
     }
 
@@ -154,8 +155,12 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         return "KBO LIVE\n\(scoreText)\n\(stateText)\n\(venue)"
     }
 
-    var hasCompleteFinalScore: Bool {
+    nonisolated var hasCompleteFinalScore: Bool {
         status == .final && awayScore != nil && homeScore != nil
+    }
+
+    var officialGameCenterID: String? {
+        providerGameID ?? Self.providerGameID(from: note)
     }
 
     var finalWinningTeam: Team? {
@@ -183,6 +188,20 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         }
         guard let winningTeam = finalWinningTeam else { return nil }
         return winningTeam.id == teamID ? .win : .loss
+    }
+
+    nonisolated private static func providerGameID(from note: String?) -> String? {
+        guard let note,
+              let range = note.range(of: "provider_game_id=") else {
+            return nil
+        }
+
+        let suffix = note[range.upperBound...]
+        let token = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first
+        guard let token, token.isEmpty == false else {
+            return nil
+        }
+        return String(token)
     }
 }
 

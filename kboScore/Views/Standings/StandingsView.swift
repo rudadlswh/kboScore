@@ -82,7 +82,7 @@ private struct StandingsRow: View {
                     standingsMetric(title: "승률", value: snapshot.winPercentageText)
                     standingsMetric(title: "최근", value: snapshot.recentResultsText)
                     if let postseasonValue = snapshot.postseasonQualificationText {
-                        standingsMetric(title: "가을야구", value: postseasonValue)
+                        standingsMetric(title: "포스트시즌 확률", value: postseasonValue)
                     }
                 }
 

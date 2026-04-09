@@ -330,6 +330,9 @@ private struct ScheduleCalendarCardView: View {
         if isSelected(day) {
             return appModel.currentTheme.accent
         }
+        if day.isToday {
+            return .clear
+        }
         if let favoriteTeamResult = day.favoriteTeamResult {
             switch favoriteTeamResult {
             case .win:
@@ -340,18 +343,15 @@ private struct ScheduleCalendarCardView: View {
                 return appModel.currentTheme.chipBackground
             }
         }
-        if day.isToday {
-            return appModel.currentTheme.chipBackground
-        }
         return Color.clear
     }
 
     private func dayBorderColor(for day: MyTeamCalendarDay) -> Color {
+        if day.isToday {
+            return KBOLivePalette.upcoming.opacity(0.9)
+        }
         if isSelected(day) {
             return appModel.currentTheme.accent
-        }
-        if day.isToday {
-            return appModel.currentTheme.accent.opacity(0.28)
         }
         return .clear
     }

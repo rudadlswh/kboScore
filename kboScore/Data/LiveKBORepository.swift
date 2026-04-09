@@ -20,12 +20,94 @@ enum RepositoryDeliverySourceKind: String, Sendable {
     case mockFallback = "목 데이터 폴백"
 }
 
+enum LocalBootstrapSourceKind: String, Sendable {
+    case documents = "문서 JSON"
+    case bundled = "번들 JSON"
+}
+
+enum BootstrapRefreshResultKind: String, Sendable, Codable {
+    case idle = "대기"
+    case updated = "업데이트됨"
+    case notModified = "변경 없음"
+    case failed = "실패"
+    case disabled = "비활성"
+}
+
+struct BootstrapRefreshDebugSnapshot: Sendable {
+    let isEnabled: Bool
+    let etag: String?
+    let lastFetchAt: Date?
+    let lastWriteAt: Date?
+    let lastResult: BootstrapRefreshResultKind
+}
+
+private struct PersistedBootstrapRefreshState: Codable, Sendable {
+    let etag: String?
+    let lastFetchAt: Date?
+    let lastWriteAt: Date?
+    let lastResult: BootstrapRefreshResultKind
+}
+
+struct BootstrapRefreshStateStore: Sendable {
+    private let defaults: UserDefaults
+    private let storageKey: String
+
+    init(
+        baseURL: URL,
+        defaults: UserDefaults = .standard
+    ) {
+        self.defaults = defaults
+        self.storageKey = "kbo_live_bootstrap_refresh_state::\(baseURL.absoluteString)"
+    }
+
+    func load(isEnabled: Bool) -> BootstrapRefreshDebugSnapshot {
+        guard let data = defaults.data(forKey: storageKey),
+              let persisted = try? JSONDecoder().decode(PersistedBootstrapRefreshState.self, from: data) else {
+            return BootstrapRefreshDebugSnapshot(
+                isEnabled: isEnabled,
+                etag: nil,
+                lastFetchAt: nil,
+                lastWriteAt: nil,
+                lastResult: isEnabled ? .idle : .disabled
+            )
+        }
+
+        return BootstrapRefreshDebugSnapshot(
+            isEnabled: isEnabled,
+            etag: persisted.etag,
+            lastFetchAt: persisted.lastFetchAt,
+            lastWriteAt: persisted.lastWriteAt,
+            lastResult: isEnabled ? persisted.lastResult : .disabled
+        )
+    }
+
+    func save(_ snapshot: BootstrapRefreshDebugSnapshot) {
+        let persisted = PersistedBootstrapRefreshState(
+            etag: snapshot.etag,
+            lastFetchAt: snapshot.lastFetchAt,
+            lastWriteAt: snapshot.lastWriteAt,
+            lastResult: snapshot.lastResult
+        )
+        guard let data = try? JSONEncoder().encode(persisted) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+}
+
 struct RepositoryDebugSnapshot: Sendable {
     let activeSource: RepositoryDataSourceKind
     let deliverySource: RepositoryDeliverySourceKind
     let baseURL: String?
     let lastRefreshAt: Date?
     let isUsingStaleCache: Bool
+    let localBootstrapSource: LocalBootstrapSourceKind?
+    let localBootstrapMessage: String?
+    let localBootstrapResolvedPath: String?
+    let localBootstrapLoadedAt: Date?
+    let bootstrapAPIEnabled: Bool
+    let bootstrapRefreshETag: String?
+    let bootstrapLastFetchAt: Date?
+    let bootstrapLastWriteAt: Date?
+    let bootstrapLastResult: BootstrapRefreshResultKind
 }
 
 actor RepositoryRuntimeState {
@@ -34,11 +116,21 @@ actor RepositoryRuntimeState {
     let baseURL: String?
     private(set) var lastRefreshAt: Date?
     private(set) var isUsingStaleCache: Bool
+    private(set) var localBootstrapSource: LocalBootstrapSourceKind?
+    private(set) var localBootstrapMessage: String?
+    private(set) var localBootstrapResolvedPath: String?
+    private(set) var localBootstrapLoadedAt: Date?
+    private(set) var bootstrapAPIEnabled: Bool
+    private(set) var bootstrapRefreshETag: String?
+    private(set) var bootstrapLastFetchAt: Date?
+    private(set) var bootstrapLastWriteAt: Date?
+    private(set) var bootstrapLastResult: BootstrapRefreshResultKind
 
     init(
         activeSource: RepositoryDataSourceKind,
         baseURL: String?,
-        deliverySource: RepositoryDeliverySourceKind? = nil
+        deliverySource: RepositoryDeliverySourceKind? = nil,
+        bootstrapRefreshSnapshot: BootstrapRefreshDebugSnapshot? = nil
     ) {
         self.activeSource = activeSource
         self.baseURL = baseURL
@@ -54,18 +146,45 @@ actor RepositoryRuntimeState {
         }()
         self.lastRefreshAt = nil
         self.isUsingStaleCache = false
+        self.localBootstrapSource = nil
+        self.localBootstrapMessage = nil
+        self.localBootstrapResolvedPath = nil
+        self.localBootstrapLoadedAt = nil
+        self.bootstrapAPIEnabled = bootstrapRefreshSnapshot?.isEnabled ?? false
+        self.bootstrapRefreshETag = bootstrapRefreshSnapshot?.etag
+        self.bootstrapLastFetchAt = bootstrapRefreshSnapshot?.lastFetchAt
+        self.bootstrapLastWriteAt = bootstrapRefreshSnapshot?.lastWriteAt
+        self.bootstrapLastResult = bootstrapRefreshSnapshot?.lastResult ?? (baseURL == nil ? .disabled : .idle)
     }
 
     func record(
         source: RepositoryDataSourceKind,
         delivery: RepositoryDeliverySourceKind,
         refreshedAt: Date = .now,
-        isUsingStaleCache: Bool = false
+        isUsingStaleCache: Bool = false,
+        localBootstrapSource: LocalBootstrapSourceKind? = nil,
+        localBootstrapMessage: String? = nil,
+        localBootstrapResolvedPath: String? = nil,
+        localBootstrapLoadedAt: Date? = nil
     ) {
         activeSource = source
         deliverySource = delivery
         lastRefreshAt = refreshedAt
         self.isUsingStaleCache = isUsingStaleCache
+        if let localBootstrapSource {
+            self.localBootstrapSource = localBootstrapSource
+        }
+        if localBootstrapMessage != nil {
+            self.localBootstrapMessage = localBootstrapMessage?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty == true ? nil : localBootstrapMessage
+        }
+        if let localBootstrapResolvedPath {
+            self.localBootstrapResolvedPath = localBootstrapResolvedPath
+        }
+        if let localBootstrapLoadedAt {
+            self.localBootstrapLoadedAt = localBootstrapLoadedAt
+        }
     }
 
     func recordCacheHit(refreshedAt: Date, isStale: Bool) {
@@ -74,13 +193,31 @@ actor RepositoryRuntimeState {
         isUsingStaleCache = isStale
     }
 
+    func recordBootstrapRefresh(_ snapshot: BootstrapRefreshDebugSnapshot) {
+        bootstrapAPIEnabled = snapshot.isEnabled
+        bootstrapRefreshETag = snapshot.etag
+        bootstrapLastFetchAt = snapshot.lastFetchAt
+        bootstrapLastWriteAt = snapshot.lastWriteAt
+        bootstrapLastResult = snapshot.lastResult
+        lastRefreshAt = snapshot.lastFetchAt ?? lastRefreshAt
+    }
+
     func snapshot() -> RepositoryDebugSnapshot {
         RepositoryDebugSnapshot(
             activeSource: activeSource,
             deliverySource: deliverySource,
             baseURL: baseURL,
             lastRefreshAt: lastRefreshAt,
-            isUsingStaleCache: isUsingStaleCache
+            isUsingStaleCache: isUsingStaleCache,
+            localBootstrapSource: localBootstrapSource,
+            localBootstrapMessage: localBootstrapMessage,
+            localBootstrapResolvedPath: localBootstrapResolvedPath,
+            localBootstrapLoadedAt: localBootstrapLoadedAt,
+            bootstrapAPIEnabled: bootstrapAPIEnabled,
+            bootstrapRefreshETag: bootstrapRefreshETag,
+            bootstrapLastFetchAt: bootstrapLastFetchAt,
+            bootstrapLastWriteAt: bootstrapLastWriteAt,
+            bootstrapLastResult: bootstrapLastResult
         )
     }
 }
@@ -116,10 +253,17 @@ enum KBORepositoryFactory {
         configuration: AppRepositoryConfiguration = .fromEnvironment()
     ) -> AppRepositoryBundle {
         if let backendBaseURL = configuration.backendBaseURL {
+            let bootstrapStateStore = BootstrapRefreshStateStore(baseURL: backendBaseURL)
             let runtimeState = RepositoryRuntimeState(
                 activeSource: .live,
                 baseURL: backendBaseURL.absoluteString,
-                deliverySource: .live
+                deliverySource: .live,
+                bootstrapRefreshSnapshot: bootstrapStateStore.load(isEnabled: true)
+            )
+            let localBootstrapRepository = BundledJSONKBORepository(
+                runtimeState: runtimeState,
+                runtimeSource: .live,
+                runtimeDelivery: .cache
             )
             let liveRepository = LiveKBORepository(
                 baseURL: backendBaseURL,
@@ -130,9 +274,16 @@ enum KBORepositoryFactory {
                 configuration: .default,
                 runtimeState: runtimeState
             )
+            let bootstrapRepository = BootstrapRefreshingKBORepository(
+                base: cachedRepository,
+                localBootstrapRepository: localBootstrapRepository,
+                bootstrapBaseURL: backendBaseURL,
+                runtimeState: runtimeState,
+                stateStore: bootstrapStateStore
+            )
             let repository = FallbackKBORepository(
-                primary: cachedRepository,
-                fallback: BundledJSONKBORepository(),
+                primary: bootstrapRepository,
+                fallback: localBootstrapRepository,
                 runtimeState: runtimeState
             )
             return AppRepositoryBundle(
@@ -144,12 +295,16 @@ enum KBORepositoryFactory {
         let runtimeState = RepositoryRuntimeState(
             activeSource: .mock,
             baseURL: nil,
-            deliverySource: .mock
+            deliverySource: .mock,
+            bootstrapRefreshSnapshot: BootstrapRefreshDebugSnapshot(
+                isEnabled: false,
+                etag: nil,
+                lastFetchAt: nil,
+                lastWriteAt: nil,
+                lastResult: .disabled
+            )
         )
-        let repository = RuntimeStateReportingRepository(
-            base: BundledJSONKBORepository(),
-            source: .mock,
-            delivery: .mock,
+        let repository = BundledJSONKBORepository(
             runtimeState: runtimeState
         )
 
@@ -242,6 +397,7 @@ private struct BootstrapCachePayload: Codable, Sendable {
     nonisolated fileprivate static func makeGameDTO(from game: GameDetail) -> KBOGameDTO {
         KBOGameDTO(
             id: game.id,
+            providerGameID: game.providerGameID,
             scheduledStart: game.scheduledStart,
             venue: game.venue,
             awayTeamID: game.awayTeam.id,
@@ -307,9 +463,11 @@ private struct GamesCachePayload: Codable, Sendable {
     let games: [KBOGameDTO]
 
     nonisolated init(games value: [GameDetail]) {
-        let uniqueTeams = Dictionary(
-            uniqueKeysWithValues: value.flatMap { [$0.awayTeam, $0.homeTeam] }.map { ($0.id, $0) }
-        )
+        let uniqueTeams = value
+            .flatMap { [$0.awayTeam, $0.homeTeam] }
+            .reduce(into: [String: Team]()) { partialResult, team in
+                partialResult[team.id] = team
+            }
         teams = uniqueTeams.values
             .sorted { $0.id < $1.id }
             .map(BootstrapCachePayload.makeTeamDTO)
@@ -904,6 +1062,170 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, Sendable {
     }
 }
 
+struct BootstrapRefreshingKBORepository<Base: KBORepository>: KBORepository, Sendable {
+    let base: Base
+    let localBootstrapRepository: BundledJSONKBORepository
+    let bootstrapBaseURL: URL
+    let session: URLSession
+    let runtimeState: RepositoryRuntimeState?
+    let stateStore: BootstrapRefreshStateStore
+    let fileManager: FileManager
+    private let nowProvider: @Sendable () -> Date
+
+    init(
+        base: Base,
+        localBootstrapRepository: BundledJSONKBORepository,
+        bootstrapBaseURL: URL,
+        session: URLSession = .shared,
+        runtimeState: RepositoryRuntimeState? = nil,
+        stateStore: BootstrapRefreshStateStore,
+        fileManager: FileManager = .default,
+        nowProvider: @escaping @Sendable () -> Date = { .now }
+    ) {
+        self.base = base
+        self.localBootstrapRepository = localBootstrapRepository
+        self.bootstrapBaseURL = bootstrapBaseURL
+        self.session = session
+        self.runtimeState = runtimeState
+        self.stateStore = stateStore
+        self.fileManager = fileManager
+        self.nowProvider = nowProvider
+    }
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        await refreshBootstrapSnapshotIfNeeded()
+        return try await localBootstrapRepository.fetchBootstrapData()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await base.fetchGames()
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await base.fetchNotifications()
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        try await base.fetchMonthlySchedule(for: month)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
+    }
+
+    private func refreshBootstrapSnapshotIfNeeded() async {
+        let fetchedAt = nowProvider()
+        let existingSnapshot = stateStore.load(isEnabled: true)
+        var request: URLRequest
+
+        do {
+            request = try makeBootstrapRequest(etag: existingSnapshot.etag)
+        } catch {
+            let failedSnapshot = BootstrapRefreshDebugSnapshot(
+                isEnabled: true,
+                etag: existingSnapshot.etag,
+                lastFetchAt: fetchedAt,
+                lastWriteAt: existingSnapshot.lastWriteAt,
+                lastResult: .failed
+            )
+            stateStore.save(failedSnapshot)
+            await runtimeState?.recordBootstrapRefresh(failedSnapshot)
+            return
+        }
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw LiveRepositoryError.invalidResponse(endpoint: "v1/bootstrap")
+            }
+
+            switch httpResponse.statusCode {
+            case 200:
+                try await handleUpdatedBootstrapResponse(
+                    data: data,
+                    response: httpResponse,
+                    fetchedAt: fetchedAt
+                )
+            case 304:
+                let snapshot = BootstrapRefreshDebugSnapshot(
+                    isEnabled: true,
+                    etag: httpResponse.value(forHTTPHeaderField: "ETag") ?? existingSnapshot.etag,
+                    lastFetchAt: fetchedAt,
+                    lastWriteAt: existingSnapshot.lastWriteAt,
+                    lastResult: .notModified
+                )
+                stateStore.save(snapshot)
+                await runtimeState?.recordBootstrapRefresh(snapshot)
+            default:
+                throw LiveRepositoryError.httpStatus(code: httpResponse.statusCode, endpoint: "v1/bootstrap")
+            }
+        } catch {
+            let failedSnapshot = BootstrapRefreshDebugSnapshot(
+                isEnabled: true,
+                etag: existingSnapshot.etag,
+                lastFetchAt: fetchedAt,
+                lastWriteAt: existingSnapshot.lastWriteAt,
+                lastResult: .failed
+            )
+            stateStore.save(failedSnapshot)
+            await runtimeState?.recordBootstrapRefresh(failedSnapshot)
+#if DEBUG
+            print("[BootstrapRefresh] refresh failed error=\(error)")
+#endif
+        }
+    }
+
+    private func handleUpdatedBootstrapResponse(
+        data: Data,
+        response: HTTPURLResponse,
+        fetchedAt: Date
+    ) async throws {
+        _ = try BundledJSONKBORepository.decodeBootstrapData(from: data)
+        guard let fileURL = localBootstrapRepository.localBootstrapFileURL else {
+            throw LiveRepositoryError.invalidBaseURL
+        }
+
+        try fileManager.createDirectory(
+            at: fileURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        try data.write(to: fileURL, options: .atomic)
+
+        let snapshot = BootstrapRefreshDebugSnapshot(
+            isEnabled: true,
+            etag: response.value(forHTTPHeaderField: "ETag"),
+            lastFetchAt: fetchedAt,
+            lastWriteAt: fetchedAt,
+            lastResult: .updated
+        )
+        stateStore.save(snapshot)
+        await runtimeState?.recordBootstrapRefresh(snapshot)
+    }
+
+    private func makeBootstrapRequest(etag: String?) throws -> URLRequest {
+        guard let url = URL(string: "v1/bootstrap", relativeTo: normalizedBaseURL)?.absoluteURL else {
+            throw LiveRepositoryError.invalidBaseURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let etag, etag.isEmpty == false {
+            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        }
+        return request
+    }
+
+    private var normalizedBaseURL: URL {
+        if bootstrapBaseURL.absoluteString.hasSuffix("/") {
+            return bootstrapBaseURL
+        }
+        return URL(string: bootstrapBaseURL.absoluteString + "/") ?? bootstrapBaseURL
+    }
+}
+
 struct LiveKBORepository: KBORepository, Sendable {
     private let baseURL: URL
     private let session: URLSession
@@ -1110,7 +1432,7 @@ struct LiveKBORepository: KBORepository, Sendable {
         case teams
         case monthlySchedule(KBOMonthScheduleKey)
 
-        var path: String {
+        nonisolated var path: String {
             switch self {
             case .bootstrap:
                 "bootstrap"
@@ -1137,7 +1459,7 @@ struct OfficialKBOMonthlyScheduleRequestContract: Sendable {
     let accept = "application/json"
     let requestedWith = "XMLHttpRequest"
 
-    init(baseURL: URL, month: KBOMonthScheduleKey) throws {
+    nonisolated init(baseURL: URL, month: KBOMonthScheduleKey) throws {
         self.month = month
         self.url = URL(string: "ws/Schedule.asmx/GetScheduleList", relativeTo: baseURL)?.absoluteURL
         if url == nil {
@@ -1145,11 +1467,11 @@ struct OfficialKBOMonthlyScheduleRequestContract: Sendable {
         }
     }
 
-    var seriesIDList: String {
+    nonisolated var seriesIDList: String {
         month.month == 3 ? "0,9" : "0"
     }
 
-    var queryItems: [URLQueryItem] {
+    nonisolated var queryItems: [URLQueryItem] {
         [
             URLQueryItem(name: "leId", value: "1"),
             URLQueryItem(name: "srIdList", value: seriesIDList),
@@ -1159,13 +1481,13 @@ struct OfficialKBOMonthlyScheduleRequestContract: Sendable {
         ]
     }
 
-    var bodyString: String {
+    nonisolated var bodyString: String {
         var components = URLComponents()
         components.queryItems = queryItems
         return components.percentEncodedQuery ?? ""
     }
 
-    var bodyData: Data {
+    nonisolated var bodyData: Data {
         Data(bodyString.utf8)
     }
 }
@@ -1178,7 +1500,7 @@ struct OfficialKBOLiveGamesRequestContract: Sendable {
     let accept = "application/json"
     let requestedWith = "XMLHttpRequest"
 
-    init(baseURL: URL, date: Date) throws {
+    nonisolated init(baseURL: URL, date: Date) throws {
         self.date = date
         self.url = URL(string: "ws/Main.asmx/GetKboGameList", relativeTo: baseURL)?.absoluteURL
         if url == nil {
@@ -1186,7 +1508,7 @@ struct OfficialKBOLiveGamesRequestContract: Sendable {
         }
     }
 
-    var seriesIDList: String {
+    nonisolated var seriesIDList: String {
         if kboDate >= "20241026" {
             return "0,1,3,4,5,6,7,8,9"
         }
@@ -1196,7 +1518,7 @@ struct OfficialKBOLiveGamesRequestContract: Sendable {
         return "0,1,3,4,5,7,9"
     }
 
-    var queryItems: [URLQueryItem] {
+    nonisolated var queryItems: [URLQueryItem] {
         [
             URLQueryItem(name: "leId", value: "1"),
             URLQueryItem(name: "srId", value: seriesIDList),
@@ -1204,17 +1526,17 @@ struct OfficialKBOLiveGamesRequestContract: Sendable {
         ]
     }
 
-    var bodyString: String {
+    nonisolated var bodyString: String {
         var components = URLComponents()
         components.queryItems = queryItems
         return components.percentEncodedQuery ?? ""
     }
 
-    var bodyData: Data {
+    nonisolated var bodyData: Data {
         Data(bodyString.utf8)
     }
 
-    private var kboDate: String {
+    nonisolated private var kboDate: String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")

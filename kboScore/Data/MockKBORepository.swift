@@ -44,30 +44,45 @@ struct MockKBORepository: KBORepository, Sendable {
 struct BundledJSONKBORepository: KBORepository, Sendable {
     private let bundle: Bundle
     private let resourceName: String
+    private let documentsDirectoryURL: URL?
+    private let bundledFileURLOverride: URL?
+    private let runtimeState: RepositoryRuntimeState?
+    private let runtimeSource: RepositoryDataSourceKind
+    private let runtimeDelivery: RepositoryDeliverySourceKind
 
     nonisolated init(
         bundle: Bundle = .main,
-        resourceName: String = "LocalBootstrapData"
+        resourceName: String = "LocalBootstrapData",
+        documentsDirectoryURL: URL? = nil,
+        bundledFileURLOverride: URL? = nil,
+        runtimeState: RepositoryRuntimeState? = nil,
+        runtimeSource: RepositoryDataSourceKind = .mock,
+        runtimeDelivery: RepositoryDeliverySourceKind = .mock
     ) {
         self.bundle = bundle
         self.resourceName = resourceName
+        self.documentsDirectoryURL = documentsDirectoryURL
+        self.bundledFileURLOverride = bundledFileURLOverride
+        self.runtimeState = runtimeState
+        self.runtimeSource = runtimeSource
+        self.runtimeDelivery = runtimeDelivery
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
-        try loadBootstrap()
+        try await loadBootstrap()
     }
 
     nonisolated func fetchGames() async throws -> [GameDetail] {
-        try loadBootstrap().games
+        (try await loadBootstrap()).games
     }
 
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
-        try loadBootstrap().notifications
+        (try await loadBootstrap()).notifications
     }
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         let calendar = Calendar(identifier: .gregorian)
-        return try loadBootstrap().games
+        return (try await loadBootstrap()).games
             .filter {
                 let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
                 return components.year == month.year && components.month == month.month
@@ -75,21 +90,87 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
-    nonisolated private func loadBootstrap() throws -> KBOBootstrapData {
+    nonisolated private func loadBootstrap() async throws -> KBOBootstrapData {
+        if let documentsURL = documentsFileURL, FileManager.default.fileExists(atPath: documentsURL.path) {
+            do {
+                let bootstrap = try loadBootstrap(from: documentsURL, source: .documents)
+                await runtimeState?.record(
+                    source: runtimeSource,
+                    delivery: runtimeDelivery,
+                    localBootstrapSource: .documents,
+                    localBootstrapMessage: "",
+                    localBootstrapResolvedPath: documentsURL.path,
+                    localBootstrapLoadedAt: .now
+                )
+                return bootstrap
+            } catch {
+#if DEBUG
+                print(
+                    "[BundledJSONKBORepository] Documents JSON invalid at \(documentsURL.path). " +
+                    "Falling back to bundled JSON. error=\(error)"
+                )
+#endif
+                let bundledURL = try bundledFileURL()
+                let fallback = try loadBootstrap(from: bundledURL, source: .bundled)
+                await runtimeState?.record(
+                    source: runtimeSource,
+                    delivery: runtimeDelivery,
+                    localBootstrapSource: .bundled,
+                    localBootstrapMessage: "문서 JSON 해석 실패로 번들 JSON을 사용했습니다. 문서 경로: \(documentsURL.path)",
+                    localBootstrapResolvedPath: bundledURL.path,
+                    localBootstrapLoadedAt: .now
+                )
+                return fallback
+            }
+        }
+
+        let bundledURL = try bundledFileURL()
+        let bootstrap = try loadBootstrap(from: bundledURL, source: .bundled)
+        await runtimeState?.record(
+            source: runtimeSource,
+            delivery: runtimeDelivery,
+            localBootstrapSource: .bundled,
+            localBootstrapMessage: "",
+            localBootstrapResolvedPath: bundledURL.path,
+            localBootstrapLoadedAt: .now
+        )
+        return bootstrap
+    }
+
+    nonisolated var localBootstrapFileURL: URL? {
+        Self.localBootstrapFileURL(
+            resourceName: resourceName,
+            documentsDirectoryURL: documentsDirectoryURL
+        )
+    }
+
+    nonisolated private var documentsFileURL: URL? {
+        localBootstrapFileURL
+    }
+
+    nonisolated private func bundledFileURL() throws -> URL {
 #if DEBUG
         print("[BundledJSONKBORepository] Looking up \(resourceName).json in bundle: \(bundle.bundlePath)")
 #endif
+        if let bundledFileURLOverride {
+            return bundledFileURLOverride
+        }
         guard let url = bundle.url(forResource: resourceName, withExtension: "json") else {
 #if DEBUG
             print("[BundledJSONKBORepository] Resource lookup failed: \(resourceName).json")
 #endif
             throw BundledJSONRepositoryError.missingResource(name: resourceName)
         }
+        return url
+    }
 
+    nonisolated private func loadBootstrap(
+        from url: URL,
+        source: LocalBootstrapSourceKind
+    ) throws -> KBOBootstrapData {
 #if DEBUG
-        print("[BundledJSONKBORepository] Resource URL resolved: \(url.path)")
+        print("[BundledJSONKBORepository] Loading \(source.rawValue) from: \(url.path)")
 #endif
-
         let data: Data
         do {
             data = try Data(contentsOf: url)
@@ -103,17 +184,15 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             throw error
         }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let payload: KBOBootstrapDTO
         do {
-            payload = try decoder.decode(KBOBootstrapDTO.self, from: data)
+            let mapped = try Self.decodeBootstrapData(from: data)
 #if DEBUG
             print(
-                "[BundledJSONKBORepository] JSON decode success: " +
-                "teams=\(payload.teams.count), games=\(payload.games.count), notifications=\(payload.notifications.count)"
+                "[BundledJSONKBORepository] Mapping success: " +
+                "teams=\(mapped.teams.count), games=\(mapped.games.count), notifications=\(mapped.notifications.count)"
             )
 #endif
+            return mapped
         } catch let decodingError as DecodingError {
 #if DEBUG
             print("[BundledJSONKBORepository] JSON decode failed: \(Self.describe(decodingError: decodingError))")
@@ -121,19 +200,32 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             throw decodingError
         } catch {
 #if DEBUG
-            print("[BundledJSONKBORepository] JSON decode failed: \(error)")
+            print("[BundledJSONKBORepository] Mapping failed: \(error)")
 #endif
             throw error
         }
+    }
 
-        let mapped = Self.normalizeBundledSeasonClassification(in: KBODataMapper.mapBootstrap(payload))
+    nonisolated static func localBootstrapFileURL(
+        resourceName: String = "LocalBootstrapData",
+        documentsDirectoryURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let baseDirectory = documentsDirectoryURL ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+        return baseDirectory?.appendingPathComponent("\(resourceName).json", isDirectory: false)
+    }
+
+    nonisolated static func decodeBootstrapData(from data: Data) throws -> KBOBootstrapData {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let payload = try decoder.decode(KBOBootstrapDTO.self, from: data)
 #if DEBUG
         print(
-            "[BundledJSONKBORepository] Mapping success: " +
-            "teams=\(mapped.teams.count), games=\(mapped.games.count), notifications=\(mapped.notifications.count)"
+            "[BundledJSONKBORepository] JSON decode success: " +
+            "teams=\(payload.teams.count), games=\(payload.games.count), notifications=\(payload.notifications.count)"
         )
 #endif
-        return mapped
+        return normalizeBundledSeasonClassification(in: KBODataMapper.mapBootstrap(payload))
     }
 
     nonisolated private static func describe(decodingError: DecodingError) -> String {
@@ -190,7 +282,8 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             outs: game.outs,
             highlightText: game.highlightText,
             events: game.events,
-            note: game.note
+            note: game.note,
+            providerGameID: game.providerGameID
         )
     }
 

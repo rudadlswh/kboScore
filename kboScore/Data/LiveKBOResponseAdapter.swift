@@ -209,6 +209,10 @@ enum KBOExternalResponseAdapter {
 
         return KBOGameDTO(
             id: GameIdentifier.uuid(from: stringValue(for: ["id", "gameId", "gameID", "matchId"], in: dictionary)) ?? UUID(),
+            providerGameID: stringValue(
+                for: ["officialProviderGameID", "official_provider_game_id", "providerGameID", "provider_game_id", "gameId", "gameID", "matchId"],
+                in: dictionary
+            ),
             scheduledStart: scheduledStart,
             venue: stringValue(for: ["venue", "stadium", "stadiumName", "ballpark"], in: dictionary) ??
                 stringValue(for: ["name"], in: nestedDictionary(for: ["venue"], in: dictionary)),
@@ -299,7 +303,11 @@ enum KBOExternalResponseAdapter {
             name: name,
             shortName: shortName ?? name,
             englishName: stringValue(for: ["englishName", "enName"], in: dictionary) ?? name,
-            markText: stringValue(for: ["markText", "symbol", "emblemText"], in: dictionary) ?? String((shortName ?? id).prefix(3)).uppercased()
+            markText: stringValue(for: ["markText", "symbol", "emblemText"], in: dictionary) ?? String((shortName ?? id).prefix(3)).uppercased(),
+            previousRegularSeasonRank: intValue(
+                for: ["previousRegularSeasonRank", "previous_regular_season_rank"],
+                in: dictionary
+            )
         )
     }
 
@@ -428,6 +436,7 @@ enum KBOExternalResponseAdapter {
 
         return KBOGameDTO(
             id: GameIdentifier.uuid(from: stringValue(for: ["G_ID"], in: dictionary)) ?? UUID(),
+            providerGameID: stringValue(for: ["G_ID"], in: dictionary),
             scheduledStart: parseDate(in: dictionary),
             venue: stringValue(for: ["S_NM"], in: dictionary),
             awayTeamID: awayTeam.id,
@@ -484,6 +493,7 @@ enum KBOExternalResponseAdapter {
 
         let game = KBOGameDTO(
             id: GameIdentifier.uuid(from: gameLink.gameID) ?? UUID(),
+            providerGameID: gameLink.gameID,
             scheduledStart: scheduledStart,
             venue: venueText,
             awayTeamID: awayTeam.id,

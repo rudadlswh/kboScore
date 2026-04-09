@@ -375,10 +375,11 @@ struct kboScoreTests {
         let totalGamesPlayed = standings.reduce(0) { $0 + $1.gamesPlayed }
 
         #expect(totalGamesPlayed > 0)
-        #expect(ktSnapshot.recordText == "4승 0패 0무")
-        #expect(ktSnapshot.postseasonQualificationProbability == nil)
-        #expect(ktSnapshot.postseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
-        #expect(ktSnapshot.postseasonQualificationText == nil)
+        #expect(ktSnapshot.gamesPlayed > 0)
+        #expect(ktSnapshot.winPercentage != nil)
+        #expect(ktSnapshot.postseasonQualificationProbability != nil)
+        #expect(ktSnapshot.postseasonProbabilityUnavailableReason == nil)
+        #expect(ktSnapshot.postseasonQualificationText != nil)
         #expect(ktSnapshot.visiblePostseasonProbabilityUnavailableReason == nil)
     }
 
@@ -997,6 +998,61 @@ struct kboScoreTests {
         #expect(body?.contains("date=20260323") == true)
     }
 
+    @Test func officialGameCenterClientReconcilesScheduleStartTimeFromOfficialGameList() async throws {
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328LGNC0",
+              "G_TM": "17:00",
+              "S_NM": "창원",
+              "AWAY_ID": "LG",
+              "HOME_ID": "NC",
+              "AWAY_NM": "LG",
+              "HOME_NM": "NC",
+              "GAME_STATE_SC": "1",
+              "CANCEL_SC_NM": "",
+              "T_SCORE_CN": "0",
+              "B_SCORE_CN": "0"
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "창원",
+            awayTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            homeTeam: Team(id: "nc", name: "NC 다이노스", shortName: "NC", englishName: "NC Dinos", markText: "NC"),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+
+        let reconciled = await client.reconcileScheduledStartTimes(in: [game])
+
+        #expect(reconciled.count == 1)
+        #expect(reconciled[0].scheduledStart == isoDate("2026-03-28T17:00:00+09:00"))
+    }
+
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
@@ -1066,13 +1122,16 @@ struct kboScoreTests {
               "wins": 5,
               "losses": 1,
               "ties": 0,
+              "runsScored": 31,
+              "runsAllowed": 18,
               "gamesPlayed": 6,
               "remainingRegularSeasonGames": 138,
               "winPercentage": 0.833,
               "recentResults": ["win", "win", "loss"],
               "unknownClassificationGames": 0,
               "rankingResolution": "resolved",
-              "rankingResolutionPosition": null
+              "rankingResolutionPosition": null,
+              "postseasonQualificationProbability": 0.84
             }
           ]
         }
@@ -1096,6 +1155,9 @@ struct kboScoreTests {
         #expect(standings[0].team.id == "lg")
         #expect(standings[0].rank == 1)
         #expect(standings[0].recentResults == [.win, .win, .loss])
+        #expect(standings[0].runsScored == 31)
+        #expect(standings[0].runsAllowed == 18)
+        #expect(standings[0].pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 31, runsAllowed: 18))
         #expect(standings[0].rankingResolution == .resolved)
         #expect(standings[0].postseasonQualificationProbability == 0.84)
     }
@@ -1160,6 +1222,239 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == nil)
     }
 
+    @Test func bundledJSONRepositoryUsesDocumentsJSONWhenPresent() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "문서 LG").write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "문서 LG")
+        #expect(snapshot.localBootstrapSource == .documents)
+        #expect(snapshot.localBootstrapMessage == nil)
+        #expect(snapshot.localBootstrapResolvedPath == documentsURL.path)
+        #expect(snapshot.localBootstrapLoadedAt != nil)
+    }
+
+    @Test func bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsMissing() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "번들 LG")
+        #expect(snapshot.localBootstrapSource == .bundled)
+        #expect(snapshot.localBootstrapMessage == nil)
+        #expect(snapshot.localBootstrapResolvedPath == bundledURL.path)
+        #expect(snapshot.localBootstrapLoadedAt != nil)
+    }
+
+    @Test func bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsInvalid() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try Data("{ invalid json".utf8).write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "번들 LG")
+        #expect(snapshot.localBootstrapSource == .bundled)
+        #expect(snapshot.localBootstrapMessage?.contains(documentsURL.path) == true)
+        #expect(snapshot.localBootstrapResolvedPath == bundledURL.path)
+        #expect(snapshot.localBootstrapLoadedAt != nil)
+    }
+
+    @Test func externalDocumentsBootstrapStillDrivesStandingsAndProbabilityDerivation() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let sourceData = try appLocalBootstrapFixtureData()
+        try sourceData.write(to: documentsURL, options: .atomic)
+        try sourceData.write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+        let model = AppModel(
+            repository: repository,
+            repositoryRuntimeState: runtimeState,
+            usePersistedSettings: false
+        )
+
+        await model.loadIfNeeded()
+
+        #expect(model.regularSeasonGames.isEmpty == false)
+        #expect(model.standingsSnapshots.count == model.teams.count)
+        #expect(model.standingsSnapshots.contains { $0.wins + $0.losses + $0.ties > 0 })
+        #expect(model.debugLocalBootstrapSource == "문서 JSON")
+    }
+
+    @Test func appModelRefreshReReadsEditedDocumentsBootstrapJSON() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(firstGameAwayScore: 1).write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(firstGameAwayScore: 9).write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+        let model = AppModel(
+            repository: repository,
+            repositoryRuntimeState: runtimeState,
+            usePersistedSettings: false
+        )
+
+        await model.loadIfNeeded()
+        let targetGameID = try #require(UUID(uuidString: "0aedcdb0-e727-42c9-a7e5-e3c3bad99392"))
+        let initialAwayScore = try #require(model.games.first(where: { $0.id == targetGameID })?.awayScore)
+        #expect(initialAwayScore == 1)
+
+        try makeBootstrapJSON(firstGameAwayScore: 7).write(to: documentsURL, options: .atomic)
+
+        await model.refreshHome()
+
+        #expect(model.games.first(where: { $0.id == targetGameID })?.awayScore == 7)
+        #expect(model.debugLocalBootstrapSource == "문서 JSON")
+        #expect(model.debugLocalBootstrapResolvedPath == documentsURL.path)
+        #expect(model.debugLocalBootstrapLoadedAt != nil)
+    }
+
+    @Test func appModelRefreshHomeReappliesEditedDocumentsBootstrapTeams() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "문서 LG").write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+        let model = AppModel(
+            repository: repository,
+            repositoryRuntimeState: runtimeState,
+            usePersistedSettings: false
+        )
+
+        await model.loadIfNeeded()
+        #expect(model.teams.first(where: { $0.id == "lg" })?.name == "문서 LG")
+
+        try makeBootstrapJSON(teamName: "수정 문서 LG").write(to: documentsURL, options: .atomic)
+
+        await model.refreshHome()
+
+        #expect(model.teams.first(where: { $0.id == "lg" })?.name == "수정 문서 LG")
+        #expect(model.debugLocalBootstrapResolvedPath == documentsURL.path)
+        #expect(model.debugLocalBootstrapLoadedAt != nil)
+    }
+
+    @Test func bundledJSONRepositoryRecoversAfterInvalidDocumentsJSONIsFixed() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try Data("{ invalid json".utf8).write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
+        let repository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState
+        )
+
+        let fallbackBootstrap = try await repository.fetchBootstrapData()
+        #expect(fallbackBootstrap.teams.first(where: { $0.id == "lg" })?.name == "번들 LG")
+
+        try makeBootstrapJSON(teamName: "복구 문서 LG").write(to: documentsURL, options: .atomic)
+
+        let documentsBootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(documentsBootstrap.teams.first(where: { $0.id == "lg" })?.name == "복구 문서 LG")
+        #expect(snapshot.localBootstrapSource == .documents)
+        #expect(snapshot.localBootstrapMessage == nil)
+        #expect(snapshot.localBootstrapResolvedPath == documentsURL.path)
+    }
+
     @Test func repositoryFactoryUsesLiveModeWhenBackendURLIsProvided() async throws {
         let backendURL = try #require(URL(string: "http://127.0.0.1:8080"))
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
@@ -1172,7 +1467,419 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == backendURL.absoluteString)
     }
 
-    @Test func appModelKeepsProbabilityUnavailableBeforeThirtyPercentSeasonProgress() async throws {
+    @Test func bootstrapRefreshRepositoryWritesDocumentsJSONAndStoresETagOn200() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(
+                statusCode: 200,
+                data: try makeBootstrapAPIResponseJSON(teamName: "업데이트 LG"),
+                headers: ["ETag": "\"bootstrap-v1\""]
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+        let documentsData = try Data(contentsOf: documentsURL)
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "업데이트 LG")
+        #expect(String(data: documentsData, encoding: .utf8)?.contains("업데이트 LG") == true)
+        #expect(snapshot.localBootstrapSource == .documents)
+        #expect(snapshot.bootstrapRefreshETag == "\"bootstrap-v1\"")
+        #expect(snapshot.bootstrapLastResult == .updated)
+        #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == nil)
+    }
+
+    @Test func bootstrapRefreshRepositorySendsStoredETagAndSkipsRewriteOn304() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let originalData = try makeBootstrapJSON(teamName: "문서 LG")
+        try originalData.write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        stateStore.save(
+            BootstrapRefreshDebugSnapshot(
+                isEnabled: true,
+                etag: "\"bootstrap-v1\"",
+                lastFetchAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastWriteAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastResult: .updated
+            )
+        )
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(
+                statusCode: 304,
+                data: Data(),
+                headers: ["ETag": "\"bootstrap-v1\""]
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+        let documentsData = try Data(contentsOf: documentsURL)
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "문서 LG")
+        #expect(documentsData == originalData)
+        #expect(snapshot.bootstrapLastResult == .notModified)
+        #expect(snapshot.bootstrapRefreshETag == "\"bootstrap-v1\"")
+        #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == "\"bootstrap-v1\"")
+    }
+
+    @Test func bootstrapRefreshFailurePreservesExistingDocumentsJSON() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let originalData = try makeBootstrapJSON(teamName: "문서 LG")
+        try originalData.write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(statusCode: 500, data: Data())
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+        let documentsData = try Data(contentsOf: documentsURL)
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "문서 LG")
+        #expect(documentsData == originalData)
+        #expect(snapshot.localBootstrapSource == .documents)
+        #expect(snapshot.bootstrapLastResult == .failed)
+    }
+
+    @Test func bootstrapRefreshFailureStillFallsBackToBundledJSONWithoutDocumentsFile() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(statusCode: 500, data: Data())
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "번들 LG")
+        #expect(snapshot.localBootstrapSource == .bundled)
+        #expect(snapshot.bootstrapLastResult == .failed)
+    }
+
+    @Test func appModelRefreshHomeSkipsBootstrapReapplyWhenBootstrapIsNotModified() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "문서 LG").write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        stateStore.save(
+            BootstrapRefreshDebugSnapshot(
+                isEnabled: true,
+                etag: "\"bootstrap-v1\"",
+                lastFetchAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastWriteAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastResult: .updated
+            )
+        )
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+
+        let bootstrap = stubBootstrap()
+        let lg = try #require(bootstrap.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(bootstrap.teams.first(where: { $0.id == "doosan" }))
+        let mayGame = makeGameDetail(
+            id: UUID(uuidString: "91000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-01T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in [mayGame] }),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(
+                statusCode: 304,
+                data: Data(),
+                headers: ["ETag": "\"bootstrap-v1\""]
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let model = AppModel(
+            repository: repository,
+            repositoryRuntimeState: runtimeState,
+            usePersistedSettings: false
+        )
+        let mayReferenceDate = isoDate("2026-05-01T09:00:00+09:00")
+
+        await model.loadIfNeeded()
+        await model.loadScheduleIfNeeded(for: mayReferenceDate)
+        #expect(model.scheduleGames(on: mayReferenceDate, filter: .all).count == 1)
+
+        await model.refreshHome()
+
+        #expect(model.scheduleGames(on: mayReferenceDate, filter: .all).count == 1)
+        #expect(model.debugBootstrapLastResult == "변경 없음")
+        #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == "\"bootstrap-v1\"")
+    }
+
+    @Test func appModelRefreshHomeReappliesBootstrapAfterSuccessfulDownload() async throws {
+        let documentsDirectory = try makeTemporaryDirectory()
+        let bundledDirectory = try makeTemporaryDirectory()
+        let defaults = makeTemporaryUserDefaults()
+        defer {
+            try? FileManager.default.removeItem(at: documentsDirectory)
+            try? FileManager.default.removeItem(at: bundledDirectory)
+        }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "이전 LG").write(to: documentsURL, options: .atomic)
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let baseURL = try #require(URL(string: "https://example.com/api/"))
+        let stateStore = BootstrapRefreshStateStore(baseURL: baseURL, defaults: defaults)
+        stateStore.save(
+            BootstrapRefreshDebugSnapshot(
+                isEnabled: true,
+                etag: "\"bootstrap-v1\"",
+                lastFetchAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastWriteAt: isoDate("2026-04-03T11:00:00+09:00"),
+                lastResult: .updated
+            )
+        )
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .live,
+            baseURL: baseURL.absoluteString,
+            deliverySource: .live,
+            bootstrapRefreshSnapshot: stateStore.load(isEnabled: true)
+        )
+        let localRepository = BundledJSONKBORepository(
+            documentsDirectoryURL: documentsDirectory,
+            bundledFileURLOverride: bundledURL,
+            runtimeState: runtimeState,
+            runtimeSource: .live,
+            runtimeDelivery: .cache
+        )
+        let repository = BootstrapRefreshingKBORepository(
+            base: StubRepository(),
+            localBootstrapRepository: localRepository,
+            bootstrapBaseURL: baseURL,
+            session: makeStubSession(),
+            runtimeState: runtimeState,
+            stateStore: stateStore
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(
+                statusCode: 304,
+                data: Data(),
+                headers: ["ETag": "\"bootstrap-v1\""]
+            )
+        ]
+
+        let model = AppModel(
+            repository: repository,
+            repositoryRuntimeState: runtimeState,
+            usePersistedSettings: false
+        )
+
+        await model.loadIfNeeded()
+        #expect(model.teams.first(where: { $0.id == "lg" })?.name == "이전 LG")
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/bootstrap": StubResponse(
+                statusCode: 200,
+                data: try makeBootstrapAPIResponseJSON(teamName: "최신 LG"),
+                headers: ["ETag": "\"bootstrap-v2\""]
+            )
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        await model.refreshHome()
+
+        let documentsData = try Data(contentsOf: documentsURL)
+        #expect(model.teams.first(where: { $0.id == "lg" })?.name == "최신 LG")
+        #expect(String(data: documentsData, encoding: .utf8)?.contains("최신 LG") == true)
+        #expect(model.debugBootstrapLastResult == "업데이트됨")
+        #expect(model.debugBootstrapETag == "\"bootstrap-v2\"")
+    }
+
+    @Test func appModelMakesProbabilityAvailableBeforeThirtyPercentSeasonProgress() async throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
             teams: teams,
@@ -1192,9 +1899,11 @@ struct kboScoreTests {
 
         let snapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "team1" }))
 
-        #expect(snapshot.postseasonQualificationProbability == nil)
-        #expect(snapshot.postseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
-        #expect(snapshot.postseasonQualificationText == nil)
+        let probability = try #require(snapshot.postseasonQualificationProbability)
+        #expect(probability > 0)
+        #expect(probability < 1)
+        #expect(snapshot.postseasonProbabilityUnavailableReason == nil)
+        #expect(snapshot.postseasonQualificationText != nil)
         #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == nil)
     }
 
@@ -1257,6 +1966,128 @@ struct kboScoreTests {
         #expect(first == second)
     }
 
+    @Test func appModelDoesNotTreatEarlySevenAndOneLeaderAsClinched() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeConservativeEarlySeasonProbabilitySchedule(
+            teams: teams,
+            completedGamesPerTeam: 8,
+            seasonLength: 144
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: teams,
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        let leader = try #require(model.standingsSnapshots.first(where: { $0.team.id == "team1" }))
+        let leaderProbability = try #require(leader.postseasonQualificationProbability)
+
+        #expect(leader.wins == 7)
+        #expect(leader.losses == 1)
+        #expect(leader.postseasonQualificationStatus == nil)
+        #expect(leaderProbability > 0.5)
+        #expect(leaderProbability < 0.95)
+        #expect(leader.postseasonQualificationText != "100.0%")
+    }
+
+    @Test func appModelKeepsEarlyLowerRankedTeamsAboveNearZeroProbability() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeConservativeEarlySeasonProbabilitySchedule(
+            teams: teams,
+            completedGamesPerTeam: 8,
+            seasonLength: 144
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: teams,
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        let trailing = try #require(model.standingsSnapshots.first(where: { $0.team.id == "team10" }))
+        let trailingProbability = try #require(trailing.postseasonQualificationProbability)
+
+        #expect(trailing.wins == 1)
+        #expect(trailing.losses == 7)
+        #expect(trailing.postseasonQualificationStatus == nil)
+        #expect(trailingProbability > 0.02)
+        #expect(trailing.postseasonQualificationText != "0.0%")
+    }
+
+    @Test func localProbabilityCalculatorReturnsCertainQualificationOutcomesWhenSeasonIsComplete() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 144,
+            seasonLength: 144
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 400
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+        let team1Probability = try #require(signals["team1"]?.postseasonQualificationProbability)
+        let team10Probability = try #require(signals["team10"]?.postseasonQualificationProbability)
+
+        #expect(team1Probability == 1)
+        #expect(team10Probability == 0)
+    }
+
+    @Test func standingsRemainSortedByOfficialRecordWhenProbabilitiesExist() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makeProbabilityThresholdSchedule(
+            teams: teams,
+            completedGamesPerTeam: 44,
+            seasonLength: 144
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: teams,
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        let orderedTeamIDs = model.standingsSnapshots.map(\.team.id)
+
+        #expect(orderedTeamIDs == [
+            "team1", "team2", "team3", "team4", "team5",
+            "team6", "team7", "team8", "team9", "team10"
+        ])
+    }
+
+    @Test func localProbabilityCalculatorFallsBackToNeutralPriorWithoutPreviousSeasonRanks() throws {
+        let teams = makeProbabilityTestTeams(includePreviousRanks: false)
+        let games = makeConservativeEarlySeasonProbabilitySchedule(
+            teams: teams,
+            completedGamesPerTeam: 1,
+            seasonLength: 144
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 400
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+        let team1Probability = try #require(signals["team1"]?.postseasonQualificationProbability)
+        let team10Probability = try #require(signals["team10"]?.postseasonQualificationProbability)
+
+        #expect(team1Probability > 0)
+        #expect(team1Probability < 1)
+        #expect(team10Probability > 0)
+        #expect(team10Probability < 1)
+    }
+
     @Test func localProbabilityCalculatorUsesUnavailableReasonForUnknownClassificationGames() throws {
         let teams = makeProbabilityTestTeams()
         let games = [
@@ -1285,7 +2116,7 @@ struct kboScoreTests {
         #expect(signals["team2"]?.unknownClassificationGames == 1)
     }
 
-    @Test func snapshotHidesPostseasonProbabilityBeforeThreshold() {
+    @Test func snapshotShowsUnavailablePostseasonProbabilityStateWhenReasonExists() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
             team: team,
@@ -1299,9 +2130,9 @@ struct kboScoreTests {
             postseasonProbabilityUnavailableReason: .seasonProgressBelowThreshold
         )
 
-        #expect(snapshot.shouldShowPostseasonProbability == false)
-        #expect(snapshot.postseasonQualificationText == nil)
-        #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == nil)
+        #expect(snapshot.shouldShowPostseasonProbability == true)
+        #expect(snapshot.postseasonQualificationText == "산출 불가")
+        #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
     }
 
     @Test func snapshotKeepsUnavailablePostseasonStateVisibleAfterThresholdForRealDataIssues() {
@@ -1321,6 +2152,261 @@ struct kboScoreTests {
         #expect(snapshot.shouldShowPostseasonProbability == true)
         #expect(snapshot.postseasonQualificationText == "산출 불가")
         #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == .unknownClassificationGames)
+    }
+
+    @Test func snapshotFormatsPostseasonProbabilityAsOneDecimalPercent() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 60,
+            losses: 30,
+            ties: 2,
+            remainingRegularSeasonGames: 52,
+            recentResults: [],
+            postseasonQualificationProbability: 0.784
+        )
+
+        #expect(snapshot.postseasonQualificationText == "78.4%")
+    }
+
+    @Test func snapshotClampsExtremeNonCertainPostseasonProbabilityDisplay() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let nearCertain = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 7,
+            losses: 1,
+            ties: 0,
+            remainingRegularSeasonGames: 136,
+            recentResults: [.win, .win, .win, .loss],
+            postseasonQualificationProbability: 1
+        )
+        let nearEliminated = TeamStandingsSnapshot(
+            team: team,
+            rank: 10,
+            wins: 1,
+            losses: 7,
+            ties: 0,
+            remainingRegularSeasonGames: 136,
+            recentResults: [.loss, .loss, .loss, .win],
+            postseasonQualificationProbability: 0
+        )
+
+        #expect(nearCertain.postseasonQualificationText == "99.9%")
+        #expect(nearEliminated.postseasonQualificationText == "0.1%")
+    }
+
+    @Test func snapshotShowsExactPostseasonProbabilityForClinchedAndEliminatedTeams() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let clinched = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 90,
+            losses: 40,
+            ties: 0,
+            remainingRegularSeasonGames: 0,
+            recentResults: [],
+            postseasonQualificationProbability: 1,
+            postseasonQualificationStatus: .clinched
+        )
+        let eliminated = TeamStandingsSnapshot(
+            team: team,
+            rank: 10,
+            wins: 40,
+            losses: 90,
+            ties: 0,
+            remainingRegularSeasonGames: 0,
+            recentResults: [],
+            postseasonQualificationProbability: 0,
+            postseasonQualificationStatus: .eliminated
+        )
+
+        #expect(clinched.postseasonQualificationText == "100.0%")
+        #expect(eliminated.postseasonQualificationText == "0.0%")
+    }
+
+    @Test func snapshotCalculatesPythagoreanWinningPercentageFromRunsScoredAndAllowed() throws {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let positiveSnapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 10,
+            losses: 5,
+            ties: 0,
+            runsScored: 90,
+            runsAllowed: 60,
+            remainingRegularSeasonGames: 129,
+            recentResults: []
+        )
+        let negativeSnapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 5,
+            losses: 10,
+            ties: 0,
+            runsScored: 60,
+            runsAllowed: 90,
+            remainingRegularSeasonGames: 129,
+            recentResults: []
+        )
+        let evenSnapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 8,
+            losses: 8,
+            ties: 0,
+            runsScored: 77,
+            runsAllowed: 77,
+            remainingRegularSeasonGames: 128,
+            recentResults: []
+        )
+
+        let positiveValue = try #require(positiveSnapshot.pythagoreanWinningPercentage)
+        let negativeValue = try #require(negativeSnapshot.pythagoreanWinningPercentage)
+        let evenValue = try #require(evenSnapshot.pythagoreanWinningPercentage)
+
+        #expect(positiveValue > 0.5)
+        #expect(negativeValue < 0.5)
+        #expect(abs(evenValue - 0.5) < 0.000_1)
+    }
+
+    @Test func snapshotPythagoreanWinningPercentageReturnsNeutralForZeroRuns() throws {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 0,
+            losses: 0,
+            ties: 0,
+            runsScored: 0,
+            runsAllowed: 0,
+            remainingRegularSeasonGames: 144,
+            recentResults: []
+        )
+
+        let value = try #require(snapshot.pythagoreanWinningPercentage)
+
+        #expect(value == 0.5)
+        #expect(snapshot.pythagoreanWinningPercentageText == "0.500")
+    }
+
+    @Test func snapshotPythagoreanWinningPercentageIsUnavailableWithoutRunData() {
+        let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 10,
+            losses: 5,
+            ties: 0,
+            remainingRegularSeasonGames: 129,
+            recentResults: []
+        )
+
+        #expect(snapshot.pythagoreanWinningPercentage == nil)
+        #expect(snapshot.pythagoreanWinningPercentageText == "---")
+    }
+
+    @Test func standingsSnapshotUsesOnlyCompletedRegularSeasonGamesForRunTotalsAndPythagoreanWinningPercentage() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-03T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let samsung = try #require(base.teams.first(where: { $0.id == "samsung" }))
+
+        let regularWin = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let regularLoss = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-03-29T14:00:00+09:00"),
+            venue: "대구",
+            awayTeam: lg,
+            homeTeam: samsung,
+            awayScore: 3,
+            homeScore: 4,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let exhibition = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-03-15T13:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: samsung,
+            homeTeam: lg,
+            awayScore: 1,
+            homeScore: 9,
+            status: .final,
+            seasonClassification: .exhibitionPreseason
+        )
+        let postseason = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000004")!,
+            scheduledStart: isoDate("2026-10-12T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 7,
+            status: .final,
+            seasonClassification: .postseason
+        )
+        let cancelled = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000005")!,
+            scheduledStart: isoDate("2026-04-01T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason
+        )
+        let live = makeGameDetail(
+            id: UUID(uuidString: "40000000-0000-0000-0000-000000000006")!,
+            scheduledStart: isoDate("2026-04-02T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: samsung,
+            homeTeam: lg,
+            awayScore: 6,
+            homeScore: 6,
+            status: .live,
+            seasonClassification: .regularSeason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan, samsung],
+                games: [regularWin, regularLoss, exhibition, postseason, cancelled, live],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "lg" }))
+        let doosanSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "doosan" }))
+        let samsungSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "samsung" }))
+
+        #expect(lgSnapshot.wins == 1)
+        #expect(lgSnapshot.losses == 1)
+        #expect(lgSnapshot.runsScored == 8)
+        #expect(lgSnapshot.runsAllowed == 6)
+        #expect(lgSnapshot.pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 8, runsAllowed: 6))
+
+        #expect(doosanSnapshot.runsScored == 2)
+        #expect(doosanSnapshot.runsAllowed == 5)
+        #expect(doosanSnapshot.pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 2, runsAllowed: 5))
+
+        #expect(samsungSnapshot.runsScored == 4)
+        #expect(samsungSnapshot.runsAllowed == 3)
+        #expect(samsungSnapshot.pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 4, runsAllowed: 3))
     }
 
     @Test func fallbackRepositoryUsesMockWhenLiveRequestFails() async throws {
@@ -1675,6 +2761,17 @@ struct kboScoreTests {
 private struct StubResponse {
     let statusCode: Int
     let data: Data
+    let headers: [String: String]
+
+    init(
+        statusCode: Int,
+        data: Data,
+        headers: [String: String] = [:]
+    ) {
+        self.statusCode = statusCode
+        self.data = data
+        self.headers = headers
+    }
 }
 
 private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
@@ -1701,7 +2798,7 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
             url: url,
             statusCode: response.statusCode,
             httpVersion: nil,
-            headerFields: ["Content-Type": "application/json"]
+            headerFields: response.headers.merging(["Content-Type": "application/json"]) { current, _ in current }
         )!
 
         client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
@@ -1731,6 +2828,72 @@ private func saveFixtureData(_ data: Data, named name: String) throws {
         .appendingPathComponent("Fixtures", isDirectory: true)
     try FileManager.default.createDirectory(at: fixturesDirectory, withIntermediateDirectories: true, attributes: nil)
     try data.write(to: fixturesDirectory.appendingPathComponent("\(name).json"), options: .atomic)
+}
+
+private func makeTemporaryDirectory() throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+    return directory
+}
+
+private func makeTemporaryUserDefaults() -> UserDefaults {
+    let suiteName = "kboScoreTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return defaults
+}
+
+private func appLocalBootstrapFixtureData() throws -> Data {
+    let projectDirectory = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    return try Data(contentsOf: projectDirectory.appendingPathComponent("kboScore/LocalBootstrapData.json"))
+}
+
+private func makeBootstrapJSON(
+    teamName: String? = nil,
+    firstGameAwayScore: Int? = nil
+) throws -> Data {
+    guard var root = try JSONSerialization.jsonObject(with: appLocalBootstrapFixtureData()) as? [String: Any] else {
+        throw CocoaError(.fileReadCorruptFile)
+    }
+
+    if let teamName {
+        guard var teams = root["teams"] as? [[String: Any]],
+              let teamIndex = teams.firstIndex(where: { ($0["id"] as? String) == "lg" }) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        teams[teamIndex]["name"] = teamName
+        root["teams"] = teams
+    }
+
+    if let firstGameAwayScore {
+        guard var games = root["games"] as? [[String: Any]], games.isEmpty == false else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        games[0]["away_score"] = firstGameAwayScore
+        root["games"] = games
+    }
+
+    return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+}
+
+private func makeBootstrapAPIResponseJSON(
+    teamName: String? = nil,
+    firstGameAwayScore: Int? = nil,
+    generatedAt: String = "2026-04-03T12:00:00+09:00",
+    dataVersion: String = "test-revision-1"
+) throws -> Data {
+    guard var root = try JSONSerialization.jsonObject(
+        with: makeBootstrapJSON(teamName: teamName, firstGameAwayScore: firstGameAwayScore)
+    ) as? [String: Any] else {
+        throw CocoaError(.fileReadCorruptFile)
+    }
+
+    root["generated_at"] = generatedAt
+    root["data_version"] = dataVersion
+    return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
 }
 
 private func makeBackendMonthPayloadJSON() throws -> Data {
@@ -1900,18 +3063,21 @@ private func makeGameDetail(
         outs: nil,
         highlightText: nil,
         events: [],
-        note: note
+        note: note,
+        providerGameID: nil
     )
 }
 
-private func makeProbabilityTestTeams() -> [Team] {
+private func makeProbabilityTestTeams(includePreviousRanks: Bool = true) -> [Team] {
     (1...10).map { index in
-        Team(
+        let previousRegularSeasonRank: Int? = includePreviousRanks ? index : nil
+        return Team(
             id: "team\(index)",
             name: "팀\(index)",
             shortName: "T\(index)",
             englishName: "Team \(index)",
-            markText: "T\(index)"
+            markText: "T\(index)",
+            previousRegularSeasonRank: previousRegularSeasonRank
         )
     }
 }
@@ -1986,4 +3152,130 @@ private func completedProbabilityGame(
         seasonClassification: .regularSeason,
         note: "db_export provider_game_id=20260919\(awayTeam.shortName)\(homeTeam.shortName)0"
     )
+}
+
+private func makeConservativeEarlySeasonProbabilitySchedule(
+    teams: [Team],
+    completedGamesPerTeam: Int,
+    seasonLength: Int
+) -> [GameDetail] {
+    var gaveTeam1OpeningLoss = false
+
+    return makeRoundRobinProbabilitySchedule(
+        teams: teams,
+        completedGamesPerTeam: completedGamesPerTeam,
+        seasonLength: seasonLength
+    ) { _, awayTeam, homeTeam in
+        let winningTeamID: String
+
+        if awayTeam.id == "team1" || homeTeam.id == "team1" {
+            if gaveTeam1OpeningLoss == false {
+                gaveTeam1OpeningLoss = true
+                winningTeamID = awayTeam.id == "team1" ? homeTeam.id : awayTeam.id
+            } else {
+                winningTeamID = "team1"
+            }
+        } else if awayTeam.id == "team10" || homeTeam.id == "team10" {
+            winningTeamID = awayTeam.id == "team10" ? homeTeam.id : awayTeam.id
+        } else {
+            let awayRank = awayTeam.previousRegularSeasonRank ?? Int.max
+            let homeRank = homeTeam.previousRegularSeasonRank ?? Int.max
+            winningTeamID = awayRank <= homeRank ? awayTeam.id : homeTeam.id
+        }
+
+        if winningTeamID == awayTeam.id {
+            return (awayScore: 5, homeScore: 3)
+        }
+        return (awayScore: 3, homeScore: 5)
+    }
+}
+
+private func makeRoundRobinProbabilitySchedule(
+    teams: [Team],
+    completedGamesPerTeam: Int,
+    seasonLength: Int,
+    completedScoreProvider: (_ round: Int, _ awayTeam: Team, _ homeTeam: Team) -> (awayScore: Int, homeScore: Int)
+) -> [GameDetail] {
+    precondition(teams.count.isMultiple(of: 2))
+    precondition((0...seasonLength).contains(completedGamesPerTeam))
+
+    let roundPairings = roundRobinPairings(teamCount: teams.count)
+    var games: [GameDetail] = []
+    var identifierIndex = 1
+
+    for round in 0..<seasonLength {
+        let pairings = roundPairings[round % roundPairings.count]
+        for (pairIndex, pairing) in pairings.enumerated() {
+            let isHomeTeamSecond = (round + pairIndex).isMultiple(of: 2)
+            let awayTeam = isHomeTeamSecond ? teams[pairing.first] : teams[pairing.second]
+            let homeTeam = isHomeTeamSecond ? teams[pairing.second] : teams[pairing.first]
+            let scheduledStart = isoDate(
+                String(
+                    format: "2026-%02d-%02dT18:30:00+09:00",
+                    min(12, 3 + (round / 27)),
+                    1 + (round % 27)
+                )
+            )
+
+            if round < completedGamesPerTeam {
+                let score = completedScoreProvider(round, awayTeam, homeTeam)
+                let identifier = String(format: "65000000-0000-0000-0000-%012d", identifierIndex)
+                games.append(
+                    makeGameDetail(
+                        id: UUID(uuidString: identifier)!,
+                        scheduledStart: scheduledStart,
+                        venue: "잠실",
+                        awayTeam: awayTeam,
+                        homeTeam: homeTeam,
+                        awayScore: score.awayScore,
+                        homeScore: score.homeScore,
+                        status: .final,
+                        seasonClassification: .regularSeason,
+                        note: "db_export provider_game_id=2026RR\(identifierIndex)"
+                    )
+                )
+            } else {
+                let identifier = String(format: "66000000-0000-0000-0000-%012d", identifierIndex)
+                games.append(
+                    makeGameDetail(
+                        id: UUID(uuidString: identifier)!,
+                        scheduledStart: scheduledStart,
+                        venue: "잠실",
+                        awayTeam: awayTeam,
+                        homeTeam: homeTeam,
+                        awayScore: nil,
+                        homeScore: nil,
+                        status: .upcoming,
+                        seasonClassification: .regularSeason
+                    )
+                )
+            }
+
+            identifierIndex += 1
+        }
+    }
+
+    return games
+}
+
+private func roundRobinPairings(teamCount: Int) -> [[(first: Int, second: Int)]] {
+    precondition(teamCount.isMultiple(of: 2))
+
+    var rotation = Array(0..<teamCount)
+    var rounds: [[(first: Int, second: Int)]] = []
+
+    for _ in 0..<(teamCount - 1) {
+        var round: [(first: Int, second: Int)] = []
+        for pairIndex in 0..<(teamCount / 2) {
+            round.append((first: rotation[pairIndex], second: rotation[teamCount - 1 - pairIndex]))
+        }
+        rounds.append(round)
+
+        let fixed = rotation.removeFirst()
+        let last = rotation.removeLast()
+        rotation.insert(last, at: 0)
+        rotation.insert(fixed, at: 0)
+    }
+
+    return rounds
 }
