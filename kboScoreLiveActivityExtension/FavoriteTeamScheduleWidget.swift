@@ -291,6 +291,7 @@ private struct FavoriteTeamScheduleDayCell: View {
                     FavoriteTeamScheduleOpponentMark(
                         teamID: day.opponentTeamID,
                         status: day.dominantStatus,
+                        favoriteTeamIsHome: day.favoriteTeamIsHome,
                         accent: accent,
                         isFullColor: isFullColor,
                         count: day.gameCount
@@ -308,9 +309,9 @@ private struct FavoriteTeamScheduleDayCell: View {
                     }
                 }
             }
-            .frame(height: 18)
+            .frame(height: 24)
         }
-        .frame(maxWidth: .infinity, minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: 46)
         .background(cellBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -323,6 +324,9 @@ private struct FavoriteTeamScheduleDayCell: View {
     }
 
     private var cellBackground: Color {
+        if day.isToday {
+            return .clear
+        }
         if let result = day.favoriteTeamResult {
             switch result {
             case .win:
@@ -333,26 +337,29 @@ private struct FavoriteTeamScheduleDayCell: View {
                 return chipBackground
             }
         }
-        if day.isToday {
-            return chipBackground
-        }
         return .clear
     }
 
     private var cellBorderColor: Color {
-        day.isToday ? accent.opacity(isFullColor ? 0.32 : 0.7) : .clear
+        day.isToday ? Color(red: 0.13, green: 0.44, blue: 0.88).opacity(isFullColor ? 0.9 : 0.82) : .clear
     }
 }
 
 private struct FavoriteTeamScheduleOpponentMark: View {
     let teamID: String?
     let status: FavoriteTeamScheduleWidgetGameStatus?
+    let favoriteTeamIsHome: Bool?
     let accent: Color
     let isFullColor: Bool
     let count: Int
 
     private var size: CGFloat {
-        count > 1 ? 18 : 16
+        count > 1 ? 22 : 20
+    }
+
+    private var homeAwayLabel: String? {
+        guard let favoriteTeamIsHome else { return nil }
+        return favoriteTeamIsHome ? "H" : "A"
     }
 
     var body: some View {
@@ -364,23 +371,37 @@ private struct FavoriteTeamScheduleOpponentMark: View {
                 Image(identity.logoAssetName)
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.16)
+                    .padding(size * 0.20)
             }
             .frame(width: size, height: size)
             .overlay(
                 RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                     .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             )
+            .overlay(alignment: .bottomTrailing) {
+                if let homeAwayLabel {
+                    FavoriteTeamScheduleHomeAwayBadge(label: homeAwayLabel, isFullColor: isFullColor)
+                        .offset(x: 3, y: 3)
+                }
+            }
+            .accessibilityLabel(accessibilityLabel(teamName: identity.displayName))
         } else if let teamID, let identity = TeamIdentity.catalog[teamID] {
             Text(identity.monogram)
-                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .font(.system(size: 9, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 5)
                 .frame(height: size)
                 .background(
                     RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                         .fill(isFullColor ? identity.theme.chipBackground : Color.primary.opacity(0.12))
                 )
+                .overlay(alignment: .bottomTrailing) {
+                    if let homeAwayLabel {
+                        FavoriteTeamScheduleHomeAwayBadge(label: homeAwayLabel, isFullColor: isFullColor)
+                            .offset(x: 3, y: 3)
+                    }
+                }
+                .accessibilityLabel(accessibilityLabel(teamName: identity.displayName))
                 .widgetAccentable()
         } else {
             Circle()
@@ -388,6 +409,32 @@ private struct FavoriteTeamScheduleOpponentMark: View {
                 .frame(width: count > 1 ? 10 : 6, height: count > 1 ? 10 : 6)
                 .widgetAccentable()
         }
+    }
+
+    private func accessibilityLabel(teamName: String) -> String {
+        guard let favoriteTeamIsHome else { return "\(teamName)" }
+        return favoriteTeamIsHome ? "\(teamName), 홈 경기" : "\(teamName), 원정 경기"
+    }
+}
+
+private struct FavoriteTeamScheduleHomeAwayBadge: View {
+    let label: String
+    let isFullColor: Bool
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 7, weight: .bold, design: .rounded))
+            .foregroundStyle(isFullColor ? .secondary : .primary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(isFullColor ? Color(.systemBackground).opacity(0.92) : Color.primary.opacity(0.16))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.primary.opacity(isFullColor ? 0.10 : 0.08), lineWidth: 0.5)
+            )
     }
 }
 
@@ -407,15 +454,20 @@ private enum FavoriteTeamScheduleWidgetV2Preview {
             let isInMonth = calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month)
             let isToday = calendar.isDateInToday(cursor)
             let sampleGame: (count: Int, teamID: String?, result: FavoriteTeamScheduleWidgetTeamResult?, status: FavoriteTeamScheduleWidgetGameStatus?)?
+            let sampleHomeGame: Bool?
             switch offset {
             case 9:
                 sampleGame = (1, "hanwha", .win, .final)
+                sampleHomeGame = true
             case 13:
                 sampleGame = (1, "doosan", nil, .upcoming)
+                sampleHomeGame = false
             case 18:
                 sampleGame = (2, "samsung", .loss, .final)
+                sampleHomeGame = true
             default:
                 sampleGame = nil
+                sampleHomeGame = nil
             }
 
             days.append(
@@ -426,6 +478,7 @@ private enum FavoriteTeamScheduleWidgetV2Preview {
                     gameCount: sampleGame?.count ?? 0,
                     dominantStatus: sampleGame?.status,
                     opponentTeamID: sampleGame?.teamID,
+                    favoriteTeamIsHome: sampleHomeGame,
                     favoriteTeamResult: sampleGame?.result
                 )
             )

@@ -189,6 +189,7 @@ struct FavoriteTeamScheduleWidgetSnapshot: Codable, Hashable, Sendable {
         let gameCount: Int
         let dominantStatus: FavoriteTeamScheduleWidgetGameStatus?
         let opponentTeamID: String?
+        let favoriteTeamIsHome: Bool?
         let favoriteTeamResult: FavoriteTeamScheduleWidgetTeamResult?
 
         var id: Date { date }
