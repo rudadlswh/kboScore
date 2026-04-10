@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
+from app.api.routes import bootstrap as bootstrap_route
 from app.api.routes import games as games_route
 from app.api.routes import schedule as schedule_route
 from app.api.routes import standings as standings_route
@@ -37,6 +40,88 @@ def test_health_endpoint_returns_ok(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_bootstrap_endpoint_returns_expected_app_contract_and_cache_headers(client, monkeypatch):
+    generated_at = datetime(2026, 4, 3, 18, 30, tzinfo=KST)
+    payload = {
+        "generated_at": "2026-04-03T18:30:00+09:00",
+        "data_version": "bootstrap-v1",
+        "teams": [
+            {
+                "id": "lg",
+                "name": "LG 트윈스",
+                "short_name": "LG",
+                "english_name": "LG Twins",
+                "mark_text": "LG",
+            }
+        ],
+        "games": [
+            {
+                "id": "game-1",
+                "scheduled_start": "2026-04-03T18:30:00+09:00",
+                "venue": "잠실",
+                "away_team_id": "doosan",
+                "home_team_id": "lg",
+                "away_score": 2,
+                "home_score": 5,
+                "status_code": "FINAL",
+                "status_text": "종료",
+                "season_classification": "regular_season",
+                "inning_text": "종료",
+                "events": [],
+                "note": "db_export provider_game_id=20260403LGDOO0",
+            }
+        ],
+        "notifications": [],
+        "settings": None,
+    }
+    fake_snapshot = SimpleNamespace(
+        payload=payload,
+        body=json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+        generated_at=generated_at,
+        data_version="bootstrap-v1",
+        etag='"bootstrap-v1"',
+        last_modified="Fri, 03 Apr 2026 09:30:00 GMT",
+    )
+
+    monkeypatch.setattr(
+        bootstrap_route.bootstrap_snapshot_service,
+        "build_snapshot",
+        lambda db: fake_snapshot,
+    )
+
+    response = client.get("/v1/bootstrap")
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == '"bootstrap-v1"'
+    assert response.headers["last-modified"] == "Fri, 03 Apr 2026 09:30:00 GMT"
+    assert response.headers["cache-control"] == "public, max-age=15"
+    assert response.json() == payload
+
+
+def test_bootstrap_endpoint_returns_304_when_etag_matches(client, monkeypatch):
+    generated_at = datetime(2026, 4, 3, 18, 30, tzinfo=KST)
+    fake_snapshot = SimpleNamespace(
+        payload={},
+        body=b"{}",
+        generated_at=generated_at,
+        data_version="bootstrap-v1",
+        etag='"bootstrap-v1"',
+        last_modified="Fri, 03 Apr 2026 09:30:00 GMT",
+    )
+
+    monkeypatch.setattr(
+        bootstrap_route.bootstrap_snapshot_service,
+        "build_snapshot",
+        lambda db: fake_snapshot,
+    )
+
+    response = client.get("/v1/bootstrap", headers={"If-None-Match": '"bootstrap-v1"'})
+
+    assert response.status_code == 304
+    assert response.content == b""
+    assert response.headers["etag"] == '"bootstrap-v1"'
 
 
 def test_teams_endpoint_returns_expected_shape(client, monkeypatch):

@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS public.games (
     away_score integer NOT NULL DEFAULT 0,
     inning_state character varying(50),
     is_cancelled boolean NOT NULL DEFAULT false,
-    is_postponed boolean NOT NULL DEFAULT false
+    is_postponed boolean NOT NULL DEFAULT false,
+    source_updated_at timestamptz
 );
 
 CREATE TABLE IF NOT EXISTS public.game_snapshots (
