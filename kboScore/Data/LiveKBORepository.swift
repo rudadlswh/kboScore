@@ -409,6 +409,8 @@ private struct BootstrapCachePayload: Codable, Sendable {
             seasonClassification: game.seasonClassification.rawValue,
             inningText: game.inningText,
             bases: game.bases.map { KBORunnerStateDTO(first: $0.first, second: $0.second, third: $0.third) },
+            balls: game.balls,
+            strikes: game.strikes,
             outs: game.outs,
             highlightText: game.highlightText,
             events: game.events.map {

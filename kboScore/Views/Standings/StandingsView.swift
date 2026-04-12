@@ -70,7 +70,7 @@ private struct StandingsRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(snapshot.team.name)
+                    Text(snapshot.team.displayName)
                         .font(.subheadline.weight(.bold))
                         .lineLimit(1)
                     Text(snapshot.recordText)

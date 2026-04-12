@@ -546,7 +546,7 @@ final class AppModel {
 
         let lowered = trimmed.lowercased()
         if lowered.contains("provider_game_id=") || lowered.hasPrefix("db_export") {
-            return "\(awayTeam.shortName) vs \(homeTeam.shortName) · \(status.title)"
+            return "\(awayTeam.displayName) vs \(homeTeam.displayName) · \(status.title)"
         }
         return trimmed
     }
@@ -942,7 +942,7 @@ final class AppModel {
             gameID: targetGame.map { resolvedRawGameID(for: $0) },
             eventType: .scoreChange,
             title: "테스트 스코어 알림",
-            body: targetGame.map { "\($0.awayTeam.shortName) vs \($0.homeTeam.shortName) 상세로 이동합니다." } ?? "게임 상세 이동 경로를 확인합니다.",
+            body: targetGame.map { "\($0.awayTeam.displayName) vs \($0.homeTeam.displayName) 상세로 이동합니다." } ?? "게임 상세 이동 경로를 확인합니다.",
             teamIDs: [targetGame?.awayTeam.id, targetGame?.homeTeam.id].compactMap { $0 },
             routeHint: targetGame == nil ? .notifications : .gameDetail
         )
@@ -1320,11 +1320,11 @@ final class AppModel {
         guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
 
         if let team = teams.first(where: { $0.id == favoriteTeamID }) {
-            return (team.id, team.name, team.shortName)
+            return (team.id, team.displayName, team.displayName)
         }
 
         if let identity = TeamIdentity.catalog[favoriteTeamID] {
-            return (identity.id, identity.displayName, identity.shortLabel)
+            return (identity.id, identity.teamDisplayName, identity.teamDisplayName)
         }
 
         return (favoriteTeamID, favoriteTeamID.uppercased(), favoriteTeamID.uppercased())

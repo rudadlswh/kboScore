@@ -117,7 +117,7 @@ struct TeamIdentity: Sendable {
         "kia": TeamIdentity(
             id: "kia",
             displayName: "KIA 타이거즈",
-            shortLabel: "KIA",
+            shortLabel: "기아",
             monogram: "KIA",
             logoAssetName: "team-kia",
             themeID: .kia,

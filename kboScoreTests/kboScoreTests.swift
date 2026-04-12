@@ -1467,6 +1467,28 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == backendURL.absoluteString)
     }
 
+    @Test func liveRepositoryBuildsLocalhostBackendRequestURLs() async throws {
+        let session = makeStubSession()
+        let repository = LiveKBORepository(baseURL: URL(string: "http://localhost:8088")!, session: session)
+        let payload = try fixtureData(named: "2026-preseason-bootstrap")
+
+        URLProtocolStub.testResponses = [
+            "http://localhost:8088/games": StubResponse(statusCode: 200, data: payload)
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        _ = try await repository.fetchGames()
+        let request = try #require(URLProtocolStub.lastRequest)
+
+        #expect(request.url?.absoluteString == "http://localhost:8088/games")
+        #expect(request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+    }
+
     @Test func bootstrapRefreshRepositoryWritesDocumentsJSONAndStoresETagOn200() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -2780,7 +2802,7 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host else { return false }
-        return host == "example.com" || host == "www.koreabaseball.com"
+        return host == "example.com" || host == "www.koreabaseball.com" || host == "localhost"
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
@@ -3060,6 +3082,8 @@ private func makeGameDetail(
         seasonClassification: seasonClassification,
         inningText: status.title,
         bases: nil,
+        balls: nil,
+        strikes: nil,
         outs: nil,
         highlightText: nil,
         events: [],

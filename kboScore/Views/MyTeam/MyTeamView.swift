@@ -51,7 +51,7 @@ struct MyTeamView: View {
                             } else {
                                 EmptyStateView(
                                     systemImage: "calendar.badge.exclamationmark",
-                                    title: "오늘 \(favoriteTeam.shortName) 경기 없음",
+                                    title: "오늘 \(favoriteTeam.displayName) 경기 없음",
                                     message: "오늘은 쉬는 날입니다. 아래에서 다음 경기와 최근 결과를 확인하세요."
                                 )
                             }
@@ -126,7 +126,7 @@ private struct MyTeamHeaderView: View {
                 Text("마이팀")
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white.opacity(0.82))
-                Text(team.name)
+                Text(team.displayName)
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                 Text("오늘 경기 우선, 다음 일정과 최근 결과를 함께 봅니다.")
@@ -142,7 +142,7 @@ private struct MyTeamHeaderView: View {
                 }
 
                 ForEach(appModel.teams) { candidate in
-                    Button(candidate.name) {
+                    Button(candidate.displayName) {
                         appModel.settings.favoriteTeamID = candidate.id
                     }
                 }

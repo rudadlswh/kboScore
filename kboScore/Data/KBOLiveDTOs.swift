@@ -134,6 +134,8 @@ struct KBOGameDTO: Codable, Sendable {
     let seasonClassification: String?
     let inningText: String?
     let bases: KBORunnerStateDTO?
+    let balls: Int?
+    let strikes: Int?
     let outs: Int?
     let highlightText: String?
     let events: [KBOGameEventDTO]
@@ -159,7 +161,12 @@ struct KBOGameDTO: Codable, Sendable {
         case seasonType
         case inningText
         case bases
+        case balls
+        case ballCount
+        case strikes
+        case strikeCount
         case outs
+        case outCount
         case highlightText
         case events
         case note
@@ -179,6 +186,8 @@ struct KBOGameDTO: Codable, Sendable {
         seasonClassification: String? = nil,
         inningText: String?,
         bases: KBORunnerStateDTO?,
+        balls: Int? = nil,
+        strikes: Int? = nil,
         outs: Int?,
         highlightText: String?,
         events: [KBOGameEventDTO],
@@ -197,6 +206,8 @@ struct KBOGameDTO: Codable, Sendable {
         self.seasonClassification = seasonClassification
         self.inningText = inningText
         self.bases = bases
+        self.balls = balls
+        self.strikes = strikes
         self.outs = outs
         self.highlightText = highlightText
         self.events = events
@@ -236,7 +247,12 @@ struct KBOGameDTO: Codable, Sendable {
             (try container.decodeIfPresent(String.self, forKey: .seasonType))
         inningText = try container.decodeIfPresent(String.self, forKey: .inningText)
         bases = try container.decodeIfPresent(KBORunnerStateDTO.self, forKey: .bases)
-        outs = try container.decodeIfPresent(Int.self, forKey: .outs)
+        balls = try container.decodeIfPresent(Int.self, forKey: .balls) ??
+            (try container.decodeIfPresent(Int.self, forKey: .ballCount))
+        strikes = try container.decodeIfPresent(Int.self, forKey: .strikes) ??
+            (try container.decodeIfPresent(Int.self, forKey: .strikeCount))
+        outs = try container.decodeIfPresent(Int.self, forKey: .outs) ??
+            (try container.decodeIfPresent(Int.self, forKey: .outCount))
         highlightText = try container.decodeIfPresent(String.self, forKey: .highlightText)
         events = try container.decodeIfPresent([KBOGameEventDTO].self, forKey: .events) ?? []
     }
@@ -290,6 +306,8 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(seasonClassification, forKey: .seasonClassification)
         try container.encodeIfPresent(inningText, forKey: .inningText)
         try container.encodeIfPresent(bases, forKey: .bases)
+        try container.encodeIfPresent(balls, forKey: .balls)
+        try container.encodeIfPresent(strikes, forKey: .strikes)
         try container.encodeIfPresent(outs, forKey: .outs)
         try container.encodeIfPresent(highlightText, forKey: .highlightText)
         try container.encode(events, forKey: .events)
@@ -582,6 +600,8 @@ enum KBODataMapper {
             seasonClassification: seasonClassification,
             inningText: inningText,
             bases: dto.bases.map { RunnerState(first: $0.first, second: $0.second, third: $0.third) },
+            balls: dto.balls,
+            strikes: dto.strikes,
             outs: dto.outs,
             highlightText: highlight,
             events: dto.events.map(mapEvent).sorted { $0.timestamp > $1.timestamp },

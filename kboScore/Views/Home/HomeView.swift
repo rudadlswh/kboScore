@@ -55,7 +55,11 @@ struct HomeView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(appModel.filteredHomeGames) { game in
                                 NavigationLink(value: game.id) {
-                                    GameCardView(summary: game, showsHomeTeamBadge: true)
+                                    GameCardView(
+                                        summary: game,
+                                        showsHomeTeamBadge: true,
+                                        liveColorStyle: .white
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -120,7 +124,7 @@ private struct HomeFallbackStandingsRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
-                    Text(snapshot.team.name)
+                    Text(snapshot.team.displayName)
                         .font(.subheadline.weight(.bold))
                         .lineLimit(1)
                     Text(snapshot.recordText)

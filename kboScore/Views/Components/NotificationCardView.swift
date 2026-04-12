@@ -53,7 +53,7 @@ struct NotificationCardView: View {
                     HStack(spacing: 6) {
                         ForEach(relatedTeams) { team in
                             TeamMarkView(team: team, size: 22)
-                            Text(team.shortName)
+                            Text(team.displayName)
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.secondary)
                         }
