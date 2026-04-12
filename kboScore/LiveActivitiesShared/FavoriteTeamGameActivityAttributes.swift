@@ -16,6 +16,12 @@ struct FavoriteTeamGameActivityAttributes: ActivityAttributes {
         let opponentScoreText: String
         let inningText: String
         let summaryText: String
+        let balls: Int?
+        let strikes: Int?
+        let outs: Int?
+        let runnerOnFirst: Bool?
+        let runnerOnSecond: Bool?
+        let runnerOnThird: Bool?
     }
 
     let gameID: String

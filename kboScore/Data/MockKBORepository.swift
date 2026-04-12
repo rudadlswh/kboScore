@@ -279,6 +279,8 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             seasonClassification: inferredClassification,
             inningText: game.inningText,
             bases: game.bases,
+            balls: game.balls,
+            strikes: game.strikes,
             outs: game.outs,
             highlightText: game.highlightText,
             events: game.events,

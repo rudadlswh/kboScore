@@ -123,6 +123,40 @@ class GameRepository:
         result = db.execute(text(query), params)
         return result.mappings().all()
 
+    def list_games_for_bootstrap(self, db: Session) -> Sequence[dict]:
+        result = db.execute(
+            text(
+                """
+                SELECT
+                    g.id::text AS game_id,
+                    g.provider_game_id,
+                    g.official_provider_game_id,
+                    g.scheduled_at,
+                    g.stadium AS stadium_name_ko,
+                    g.status,
+                    g.season_classification,
+                    g.home_score,
+                    g.away_score,
+                    g.inning_state,
+                    g.is_postponed,
+                    g.is_cancelled,
+                    g.source_updated_at,
+                    home.code AS home_team_code,
+                    away.code AS away_team_code
+                FROM games g
+                JOIN teams home ON home.id = g.home_team_id
+                JOIN teams away ON away.id = g.away_team_id
+                ORDER BY
+                    g.game_date ASC,
+                    g.scheduled_at ASC NULLS LAST,
+                    away.sort_order ASC,
+                    home.sort_order ASC,
+                    g.id ASC
+                """
+            )
+        )
+        return result.mappings().all()
+
     def get_game_detail_base(self, db: Session, game_id: str) -> dict | None:
         result = db.execute(
             text(

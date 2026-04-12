@@ -421,16 +421,16 @@ private struct ScheduleGameRow: View {
 
     private var titleText: String {
         if filter == .myTeam, favoriteTeamID != nil {
-            return leadingTeam.name
+            return leadingTeam.displayName
         }
-        return "\(game.awayTeam.shortName) vs \(game.homeTeam.shortName)"
+        return "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName)"
     }
 
     private var subtitleText: String {
         if filter == .myTeam, favoriteTeamID != nil {
             return game.venue
         }
-        return "\(game.venue) · \(game.homeTeam.shortName) 홈"
+        return "\(game.venue) · \(game.homeTeam.displayName) 홈"
     }
 
     private var finalResultText: String? {
@@ -439,7 +439,7 @@ private struct ScheduleGameRow: View {
               let scoreLine = game.finalScoreLine else {
             return nil
         }
-        return "\(winningTeam.shortName) 승 · \(scoreLine)"
+        return "\(winningTeam.displayName) 승 · \(scoreLine)"
     }
 
     private var homeAwayLabel: String {

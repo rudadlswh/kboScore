@@ -22,12 +22,15 @@ struct SettingsView: View {
 
                         if let selectedTeamID = appModel.settings.favoriteTeamID,
                            appModel.teams.contains(where: { $0.id == selectedTeamID }) == false {
-                            Text(TeamIdentity.catalog[selectedTeamID]?.displayName ?? selectedTeamID)
+                            Text(Team.displayName(
+                                forTeamID: selectedTeamID,
+                                fallback: TeamIdentity.catalog[selectedTeamID]?.shortLabel ?? selectedTeamID
+                            ))
                                 .tag(Optional(selectedTeamID))
                         }
 
                         ForEach(appModel.teams) { team in
-                            Text(team.name)
+                            Text(team.displayName)
                                 .tag(Optional(team.id))
                         }
                     }
@@ -83,6 +86,18 @@ struct SettingsView: View {
                 Section("디버그") {
                     InfoRow(title: "활성 데이터", value: appModel.debugActiveDataSource)
                     InfoRow(title: "표시 데이터", value: appModel.debugDeliverySource)
+                    InfoRow(title: "부트스트랩 API", value: appModel.debugBootstrapAPIEnabled)
+                    InfoRow(title: "부트스트랩 ETag", value: appModel.debugBootstrapETag)
+                    InfoRow(title: "부트스트랩 조회", value: appModel.debugBootstrapLastFetchText)
+                    InfoRow(title: "부트스트랩 저장", value: appModel.debugBootstrapLastWriteText)
+                    InfoRow(title: "부트스트랩 결과", value: appModel.debugBootstrapLastResult)
+                    InfoRow(title: "로컬 JSON 소스", value: appModel.debugLocalBootstrapSource)
+                    InfoRow(title: "문서 JSON 경로", value: appModel.debugLocalBootstrapPath)
+                    InfoRow(title: "활성 로드 경로", value: appModel.debugLocalBootstrapResolvedPath ?? "아직 읽지 않음")
+                    InfoRow(title: "로컬 JSON 읽기", value: appModel.debugLocalBootstrapLoadedText)
+                    if let debugLocalBootstrapMessage = appModel.debugLocalBootstrapMessage {
+                        InfoRow(title: "로컬 JSON 상태", value: debugLocalBootstrapMessage)
+                    }
                     InfoRow(title: "기준 URL", value: appModel.debugBaseURL ?? "설정 안 됨")
                     InfoRow(title: "마지막 갱신", value: appModel.debugLastRefreshText)
                     InfoRow(title: "지연 상태", value: appModel.isShowingStaleData ? "지연됨" : "정상")
@@ -127,6 +142,7 @@ private struct InfoRow: View {
             Spacer()
             Text(value)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 }

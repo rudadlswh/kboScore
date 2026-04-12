@@ -139,10 +139,10 @@ struct GameDetailView: View {
                         SummaryItemsCard(items: review.summaryItems)
                     }
 
-                    BattingSectionCard(title: "\(presentation.game.awayTeam.name) 타자 기록", section: review.awayBatting)
-                    BattingSectionCard(title: "\(presentation.game.homeTeam.name) 타자 기록", section: review.homeBatting)
-                    PitchingSectionCard(title: "\(presentation.game.awayTeam.name) 투수 기록", section: review.awayPitching)
-                    PitchingSectionCard(title: "\(presentation.game.homeTeam.name) 투수 기록", section: review.homePitching)
+                    BattingSectionCard(title: "\(presentation.game.awayTeam.displayName) 타자 기록", section: review.awayBatting)
+                    BattingSectionCard(title: "\(presentation.game.homeTeam.displayName) 타자 기록", section: review.homeBatting)
+                    PitchingSectionCard(title: "\(presentation.game.awayTeam.displayName) 투수 기록", section: review.awayPitching)
+                    PitchingSectionCard(title: "\(presentation.game.homeTeam.displayName) 투수 기록", section: review.homePitching)
                 } else {
                     EmptyStateView(
                         systemImage: "doc.text",
@@ -416,7 +416,7 @@ private struct ScoreColumn: View {
                 .font(.caption.weight(.bold))
                 .foregroundStyle(tint)
             TeamMarkView(team: team, size: 54)
-            Text(team.shortName)
+            Text(team.displayName)
                 .font(.subheadline.weight(.bold))
                 .lineLimit(1)
             Text(scoreText)
@@ -700,7 +700,7 @@ private struct LineScoreValueRow: View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
                 TeamMarkView(team: team, size: 24)
-                Text(team.shortName)
+                Text(team.displayName)
                     .font(.caption.weight(.bold))
                     .lineLimit(1)
             }
@@ -740,7 +740,7 @@ private struct FallbackLineScoreRow: View {
         HStack {
             HStack(spacing: 8) {
                 TeamMarkView(team: team, size: 26)
-                Text(team.name)
+                Text(team.displayName)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
             }
@@ -942,7 +942,7 @@ private struct StarterColumn: View {
                     Text(role)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
-                    Text(team.name)
+                    Text(team.displayName)
                         .font(.subheadline.weight(.bold))
                         .lineLimit(1)
                 }

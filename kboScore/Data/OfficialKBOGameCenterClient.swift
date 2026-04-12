@@ -397,6 +397,8 @@ struct OfficialKBOGameCenterClient: Sendable {
             seasonClassification: game.seasonClassification,
             inningText: game.inningText,
             bases: game.bases,
+            balls: game.balls,
+            strikes: game.strikes,
             outs: game.outs,
             highlightText: game.highlightText,
             events: game.events,

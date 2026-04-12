@@ -384,7 +384,7 @@ private struct FavoriteTeamScheduleOpponentMark: View {
                         .offset(x: 3, y: 3)
                 }
             }
-            .accessibilityLabel(accessibilityLabel(teamName: identity.displayName))
+            .accessibilityLabel(accessibilityLabel(teamName: identity.teamDisplayName))
         } else if let teamID, let identity = TeamIdentity.catalog[teamID] {
             Text(identity.monogram)
                 .font(.system(size: 9, weight: .bold, design: .rounded))
@@ -401,7 +401,7 @@ private struct FavoriteTeamScheduleOpponentMark: View {
                             .offset(x: 3, y: 3)
                     }
                 }
-                .accessibilityLabel(accessibilityLabel(teamName: identity.displayName))
+                .accessibilityLabel(accessibilityLabel(teamName: identity.teamDisplayName))
                 .widgetAccentable()
         } else {
             Circle()
@@ -490,7 +490,7 @@ private enum FavoriteTeamScheduleWidgetV2Preview {
             generatedAt: referenceDate,
             refreshAfter: referenceDate.addingTimeInterval(60 * 60 * 6),
             teamID: "lg",
-            teamName: "LG 트윈스",
+            teamName: "LG",
             teamShortName: "LG",
             displayedMonth: monthStart,
             monthTitle: {

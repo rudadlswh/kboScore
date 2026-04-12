@@ -112,6 +112,8 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let seasonClassification: GameSeasonClassification
     let inningText: String?
     let bases: RunnerState?
+    let balls: Int?
+    let strikes: Int?
     let outs: Int?
     let highlightText: String?
     let events: [GameEvent]
@@ -146,9 +148,9 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     var shareText: String {
         let scoreText: String
         if let awayScore, let homeScore {
-            scoreText = "\(awayTeam.name) \(awayScore) : \(homeScore) \(homeTeam.name)"
+            scoreText = "\(awayTeam.displayName) \(awayScore) : \(homeScore) \(homeTeam.displayName)"
         } else {
-            scoreText = "\(awayTeam.name) vs \(homeTeam.name)"
+            scoreText = "\(awayTeam.displayName) vs \(homeTeam.displayName)"
         }
 
         let stateText = inningText ?? status.title
@@ -172,7 +174,7 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
     var finalScoreLine: String? {
         guard hasCompleteFinalScore, let awayScore, let homeScore else { return nil }
-        return "\(awayTeam.shortName) \(awayScore) : \(homeScore) \(homeTeam.shortName)"
+        return "\(awayTeam.displayName) \(awayScore) : \(homeScore) \(homeTeam.displayName)"
     }
 
     func finalResult(for teamID: String?) -> TeamGameResult? {

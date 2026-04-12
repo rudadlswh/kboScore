@@ -14,122 +14,57 @@ struct KBOScoreLiveActivityWidget: Widget {
         ActivityConfiguration(for: FavoriteTeamGameActivityAttributes.self) { context in
             LockScreenLiveActivityView(context: context)
         } dynamicIsland: { context in
-            DynamicIsland {
+            let game = BroadcastScoreboardGame(context: context)
+
+            return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    teamBadge(
-                        shortName: context.attributes.favoriteTeamShortName,
-                        teamID: context.attributes.favoriteTeamID
+                    DynamicIslandTeamView(
+                        side: game.away,
+                        alignment: .leading,
+                        isBatting: game.battingSide == .away
                     )
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
-                    teamBadge(
-                        shortName: context.attributes.opponentTeamShortName,
-                        teamID: context.attributes.opponentTeamID
+                    DynamicIslandTeamView(
+                        side: game.home,
+                        alignment: .trailing,
+                        isBatting: game.battingSide == .home
                     )
                 }
 
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(spacing: 4) {
-                        scoreLine(context: context)
-                        Text(context.state.inningText)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                    DynamicIslandStatusView(
+                        inningText: game.inningText,
+                        statusText: game.statusText,
+                        baseState: game.baseState
+                    )
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack(spacing: 8) {
-                        Label(context.attributes.venue, systemImage: "mappin.and.ellipse")
-                            .lineLimit(1)
-                        Spacer()
-                        Text(homeAwayText(isHomeGame: context.attributes.isHomeGame))
-                            .font(.caption.weight(.bold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.12), in: Capsule())
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    DynamicIslandBroadcastMetadataRow(game: game)
                 }
             } compactLeading: {
-                Text(context.attributes.favoriteTeamShortName)
+                Text("\(game.away.shortName) \(game.away.scoreText)")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(teamColor(for: context.attributes.favoriteTeamID))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(.white)
             } compactTrailing: {
-                Text("\(context.state.favoriteScoreText):\(context.state.opponentScoreText)")
+                Text("\(game.home.scoreText) \(game.home.shortName)")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(.white)
             } minimal: {
-                Text(context.attributes.favoriteTeamShortName)
+                Text(game.minimalStatusText)
                     .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .keylineTint(teamColor(for: context.attributes.favoriteTeamID))
-        }
-    }
-
-    private func homeAwayText(isHomeGame: Bool) -> String {
-        isHomeGame ? "홈" : "원정"
-    }
-
-    private func teamColor(for teamID: String) -> Color {
-        switch teamID {
-        case "doosan":
-            Color(red: 0.97, green: 0.15, blue: 0.16)
-        case "hanwha":
-            Color(red: 1.0, green: 0.47, blue: 0.21)
-        case "kia":
-            Color(red: 0.90, green: 0.10, blue: 0.22)
-        case "kiwoom":
-            Color(red: 0.89, green: 0.00, blue: 0.49)
-        case "kt":
-            Color(red: 0.93, green: 0.11, blue: 0.14)
-        case "lg":
-            Color(red: 0.65, green: 0.00, blue: 0.20)
-        case "lotte":
-            Color(red: 0.82, green: 0.11, blue: 0.18)
-        case "nc":
-            Color(red: 0.00, green: 0.15, blue: 0.36)
-        case "samsung":
-            Color(red: 0.00, green: 0.33, blue: 0.71)
-        case "ssg":
-            Color(red: 0.78, green: 0.03, blue: 0.12)
-        default:
-            Color.accentColor
-        }
-    }
-
-    private func teamBadge(shortName: String, teamID: String) -> some View {
-        Text(shortName)
-            .font(.headline.weight(.bold))
-            .foregroundStyle(teamColor(for: teamID))
-            .frame(minWidth: 44)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(teamColor(for: teamID).opacity(0.12), in: Capsule())
-    }
-
-    private func scoreLine(context: ActivityViewContext<FavoriteTeamGameActivityAttributes>) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.attributes.favoriteTeamShortName)
-                    .font(.caption.weight(.bold))
-                Text(context.state.favoriteScoreText)
-                    .font(.title2.weight(.heavy))
-                    .monospacedDigit()
-            }
-
-            Text(":")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(context.attributes.opponentTeamShortName)
-                    .font(.caption.weight(.bold))
-                Text(context.state.opponentScoreText)
-                    .font(.title2.weight(.heavy))
-                    .monospacedDigit()
-            }
+            .keylineTint(game.favoriteAccent)
         }
     }
 }
@@ -138,93 +73,692 @@ private struct LockScreenLiveActivityView: View {
     let context: ActivityViewContext<FavoriteTeamGameActivityAttributes>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text(context.state.summaryText)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(homeAwayText)
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.white.opacity(0.12), in: Capsule())
+        BroadcastScoreboardStrip(game: BroadcastScoreboardGame(context: context))
+            .padding(.vertical, 6)
+            .activityBackgroundTint(Color.black.opacity(0.88))
+            .activitySystemActionForegroundColor(.white)
+    }
+}
+
+private struct BroadcastScoreboardGame {
+    let away: BroadcastTeamSide
+    let home: BroadcastTeamSide
+    let inningText: String
+    let statusText: String
+    let batterText: String?
+    let pitcherText: String?
+    let metadataText: String?
+    let battingSide: BroadcastBattingSide?
+    let baseState: BroadcastBaseState?
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let favoriteAccent: Color
+
+    init(context: ActivityViewContext<FavoriteTeamGameActivityAttributes>) {
+        let favorite = BroadcastTeamSide(
+            roleLabel: context.attributes.isHomeGame ? "홈" : "원정",
+            teamID: context.attributes.favoriteTeamID,
+            teamName: context.attributes.favoriteTeamName,
+            shortName: context.attributes.favoriteTeamShortName,
+            scoreText: context.state.favoriteScoreText
+        )
+        let opponent = BroadcastTeamSide(
+            roleLabel: context.attributes.isHomeGame ? "원정" : "홈",
+            teamID: context.attributes.opponentTeamID,
+            teamName: context.attributes.opponentTeamName,
+            shortName: context.attributes.opponentTeamShortName,
+            scoreText: context.state.opponentScoreText
+        )
+
+        away = context.attributes.isHomeGame ? opponent : favorite
+        home = context.attributes.isHomeGame ? favorite : opponent
+        inningText = context.state.inningText
+        statusText = context.state.summaryText
+        batterText = LiveActivityDebugMetadataFallback.batterName
+        pitcherText = LiveActivityDebugMetadataFallback.pitcherName
+        battingSide = Self.battingSide(from: context.state.inningText)
+        metadataText = Self.metadataText(
+            inningText: context.state.inningText,
+            statusText: context.state.summaryText,
+            venue: context.attributes.venue
+        )
+        baseState = Self.baseState(
+            first: context.state.runnerOnFirst ?? LiveActivityDebugMetadataFallback.runnerOnFirst,
+            second: context.state.runnerOnSecond ?? LiveActivityDebugMetadataFallback.runnerOnSecond,
+            third: context.state.runnerOnThird ?? LiveActivityDebugMetadataFallback.runnerOnThird
+        )
+        balls = context.state.balls ?? LiveActivityDebugMetadataFallback.balls
+        strikes = context.state.strikes ?? LiveActivityDebugMetadataFallback.strikes
+        outs = context.state.outs ?? LiveActivityDebugMetadataFallback.outs
+        favoriteAccent = favorite.accent
+    }
+
+    var minimalStatusText: String {
+        if statusText == "LIVE" {
+            return "LIVE"
+        }
+        return statusText
+    }
+
+    private static func metadataText(inningText: String, statusText: String, venue: String) -> String? {
+        var parts: [String] = []
+        if inningText.isEmpty == false && inningText != statusText {
+            parts.append(inningText)
+        }
+        if venue.isEmpty == false {
+            parts.append(venue)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func battingSide(from inningText: String) -> BroadcastBattingSide? {
+        let lowercased = inningText.lowercased()
+        if inningText.contains("초") || lowercased.contains("top") {
+            return .away
+        }
+        if inningText.contains("말") || lowercased.contains("bottom") {
+            return .home
+        }
+        return nil
+    }
+
+    private static func baseState(first: Bool?, second: Bool?, third: Bool?) -> BroadcastBaseState? {
+        guard first != nil || second != nil || third != nil else {
+            return nil
+        }
+
+        return BroadcastBaseState(
+            first: first ?? false,
+            second: second ?? false,
+            third: third ?? false
+        )
+    }
+
+    private static func countText(balls: Int?, strikes: Int?, outs: Int?) -> String? {
+        let parts = [
+            balls.map { "B \($0)" },
+            strikes.map { "S \($0)" },
+            outs.map { "O \($0)" }
+        ].compactMap { $0 }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    var countText: String? {
+        Self.countText(balls: balls, strikes: strikes, outs: outs)
+    }
+
+    var hasBroadcastMetadata: Bool {
+        batterText != nil || countText != nil || pitcherText != nil
+    }
+
+    var compactMetadataText: String? {
+        [
+            batterText.map { "B \($0)" },
+            countText,
+            pitcherText.map { "P \($0)" },
+            metadataText
+        ]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+}
+
+private enum BroadcastBattingSide {
+    case away
+    case home
+}
+
+private struct BroadcastBaseState {
+    let first: Bool
+    let second: Bool
+    let third: Bool
+}
+
+private struct BroadcastTeamSide {
+    let roleLabel: String
+    let teamID: String
+    let teamName: String
+    let shortName: String
+    let scoreText: String
+
+    var accent: Color {
+        TeamIdentity.catalog[teamID]?.theme.accent ?? .white
+    }
+
+    var logoAssetName: String? {
+        guard let identity = TeamIdentity.catalog[teamID], identity.hasLogoAsset else {
+            return nil
+        }
+        return identity.logoAssetName
+    }
+}
+
+private enum ScoreboardAlignment {
+    case leading
+    case trailing
+
+    var horizontal: HorizontalAlignment {
+        switch self {
+        case .leading:
+            .leading
+        case .trailing:
+            .trailing
+        }
+    }
+
+    var frame: Alignment {
+        switch self {
+        case .leading:
+            .leading
+        case .trailing:
+            .trailing
+        }
+    }
+}
+
+private struct BroadcastScoreboardStrip: View {
+    let game: BroadcastScoreboardGame
+
+    var body: some View {
+        VStack(spacing: 0) {
+            BroadcastScoreboardMainRow(game: game)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 9)
+
+            Rectangle()
+                .fill(Color.white.opacity(0.12))
+                .frame(height: 1)
+
+            BroadcastScoreboardMetadataRow(game: game)
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 9)
+        }
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.black.opacity(0.72))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        }
+    }
+}
+
+private struct BroadcastScoreboardMainRow: View {
+    let game: BroadcastScoreboardGame
+
+    var body: some View {
+        HStack(spacing: 8) {
+            BroadcastTeamIdentityView(
+                side: game.away,
+                alignment: .leading,
+                isBatting: game.battingSide == .away
+            )
+
+            BroadcastScoreValue(scoreText: game.away.scoreText)
+
+            BroadcastGameStateHub(
+                inningText: game.inningText,
+                statusText: game.statusText,
+                baseState: game.baseState
+            )
+
+            BroadcastScoreValue(scoreText: game.home.scoreText)
+
+            BroadcastTeamIdentityView(
+                side: game.home,
+                alignment: .trailing,
+                isBatting: game.battingSide == .home
+            )
+        }
+        .frame(minHeight: 56)
+    }
+}
+
+private struct BroadcastTeamIdentityView: View {
+    let side: BroadcastTeamSide
+    let alignment: ScoreboardAlignment
+    let isBatting: Bool
+
+    var body: some View {
+        HStack(spacing: 7) {
+            if alignment == .leading {
+                teamMark
             }
 
-            HStack(spacing: 12) {
-                teamColumn(
-                    shortName: context.attributes.favoriteTeamShortName,
-                    scoreText: context.state.favoriteScoreText,
-                    teamID: context.attributes.favoriteTeamID,
-                    alignment: .leading
-                )
+            VStack(alignment: alignment.horizontal, spacing: 2) {
+                Text(side.shortName)
+                    .font(.subheadline.weight(.heavy))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .accessibilityLabel(side.teamName)
 
-                Spacer()
+                HStack(spacing: 3) {
+                    if isBatting {
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 5, height: 5)
+                    }
 
-                VStack(spacing: 6) {
-                    Text(context.state.inningText)
-                        .font(.headline.weight(.bold))
-                    Label(context.attributes.venue, systemImage: "mappin.and.ellipse")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(isBatting ? "\(side.roleLabel) 공격" : side.roleLabel)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(isBatting ? .white.opacity(0.82) : .white.opacity(0.54))
+                }
+            }
+
+            if alignment == .trailing {
+                teamMark
+            }
+        }
+        .padding(.horizontal, isBatting ? 5 : 0)
+        .padding(.vertical, isBatting ? 4 : 0)
+        .background {
+            if isBatting {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment.frame)
+    }
+
+    @ViewBuilder
+    private var teamMark: some View {
+        if let logoAssetName = side.logoAssetName {
+            Image(logoAssetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 28, height: 28)
+        } else {
+            Rectangle()
+                .fill(side.accent)
+                .frame(width: 4, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+        }
+    }
+}
+
+private struct BroadcastScoreValue: View {
+    let scoreText: String
+
+    var body: some View {
+        Text(scoreText)
+            .font(.system(size: 36, weight: .black, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.68)
+            .shadow(color: Color.black.opacity(0.36), radius: 2, y: 1)
+            .frame(minWidth: 34)
+    }
+}
+
+private struct BroadcastGameStateHub: View {
+    let inningText: String
+    let statusText: String
+    let baseState: BroadcastBaseState?
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(primaryText)
+                .font(.system(size: 15, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.66)
+
+            if let baseState {
+                BroadcastBaseDiamond(baseState: baseState, size: 26)
+            }
+
+            if shouldShowStatus {
+                Text(statusText)
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .foregroundStyle(statusText == "LIVE" ? Color(red: 1, green: 0.36, blue: 0.36) : .white.opacity(0.74))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+        }
+        .frame(width: 82)
+        .frame(minHeight: 54)
+        .padding(.horizontal, 4)
+        .background(Color.white.opacity(0.08))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: 1)
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.14))
+                .frame(width: 1)
+        }
+    }
+
+    private var primaryText: String {
+        inningText.isEmpty ? statusText : inningText
+    }
+
+    private var shouldShowStatus: Bool {
+        statusText.isEmpty == false && statusText != primaryText
+    }
+}
+
+private struct BroadcastBaseDiamond: View {
+    let baseState: BroadcastBaseState
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            base(isOccupied: baseState.second)
+                .offset(y: -size * 0.26)
+            base(isOccupied: baseState.first)
+                .offset(x: size * 0.26)
+            base(isOccupied: baseState.third)
+                .offset(x: -size * 0.26)
+            base(isOccupied: false)
+                .offset(y: size * 0.26)
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private func base(isOccupied: Bool) -> some View {
+        RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
+            .fill(isOccupied ? Color.white : Color.white.opacity(0.18))
+            .frame(width: size * 0.24, height: size * 0.24)
+            .rotationEffect(.degrees(45))
+            .overlay {
+                RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
+                    .stroke(Color.white.opacity(isOccupied ? 0.90 : 0.26), lineWidth: 0.8)
+                    .rotationEffect(.degrees(45))
+            }
+    }
+
+    private var accessibilityText: String {
+        let occupiedBases = [
+            baseState.first ? "1루" : nil,
+            baseState.second ? "2루" : nil,
+            baseState.third ? "3루" : nil
+        ].compactMap { $0 }
+
+        if occupiedBases.isEmpty {
+            return "주자 없음"
+        }
+        return "주자 \(occupiedBases.joined(separator: ", "))"
+    }
+}
+
+private struct BroadcastScoreboardMetadataRow: View {
+    let game: BroadcastScoreboardGame
+
+    var body: some View {
+        HStack(spacing: 8) {
+            BroadcastPlayerSlot(
+                label: "타자",
+                text: game.batterText,
+                alignment: .leading
+            )
+
+            BroadcastCountCluster(
+                balls: game.balls,
+                strikes: game.strikes,
+                outs: game.outs
+            )
+
+            BroadcastPlayerSlot(
+                label: "투수",
+                text: game.pitcherText,
+                alignment: .trailing
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 28)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct BroadcastPlayerSlot: View {
+    let label: String
+    let text: String?
+    let alignment: ScoreboardAlignment
+
+    var body: some View {
+        Group {
+            if let text {
+                VStack(alignment: alignment.horizontal, spacing: 2) {
+                    Text(label)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.50))
+
+                    Text(text)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white.opacity(0.88))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.70)
+                }
+            } else {
+                Color.clear
+                    .frame(height: 26)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment.frame)
+    }
+}
+
+private struct BroadcastCountCluster: View {
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+
+    @ViewBuilder
+    var body: some View {
+        if metrics.isEmpty == false {
+            HStack(spacing: 6) {
+                ForEach(metrics) { metric in
+                    HStack(spacing: 3) {
+                        Text(metric.label)
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.56))
+
+                        Text(String(metric.value))
+                            .font(.caption2.weight(.black))
+                            .monospacedDigit()
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.74)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Color.white.opacity(0.09))
+            .overlay {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        }
+    }
+
+    private var metrics: [BroadcastCountMetric] {
+        [
+            balls.map { BroadcastCountMetric(label: "B", value: $0) },
+            strikes.map { BroadcastCountMetric(label: "S", value: $0) },
+            outs.map { BroadcastCountMetric(label: "O", value: $0) }
+        ].compactMap { $0 }
+    }
+}
+
+private struct BroadcastCountMetric: Identifiable {
+    let label: String
+    let value: Int
+
+    var id: String { label }
+}
+
+private enum LiveActivityDebugMetadataFallback {
+    #if DEBUG
+    static let pitcherName: String? = "테스트 투수"
+    static let batterName: String? = "테스트 타자"
+    static let balls: Int? = 2
+    static let strikes: Int? = 1
+    static let outs: Int? = 1
+    static let runnerOnFirst: Bool? = true
+    static let runnerOnSecond: Bool? = false
+    static let runnerOnThird: Bool? = true
+    #else
+    static let pitcherName: String? = nil
+    static let batterName: String? = nil
+    static let balls: Int? = nil
+    static let strikes: Int? = nil
+    static let outs: Int? = nil
+    static let runnerOnFirst: Bool? = nil
+    static let runnerOnSecond: Bool? = nil
+    static let runnerOnThird: Bool? = nil
+    #endif
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        if isEmpty {
+            return nil
+        }
+        return self
+    }
+}
+
+private struct DynamicIslandTeamView: View {
+    let side: BroadcastTeamSide
+    let alignment: ScoreboardAlignment
+    let isBatting: Bool
+
+    var body: some View {
+        VStack(alignment: alignment.horizontal, spacing: 3) {
+            HStack(spacing: 3) {
+                if isBatting {
+                    Circle()
+                        .fill(.primary)
+                        .frame(width: 4, height: 4)
                 }
 
-                Spacer()
+                Text(isBatting ? "\(side.roleLabel) 공격" : side.roleLabel)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(isBatting ? .primary : .secondary)
+            }
 
-                teamColumn(
-                    shortName: context.attributes.opponentTeamShortName,
-                    scoreText: context.state.opponentScoreText,
-                    teamID: context.attributes.opponentTeamID,
-                    alignment: .trailing
-                )
+            HStack(spacing: 5) {
+                if alignment == .trailing {
+                    Text(side.scoreText)
+                        .font(scoreFont)
+                        .monospacedDigit()
+                }
+
+                Text(side.shortName)
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(side.accent)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                if alignment == .leading {
+                    Text(side.scoreText)
+                        .font(scoreFont)
+                        .monospacedDigit()
+                }
+            }
+            .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: alignment.frame)
+    }
+
+    private var scoreFont: Font {
+        .system(size: 18, weight: .black, design: .rounded)
+    }
+}
+
+private struct DynamicIslandStatusView: View {
+    let inningText: String
+    let statusText: String
+    let baseState: BroadcastBaseState?
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(inningText.isEmpty ? statusText : inningText)
+                .font(.caption.weight(.black))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            if let baseState {
+                BroadcastBaseDiamond(baseState: baseState, size: 18)
+            }
+
+            if statusText.isEmpty == false && statusText != inningText {
+                Text(statusText)
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .foregroundStyle(statusText == "LIVE" ? Color(red: 1, green: 0.36, blue: 0.36) : .secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
             }
         }
-        .padding(.vertical, 8)
-        .activityBackgroundTint(Color.black.opacity(0.88))
-        .activitySystemActionForegroundColor(.white)
     }
+}
 
-    private var homeAwayText: String {
-        context.attributes.isHomeGame ? "홈 경기" : "원정 경기"
-    }
+private struct DynamicIslandBroadcastMetadataRow: View {
+    let game: BroadcastScoreboardGame
 
-    private func teamColumn(shortName: String, scoreText: String, teamID: String, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: alignment, spacing: 4) {
-            Text(shortName)
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(teamColor(for: teamID))
-            Text(scoreText)
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white)
+    var body: some View {
+        if game.hasBroadcastMetadata {
+            HStack(spacing: 8) {
+                DynamicIslandMetadataSlot(text: game.batterText.map { "B \($0)" }, alignment: .leading)
+
+                if let countText = game.countText {
+                    Text(countText)
+                        .font(.caption2.weight(.black))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.70)
+                }
+
+                DynamicIslandMetadataSlot(text: game.pitcherText.map { "P \($0)" }, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity)
+        } else if let metadataText = game.metadataText {
+            Text(metadataText)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
+}
 
-    private func teamColor(for teamID: String) -> Color {
-        switch teamID {
-        case "doosan":
-            Color(red: 0.97, green: 0.15, blue: 0.16)
-        case "hanwha":
-            Color(red: 1.0, green: 0.47, blue: 0.21)
-        case "kia":
-            Color(red: 0.90, green: 0.10, blue: 0.22)
-        case "kiwoom":
-            Color(red: 0.89, green: 0.00, blue: 0.49)
-        case "kt":
-            Color(red: 0.93, green: 0.11, blue: 0.14)
-        case "lg":
-            Color(red: 0.65, green: 0.00, blue: 0.20)
-        case "lotte":
-            Color(red: 0.82, green: 0.11, blue: 0.18)
-        case "nc":
-            Color(red: 0.00, green: 0.15, blue: 0.36)
-        case "samsung":
-            Color(red: 0.00, green: 0.33, blue: 0.71)
-        case "ssg":
-            Color(red: 0.78, green: 0.03, blue: 0.12)
-        default:
-            Color.white
+private struct DynamicIslandMetadataSlot: View {
+    let text: String?
+    let alignment: ScoreboardAlignment
+
+    var body: some View {
+        Group {
+            if let text {
+                Text(text)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+            } else {
+                Color.clear
+                    .frame(height: 12)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: alignment.frame)
     }
 }

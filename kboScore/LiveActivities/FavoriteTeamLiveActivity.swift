@@ -23,6 +23,12 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     let opponentScoreText: String
     let inningText: String
     let summaryText: String
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let runnerOnFirst: Bool?
+    let runnerOnSecond: Bool?
+    let runnerOnThird: Bool?
     let venue: String
     let isHomeGame: Bool
 
@@ -54,15 +60,21 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
         return FavoriteTeamLiveActivitySnapshot(
             gameID: game.id,
             favoriteTeamID: favoriteTeam.id,
-            favoriteTeamName: favoriteTeam.name,
-            favoriteTeamShortName: favoriteTeam.shortName,
+            favoriteTeamName: favoriteTeam.displayName,
+            favoriteTeamShortName: favoriteTeam.displayName,
             opponentTeamID: opponentTeam.id,
-            opponentTeamName: opponentTeam.name,
-            opponentTeamShortName: opponentTeam.shortName,
+            opponentTeamName: opponentTeam.displayName,
+            opponentTeamShortName: opponentTeam.displayName,
             favoriteScoreText: favoriteScore.map(String.init) ?? "-",
             opponentScoreText: opponentScore.map(String.init) ?? "-",
             inningText: game.inningText ?? game.status.title,
             summaryText: game.status.title,
+            balls: game.balls,
+            strikes: game.strikes,
+            outs: game.outs,
+            runnerOnFirst: game.bases?.first,
+            runnerOnSecond: game.bases?.second,
+            runnerOnThird: game.bases?.third,
             venue: game.venue,
             isHomeGame: isHomeGame
         )
@@ -88,7 +100,13 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
             favoriteScoreText: favoriteScoreText,
             opponentScoreText: opponentScoreText,
             inningText: inningText,
-            summaryText: summaryText
+            summaryText: summaryText,
+            balls: balls,
+            strikes: strikes,
+            outs: outs,
+            runnerOnFirst: runnerOnFirst,
+            runnerOnSecond: runnerOnSecond,
+            runnerOnThird: runnerOnThird
         )
     }
     #endif

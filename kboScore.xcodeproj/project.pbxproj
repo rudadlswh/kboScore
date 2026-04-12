@@ -12,9 +12,9 @@
 		66094892F9D497AF3F3E00DA /* kboScoreLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */; };
 		A1B2C3D4E5F6000000000001 /* FavoriteTeamScheduleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000003 /* FavoriteTeamScheduleWidget.swift */; };
 		A1B2C3D4E5F6000000000002 /* FavoriteTeamScheduleWidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */; };
-		A1B2C3D4E5F6000000000006 /* Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000009 /* Team.swift */; };
-		A1B2C3D4E5F6000000000007 /* TeamBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000A /* TeamBrand.swift */; };
-		A1B2C3D4E5F6000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000B /* Assets.xcassets */; };
+		A1B2C3D4E5F6000000000006 /* kboScore/Models/Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */; };
+		A1B2C3D4E5F6000000000007 /* kboScore/Models/TeamBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */; };
+		A1B2C3D4E5F6000000000008 /* kboScore/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */; };
 		C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19882FE9C0B099E95FE387FF /* KBOScoreLiveActivityWidget.swift */; };
 /* End PBXBuildFile section */
 
@@ -63,13 +63,11 @@
 		9ACDD1AD2F7418770049BF00 /* kboScore.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = kboScore.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ACDD1BA2F7418780049BF00 /* kboScoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kboScoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9ACDD1C42F7418780049BF00 /* kboScoreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kboScoreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		9AFF634E2F7596E800F8D447 /* .env */ = {isa = PBXFileReference; lastKnownFileType = text; path = .env; sourceTree = "<group>"; };
-		9AFF634F2F75974D00F8D447 /* docker-compose.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = "docker-compose.yml"; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000003 /* FavoriteTeamScheduleWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamScheduleWidget.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamScheduleWidgetShared.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F6000000000009 /* Team.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/Team.swift; sourceTree = SOURCE_ROOT; };
-		A1B2C3D4E5F600000000000A /* TeamBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/TeamBrand.swift; sourceTree = SOURCE_ROOT; };
-		A1B2C3D4E5F600000000000B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = kboScore/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/Team.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/TeamBrand.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = kboScore/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamGameActivityAttributes.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -87,16 +85,6 @@
 		9ACDD1C72F7418780049BF00 /* kboScoreUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = kboScoreUITests;
-			sourceTree = "<group>";
-		};
-		9AFF63502F7597B900F8D447 /* infra */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = infra;
-			sourceTree = "<group>";
-		};
-		9AFF63512F7597BD00F8D447 /* api */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = api;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -146,17 +134,16 @@
 		9ACDD1A42F7418770049BF00 = {
 			isa = PBXGroup;
 			children = (
-				9AFF634D2F7596D700F8D447 /* backend */,
 				9ACDD1AF2F7418770049BF00 /* kboScore */,
 				9ACDD1BD2F7418780049BF00 /* kboScoreTests */,
 				9ACDD1C72F7418780049BF00 /* kboScoreUITests */,
 				9ACDD1AE2F7418770049BF00 /* Products */,
 				5D38420BBCAF36CC55B6F0FA /* kboScoreLiveActivityExtension */,
 				BD0D7A35B5EA04A6D30B0C32 /* LiveActivitiesShared */,
-				A1B2C3D4E5F6000000000005 /* WidgetsShared */,
-				A1B2C3D4E5F6000000000009 /* Team.swift */,
-				A1B2C3D4E5F600000000000A /* TeamBrand.swift */,
-				A1B2C3D4E5F600000000000B /* Assets.xcassets */,
+				A1B2C3D4E5F6000000000005 /* kboScore/WidgetsShared */,
+				A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */,
+				A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */,
+				A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */,
 			);
 			sourceTree = "<group>";
 		};
@@ -171,15 +158,12 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		9AFF634D2F7596D700F8D447 /* backend */ = {
+		A1B2C3D4E5F6000000000005 /* kboScore/WidgetsShared */ = {
 			isa = PBXGroup;
 			children = (
-				9AFF63512F7597BD00F8D447 /* api */,
-				9AFF63502F7597B900F8D447 /* infra */,
-				9AFF634E2F7596E800F8D447 /* .env */,
-				9AFF634F2F75974D00F8D447 /* docker-compose.yml */,
+				A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */,
 			);
-			path = backend;
+			path = kboScore/WidgetsShared;
 			sourceTree = "<group>";
 		};
 		BD0D7A35B5EA04A6D30B0C32 /* LiveActivitiesShared */ = {
@@ -189,14 +173,6 @@
 			);
 			name = LiveActivitiesShared;
 			path = kboScore/LiveActivitiesShared;
-			sourceTree = "<group>";
-		};
-		A1B2C3D4E5F6000000000005 /* WidgetsShared */ = {
-			isa = PBXGroup;
-			children = (
-				A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */,
-			);
-			path = kboScore/WidgetsShared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -333,7 +309,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D4E5F6000000000008 /* Assets.xcassets in Resources */,
+				A1B2C3D4E5F6000000000008 /* kboScore/Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -388,8 +364,8 @@
 			files = (
 				A1B2C3D4E5F6000000000002 /* FavoriteTeamScheduleWidgetShared.swift in Sources */,
 				A1B2C3D4E5F6000000000001 /* FavoriteTeamScheduleWidget.swift in Sources */,
-				A1B2C3D4E5F6000000000007 /* TeamBrand.swift in Sources */,
-				A1B2C3D4E5F6000000000006 /* Team.swift in Sources */,
+				A1B2C3D4E5F6000000000007 /* kboScore/Models/TeamBrand.swift in Sources */,
+				A1B2C3D4E5F6000000000006 /* kboScore/Models/Team.swift in Sources */,
 				227A8A4633A90B208DCEED71 /* KBOScoreLiveActivityWidgetBundle.swift in Sources */,
 				C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */,
 				0E9566BEBD854D9D1E4A685A /* FavoriteTeamGameActivityAttributes.swift in Sources */,
@@ -580,8 +556,10 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info-Debug.plist;
 				INFOPLIST_KEY_KBOBackendBaseURL = "$(KBO_BACKEND_BASE_URL)";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSExceptionDomains_localhost_NSExceptionAllowsInsecureHTTPLoads = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -594,7 +572,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
-				KBO_BACKEND_BASE_URL = "";
+				KBO_BACKEND_BASE_URL = "http://localhost:8088";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
@@ -628,7 +606,8 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info-Release.plist;
 				INFOPLIST_KEY_KBOBackendBaseURL = "$(KBO_BACKEND_BASE_URL)";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

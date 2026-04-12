@@ -24,6 +24,24 @@ class TeamRepository:
         )
         return result.mappings().all()
 
+    def list_bootstrap_teams(self, db: Session) -> Sequence[dict]:
+        result = db.execute(
+            text(
+                """
+                SELECT
+                    code AS team_code,
+                    name_ko,
+                    name_en,
+                    short_name,
+                    sort_order
+                FROM teams
+                WHERE is_active = TRUE
+                ORDER BY sort_order ASC, code ASC
+                """
+            )
+        )
+        return result.mappings().all()
+
     def list_teams_with_ranking_metadata(self, db: Session) -> Sequence[dict]:
         result = db.execute(
             text(

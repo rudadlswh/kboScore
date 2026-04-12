@@ -59,6 +59,7 @@ def _insert_game(
     is_cancelled: bool = False,
     official_provider_game_id: str | None = None,
     season_classification: str = "unknown",
+    source_updated_at: datetime | None = None,
 ) -> str:
     row = db_session.execute(
         text(
@@ -79,7 +80,8 @@ def _insert_game(
                 away_score,
                 inning_state,
                 is_postponed,
-                is_cancelled
+                is_cancelled,
+                source_updated_at
             ) VALUES (
                 'kbo',
                 :provider_game_id,
@@ -96,7 +98,8 @@ def _insert_game(
                 :away_score,
                 :inning_state,
                 :is_postponed,
-                :is_cancelled
+                :is_cancelled,
+                :source_updated_at
             )
             RETURNING id::text AS id
             """
@@ -117,6 +120,7 @@ def _insert_game(
             "inning_state": inning_state,
             "is_postponed": is_postponed,
             "is_cancelled": is_cancelled,
+            "source_updated_at": source_updated_at,
         },
     ).mappings().one()
     db_session.commit()
@@ -273,6 +277,120 @@ def test_games_filters_by_kst_calendar_date_correctly(db_client, db_session: Ses
     payload = response.json()
     assert payload["date"] == "2026-03-28"
     assert [game["gameId"] for game in payload["games"]] == [included_game_id]
+
+
+def test_bootstrap_returns_full_app_ready_snapshot_and_stable_polling_headers(db_client, db_session: Session):
+    lg_id = _insert_team(
+        db_session,
+        code="LG",
+        name_ko="LG 트윈스",
+        short_name="LG",
+        sort_order=1,
+        name_en="LG Twins",
+    )
+    doosan_id = _insert_team(
+        db_session,
+        code="DOOSAN",
+        name_ko="두산 베어스",
+        short_name="두산",
+        sort_order=2,
+        name_en="Doosan Bears",
+    )
+
+    game_id = _insert_game(
+        db_session,
+        provider_game_id="20260403LGDOO0",
+        official_provider_game_id="20260403LGDOO0",
+        game_date="2026-04-03",
+        scheduled_at=datetime(2026, 4, 3, 18, 30, tzinfo=KST),
+        stadium="잠실",
+        stadium_code="JS",
+        home_team_id=lg_id,
+        away_team_id=doosan_id,
+        status="finished",
+        home_score=5,
+        away_score=2,
+        inning_state="종료",
+        season_classification="regular_season",
+        source_updated_at=datetime(2026, 4, 3, 21, 15, tzinfo=KST),
+    )
+
+    first_response = db_client.get("/v1/bootstrap")
+
+    assert first_response.status_code == 200
+    payload = first_response.json()
+    assert payload["teams"] == [
+        {
+            "id": "lg",
+            "name": "LG 트윈스",
+            "short_name": "LG",
+            "english_name": "LG Twins",
+            "mark_text": "LG",
+        },
+        {
+            "id": "doosan",
+            "name": "두산 베어스",
+            "short_name": "두산",
+            "english_name": "Doosan Bears",
+            "mark_text": "두산",
+        },
+    ]
+    assert payload["games"] == [
+        {
+            "id": game_id,
+            "scheduled_start": "2026-04-03T18:30:00+09:00",
+            "venue": "잠실",
+            "away_team_id": "doosan",
+            "home_team_id": "lg",
+            "away_score": 2,
+            "home_score": 5,
+            "status_code": "FINAL",
+            "status_text": "종료",
+            "season_classification": "regular_season",
+            "inning_text": "종료",
+            "events": [],
+            "note": "db_export provider_game_id=20260403LGDOO0",
+        }
+    ]
+    assert payload["notifications"] == []
+    assert payload["settings"] is None
+    assert payload["generated_at"] == "2026-04-03T21:15:00+09:00"
+    assert len(payload["data_version"]) == 64
+    assert first_response.headers["etag"] == f'"{payload["data_version"]}"'
+    assert first_response.headers["cache-control"] == "public, max-age=15"
+
+    second_response = db_client.get(
+        "/v1/bootstrap",
+        headers={"If-None-Match": first_response.headers["etag"]},
+    )
+    assert second_response.status_code == 304
+    assert second_response.content == b""
+
+
+def test_bootstrap_skips_incomplete_games_instead_of_emitting_malformed_rows(db_client, db_session: Session):
+    lg_id = _insert_team(db_session, code="LG", name_ko="LG 트윈스", short_name="LG", sort_order=1)
+    doosan_id = _insert_team(db_session, code="DOO", name_ko="두산 베어스", short_name="두산", sort_order=2)
+
+    _insert_game(
+        db_session,
+        provider_game_id="20260403LGDOO0",
+        game_date="2026-04-03",
+        scheduled_at=None,
+        stadium="잠실",
+        stadium_code="JS",
+        home_team_id=lg_id,
+        away_team_id=doosan_id,
+        status="scheduled",
+        season_classification="regular_season",
+    )
+
+    response = db_client.get("/v1/bootstrap")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["teams"][0]["id"] == "lg"
+    assert payload["teams"][1]["id"] == "doosan"
+    assert payload["games"] == []
 
 
 def test_games_team_id_filter_matches_home_and_away_teams(db_client, db_session: Session):
