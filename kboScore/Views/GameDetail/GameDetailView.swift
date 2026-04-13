@@ -211,6 +211,21 @@ struct GameDetailView: View {
                 LiveActivityActionButton(game: game)
             }
 
+            Button {
+                appModel.toggleGameAttendance(for: game)
+            } label: {
+                Label(
+                    appModel.isGameAttended(game) ? "직관 해제" : "직관 표시",
+                    systemImage: appModel.isGameAttended(game) ? "checkmark.circle.fill" : "checkmark.circle"
+                )
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .foregroundStyle(appModel.isGameAttended(game) ? appModel.currentTheme.accent : .primary)
+            }
+            .buttonStyle(.plain)
+
             ShareLink(item: game.shareText) {
                 Label("경기 공유하기", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.semibold))

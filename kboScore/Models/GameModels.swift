@@ -165,6 +165,17 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         providerGameID ?? Self.providerGameID(from: note)
     }
 
+    nonisolated var attendanceStorageKey: String {
+        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.isEmpty == false {
+            return "provider:\(providerGameID)"
+        }
+        if let officialGameCenterID = Self.providerGameID(from: note) {
+            return "provider:\(officialGameCenterID)"
+        }
+        return "id:\(id.uuidString.lowercased())"
+    }
+
     var finalWinningTeam: Team? {
         guard hasCompleteFinalScore, let awayScore, let homeScore, awayScore != homeScore else {
             return nil

@@ -143,6 +143,134 @@ struct kboScoreTests {
         #expect(favoriteDay.favoriteTeamResult == .win)
     }
 
+    @Test func attendanceSummaryCountsOnlyCompletedFavoriteTeamResults() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let samsung = try #require(base.teams.first(where: { $0.id == "samsung" }))
+
+        let completedWin = makeGameDetail(
+            id: UUID(uuidString: "93000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-04-01T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let completedLoss = makeGameDetail(
+            id: UUID(uuidString: "93000000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-04-02T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: samsung,
+            homeTeam: lg,
+            awayScore: 6,
+            homeScore: 3,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let completedTie = makeGameDetail(
+            id: UUID(uuidString: "93000000-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-04-03T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 4,
+            homeScore: 4,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let upcoming = makeGameDetail(
+            id: UUID(uuidString: "93000000-0000-0000-0000-000000000004")!,
+            scheduledStart: isoDate("2026-04-04T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let cancelled = makeGameDetail(
+            id: UUID(uuidString: "93000000-0000-0000-0000-000000000005")!,
+            scheduledStart: isoDate("2026-04-05T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: samsung,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan, samsung],
+                games: [completedWin, completedLoss, completedTie, upcoming, cancelled],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "lg"
+
+        [completedWin, completedLoss, completedTie, upcoming, cancelled].forEach {
+            model.toggleGameAttendance(for: $0)
+        }
+
+        let summary = model.myTeamAttendanceSummary
+        #expect(summary.completedGames == 3)
+        #expect(summary.wins == 1)
+        #expect(summary.losses == 1)
+        #expect(summary.ties == 1)
+        #expect(summary.recordText == "1승 1패 1무")
+        #expect(summary.winPercentageText == "0.500")
+
+        model.toggleGameAttendance(for: completedWin)
+        #expect(model.isGameAttended(completedWin) == false)
+        #expect(model.myTeamAttendanceSummary.completedGames == 2)
+    }
+
+    @Test func scheduleCalendarDaysExposeAttendedGameMarker() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let referenceDate = isoDate("2026-04-01T18:30:00+09:00")
+        let attendedGame = makeGameDetail(
+            id: UUID(uuidString: "94000000-0000-0000-0000-000000000001")!,
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [attendedGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameAttendance(for: attendedGame)
+
+        let calendar = Calendar(identifier: .gregorian)
+        let matchingDay = model.scheduleCalendarDays(for: referenceDate, filter: .all).first {
+            calendar.isDate($0.date, inSameDayAs: referenceDate)
+        }
+        let day = try #require(matchingDay)
+
+        #expect(model.isGameAttended(attendedGame))
+        #expect(day.hasAttendedGame)
+    }
+
     @Test func standingsExcludeExhibitionGamesAndRankByWinPercentage() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -241,6 +369,122 @@ struct kboScoreTests {
 
         #expect(lgSnapshot.recentResults.count == 5)
         #expect(lgSnapshot.recentResultsText == "승 패 승 패 승")
+    }
+
+    @Test func homeFallbackWeeklyStandingsUseFiveActualPlayedGamesAfterRainout() async throws {
+        let base = MockKBOData.makeBootstrap(now: Date())
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let referenceWeekStart = previousKBOWeekStart()
+
+        let olderLoss = makeGameDetail(
+            id: UUID(uuidString: "91000000-0000-0000-0000-000000000001")!,
+            scheduledStart: dateInKBOWeek(start: previousKBOWeekStart(referenceDate: referenceWeekStart), dayOffset: 6),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 7,
+            homeScore: 2,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let playedGames = [1, 2, 3, 4, 6].enumerated().map { index, dayOffset in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "91000000-0000-0000-0000-%012d", index + 2))!,
+                scheduledStart: dateInKBOWeek(start: referenceWeekStart, dayOffset: dayOffset),
+                venue: "잠실",
+                awayTeam: doosan,
+                homeTeam: lg,
+                awayScore: 1,
+                homeScore: 5,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        }
+        let rainout = makeGameDetail(
+            id: UUID(uuidString: "91000000-0000-0000-0000-000000000007")!,
+            scheduledStart: dateInKBOWeek(start: referenceWeekStart, dayOffset: 5),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "우천 취소"
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [olderLoss, rainout] + playedGames,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.homeFallbackStandingsSnapshots.first(where: { $0.team.id == "lg" }))
+
+        #expect(lgSnapshot.gamesPlayed == 5)
+        #expect(lgSnapshot.wins == 5)
+        #expect(lgSnapshot.recentResults.count == 5)
+        #expect(lgSnapshot.recentResultsMetricTitle == "최근 5")
+        #expect(lgSnapshot.recentResults == Array(repeating: TeamGameResult.win, count: 5))
+        #expect(lgSnapshot.recentResultsText == "승 승 승 승 승")
+        #expect(lgSnapshot.recentResultsText.contains("패") == false)
+    }
+
+    @Test func homeFallbackWeeklyStandingsUseSixActualPlayedGamesWhenAvailable() async throws {
+        let base = MockKBOData.makeBootstrap(now: Date())
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let referenceWeekStart = previousKBOWeekStart()
+
+        let olderLoss = makeGameDetail(
+            id: UUID(uuidString: "92000000-0000-0000-0000-000000000001")!,
+            scheduledStart: dateInKBOWeek(start: previousKBOWeekStart(referenceDate: referenceWeekStart), dayOffset: 6),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 7,
+            homeScore: 2,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let playedGames = (1...6).map { dayOffset in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "92000000-0000-0000-0000-%012d", dayOffset + 1))!,
+                scheduledStart: dateInKBOWeek(start: referenceWeekStart, dayOffset: dayOffset),
+                venue: "잠실",
+                awayTeam: doosan,
+                homeTeam: lg,
+                awayScore: 1,
+                homeScore: 5,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        }
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [olderLoss] + playedGames,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.homeFallbackStandingsSnapshots.first(where: { $0.team.id == "lg" }))
+
+        #expect(lgSnapshot.gamesPlayed == 6)
+        #expect(lgSnapshot.wins == 6)
+        #expect(lgSnapshot.recentResults.count == 6)
+        #expect(lgSnapshot.recentResultsMetricTitle == "최근 6")
+        #expect(lgSnapshot.recentResults == Array(repeating: TeamGameResult.win, count: 6))
+        #expect(lgSnapshot.recentResultsText == "승 승 승 승 승 승")
+        #expect(lgSnapshot.recentResultsText.contains("패") == false)
     }
 
     @Test func standingsDeriveRemainingRegularSeasonGamesFromStructuredClassification() async throws {
@@ -3056,6 +3300,24 @@ private func stubNotifications() -> [NotificationItem] {
 
 private func isoDate(_ rawValue: String) -> Date {
     ISO8601DateFormatter().date(from: rawValue)!
+}
+
+private func previousKBOWeekStart(referenceDate: Date = Date()) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    calendar.firstWeekday = 2
+    calendar.minimumDaysInFirstWeek = 1
+    let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: referenceDate)!.start
+    return calendar.date(byAdding: .day, value: -7, to: currentWeekStart)!
+}
+
+private func dateInKBOWeek(start weekStart: Date, dayOffset: Int) -> Date {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    return calendar.date(
+        byAdding: DateComponents(day: dayOffset, hour: 18, minute: 30),
+        to: weekStart
+    )!
 }
 
 private func makeGameDetail(

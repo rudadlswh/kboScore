@@ -178,6 +178,11 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         return recentResults.map(\.shortLabel).joined(separator: " ")
     }
 
+    var recentResultsMetricTitle: String {
+        guard recentResults.isEmpty == false else { return "최근" }
+        return "최근 \(recentResults.count)"
+    }
+
     var hasPostseasonProbabilitySignal: Bool {
         postseasonQualificationProbability != nil || postseasonProbabilityUnavailableReason != nil
     }
