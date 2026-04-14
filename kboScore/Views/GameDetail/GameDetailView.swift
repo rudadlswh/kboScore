@@ -215,7 +215,7 @@ struct GameDetailView: View {
                 appModel.toggleGameAttendance(for: game)
             } label: {
                 Label(
-                    appModel.isGameAttended(game) ? "직관 해제" : "직관 표시",
+                    appModel.isGameAttended(game) ? "직관 해제" : "직관",
                     systemImage: appModel.isGameAttended(game) ? "checkmark.circle.fill" : "checkmark.circle"
                 )
                 .font(.subheadline.weight(.semibold))

@@ -487,6 +487,30 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText.contains("패") == false)
     }
 
+    @Test func standingsWinningStreakFireOnlyShowsForActiveThreeGameWinStreak() async throws {
+        let base = MockKBOData.makeBootstrap(now: Date())
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+
+        let threeWins = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .win])
+        let fourWins = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .win, .win])
+        let twoWins = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .loss])
+        let mixedNonConsecutiveWins = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .loss, .win])
+        let activeThreeAfterLoss = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .win, .loss])
+        let losing = makeStandingsSnapshot(team: lg, recentResults: [.loss, .loss, .win, .win, .win])
+        let tieBreaksStreak = makeStandingsSnapshot(team: lg, recentResults: [.win, .win, .tie, .win])
+
+        #expect(threeWins.currentWinningStreakCount == 3)
+        #expect(threeWins.showsWinningStreakFire)
+        #expect(fourWins.showsWinningStreakFire)
+        #expect(twoWins.currentWinningStreakCount == 2)
+        #expect(twoWins.showsWinningStreakFire == false)
+        #expect(mixedNonConsecutiveWins.showsWinningStreakFire == false)
+        #expect(activeThreeAfterLoss.showsWinningStreakFire)
+        #expect(losing.currentWinningStreakCount == 0)
+        #expect(losing.showsWinningStreakFire == false)
+        #expect(tieBreaksStreak.showsWinningStreakFire == false)
+    }
+
     @Test func standingsDeriveRemainingRegularSeasonGamesFromStructuredClassification() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -3351,6 +3375,22 @@ private func makeGameDetail(
         events: [],
         note: note,
         providerGameID: nil
+    )
+}
+
+@MainActor
+private func makeStandingsSnapshot(
+    team: Team,
+    recentResults: [TeamGameResult]
+) -> TeamStandingsSnapshot {
+    TeamStandingsSnapshot(
+        team: team,
+        rank: 1,
+        wins: recentResults.filter { $0 == .win }.count,
+        losses: recentResults.filter { $0 == .loss }.count,
+        ties: recentResults.filter { $0 == .tie }.count,
+        remainingRegularSeasonGames: 0,
+        recentResults: recentResults
     )
 }
 
