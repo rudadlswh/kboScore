@@ -177,6 +177,14 @@ private struct ScheduleCalendarCardView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(dayBorderColor(for: day), lineWidth: day.isToday || isSelected(day) ? 1 : 0)
                             )
+                            .overlay(alignment: .topTrailing) {
+                                if day.hasAttendedGame {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(isSelected(day) ? .white : appModel.currentTheme.accent)
+                                        .padding(4)
+                                }
+                            }
                         }
                         .buttonStyle(.plain)
                     }
@@ -377,6 +385,14 @@ private struct ScheduleGameRow: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(appModel.currentTheme.chipBackground, in: Capsule())
+                    if appModel.isGameAttended(game) {
+                        Text("직관")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(appModel.currentTheme.accent)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(appModel.currentTheme.accent.opacity(0.12), in: Capsule())
+                    }
                 }
 
                 Text(subtitleText)

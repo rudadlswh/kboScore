@@ -64,6 +64,7 @@ enum AppTab: Hashable, Sendable {
 final class AppModel {
     private static let settingsStorageKey = "kbo_live_app_settings"
     private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
+    private static let attendedGamesStorageKey = "kbo_live_attended_game_keys"
     private static let staleThreshold: TimeInterval = 90
     private static let previousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
@@ -122,6 +123,7 @@ final class AppModel {
     var notificationRegistrationSyncStatus: NotificationRegistrationSyncStatus = .waitingForToken
     var notificationRegistrationLastAttemptAt: Date?
     var notificationRegistrationEndpointDescription: String?
+    private(set) var attendedGameKeys: Set<String> = []
     var settings: AppSettings {
         didSet {
             persistSettings()
@@ -170,6 +172,7 @@ final class AppModel {
         self.usesPersistedSettings = usePersistedSettings
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
         let persistedDeviceToken = Self.loadPersistedDeviceToken()
+        let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
         var initialSettings = persistedSettings ?? .default
         initialSettings.favoriteTeamID = Self.canonicalTeamIdentifier(initialSettings.favoriteTeamID)
@@ -188,6 +191,7 @@ final class AppModel {
         self.debugLocalBootstrapResolvedPath = nil
         self.debugLocalBootstrapLoadedAt = nil
         self.apnsDeviceToken = persistedDeviceToken
+        self.attendedGameKeys = persistedAttendedGameKeys
         self.notificationRegistrationEndpointDescription = notificationRegistrationClient.debugEndpointDescription
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
@@ -363,18 +367,18 @@ final class AppModel {
     }
 
     var homeFallbackStandingsSnapshots: [TeamStandingsSnapshot] {
-        let cutoffDate = calendar.startOfDay(for: Date())
+        let referenceWeekGames = homeFallbackReferenceWeekCompletedGames
+        guard referenceWeekGames.isEmpty == false else { return [] }
+
         let rankedSnapshots = teams
             .map { team in
-                let completedGames = regularSeasonGames
-                    .filter { $0.scheduledStart < cutoffDate }
+                let completedGames = referenceWeekGames
                     .filter { $0.involves(teamID: team.id) }
-                    .filter(\.hasCompleteFinalScore)
                     .sorted { $0.scheduledStart > $1.scheduledStart }
                 return makeStandingsSnapshot(
                     for: team,
-                    completedGames: Array(completedGames.prefix(6)),
-                    recentResultsLimit: 6
+                    completedGames: completedGames,
+                    recentResultsLimit: completedGames.count
                 )
             }
             .sorted(by: standingsComparator)
@@ -402,7 +406,7 @@ final class AppModel {
 
     var homeFallbackTitleText: String {
         guard let weekNumber = homeFallbackWeekNumber else {
-            return "직전 6경기 승률 기준 순위"
+            return "직전 완료 경기 기준 순위"
         }
         return "\(weekNumber)주차 순위"
     }
@@ -431,10 +435,7 @@ final class AppModel {
     }
 
     private var homeFallbackWeekNumber: Int? {
-        let cutoffDate = calendar.startOfDay(for: Date())
-        let completedGames = regularSeasonGames
-            .filter { $0.scheduledStart < cutoffDate }
-            .filter(\.hasCompleteFinalScore)
+        let completedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
         guard let latestCompletedGameDate = completedGames.map(\.scheduledStart).max(),
               let latestWeekStart = homeFallbackWeekStart(for: latestCompletedGameDate) else {
             return nil
@@ -450,6 +451,23 @@ final class AppModel {
             return nil
         }
         return weekIndex + 1
+    }
+
+    private var homeFallbackCompletedRegularSeasonGamesBeforeToday: [GameDetail] {
+        let cutoffDate = homeFallbackScheduleCalendar.startOfDay(for: Date())
+        return regularSeasonGames
+            .filter { $0.scheduledStart < cutoffDate }
+            .filter(\.hasCompleteFinalScore)
+    }
+
+    private var homeFallbackReferenceWeekCompletedGames: [GameDetail] {
+        let completedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
+        guard let latestCompletedGameDate = completedGames.map(\.scheduledStart).max(),
+              let referenceWeek = homeFallbackWeekInterval(for: latestCompletedGameDate) else {
+            return []
+        }
+
+        return completedGames.filter { referenceWeek.contains($0.scheduledStart) }
     }
 
     var favoriteTeamLiveGame: GameDetail? {
@@ -552,11 +570,19 @@ final class AppModel {
     }
 
     private func homeFallbackWeekStart(for date: Date) -> Date? {
+        homeFallbackWeekInterval(for: date)?.start
+    }
+
+    private var homeFallbackScheduleCalendar: Calendar {
         var weekCalendar = calendar
         weekCalendar.timeZone = scheduleTimeZone
         weekCalendar.firstWeekday = 2
         weekCalendar.minimumDaysInFirstWeek = 1
-        return weekCalendar.dateInterval(of: .weekOfYear, for: date)?.start
+        return weekCalendar
+    }
+
+    private func homeFallbackWeekInterval(for date: Date) -> DateInterval? {
+        homeFallbackScheduleCalendar.dateInterval(of: .weekOfYear, for: date)
     }
 
     var myTeamNextGame: GameDetail? {
@@ -573,6 +599,42 @@ final class AppModel {
             .filter { $0.involves(teamID: favoriteTeamID) && $0.status.isFinishedLike && !calendar.isDateInToday($0.scheduledStart) }
             .sorted { $0.scheduledStart > $1.scheduledStart }
             .first
+    }
+
+    var myTeamAttendanceSummary: AttendedGameSummary {
+        guard let favoriteTeamID = settings.favoriteTeamID else {
+            return AttendedGameSummary(completedGames: 0, wins: 0, losses: 0, ties: 0)
+        }
+
+        var seenKeys: Set<String> = []
+        var wins = 0
+        var losses = 0
+        var ties = 0
+
+        for game in knownScheduleGames(filter: .myTeam) {
+            let key = game.attendanceStorageKey
+            guard seenKeys.insert(key).inserted,
+                  isGameAttended(game),
+                  let result = game.finalResult(for: favoriteTeamID) else {
+                continue
+            }
+
+            switch result {
+            case .win:
+                wins += 1
+            case .loss:
+                losses += 1
+            case .tie:
+                ties += 1
+            }
+        }
+
+        return AttendedGameSummary(
+            completedGames: wins + losses + ties,
+            wins: wins,
+            losses: losses,
+            ties: ties
+        )
     }
 
     var regularSeasonGames: [GameDetail] {
@@ -695,6 +757,7 @@ final class AppModel {
                     isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
                     isToday: calendar.isDateInToday(cursor),
                     gameCount: dayGames.count,
+                    hasAttendedGame: dayGames.contains(where: isGameAttended),
                     dominantStatus: dominantStatus(for: dayGames),
                     opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
                     favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter),
@@ -888,6 +951,22 @@ final class AppModel {
 
     func setGameAlert(_ isEnabled: Bool, for gameID: UUID) {
         gameAlertOverrides[gameID] = isEnabled
+    }
+
+    func isGameAttended(_ game: GameDetail) -> Bool {
+        attendedGameKeys.contains(game.attendanceStorageKey)
+    }
+
+    func toggleGameAttendance(for game: GameDetail) {
+        var updatedKeys = attendedGameKeys
+        let key = game.attendanceStorageKey
+        if updatedKeys.contains(key) {
+            updatedKeys.remove(key)
+        } else {
+            updatedKeys.insert(key)
+        }
+        attendedGameKeys = updatedKeys
+        persistAttendedGameKeys()
     }
 
     func markNotificationRead(_ notificationID: UUID) {
@@ -1412,6 +1491,20 @@ final class AppModel {
 
     private static func loadPersistedDeviceToken() -> String? {
         UserDefaults.standard.string(forKey: Self.deviceTokenStorageKey)
+    }
+
+    private func persistAttendedGameKeys() {
+        guard usesPersistedSettings else { return }
+        guard let encoded = try? JSONEncoder().encode(Array(attendedGameKeys).sorted()) else { return }
+        UserDefaults.standard.set(encoded, forKey: Self.attendedGamesStorageKey)
+    }
+
+    private static func loadPersistedAttendedGameKeys() -> Set<String> {
+        guard let data = UserDefaults.standard.data(forKey: Self.attendedGamesStorageKey),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(decoded)
     }
 
     private func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {

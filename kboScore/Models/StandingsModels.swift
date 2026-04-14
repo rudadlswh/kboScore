@@ -178,6 +178,24 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         return recentResults.map(\.shortLabel).joined(separator: " ")
     }
 
+    var recentResultsMetricTitle: String {
+        guard recentResults.isEmpty == false else { return "최근" }
+        return "최근 \(recentResults.count)"
+    }
+
+    var currentWinningStreakCount: Int {
+        var streak = 0
+        for result in recentResults {
+            guard result == .win else { break }
+            streak += 1
+        }
+        return streak
+    }
+
+    var showsWinningStreakFire: Bool {
+        currentWinningStreakCount >= 3
+    }
+
     var hasPostseasonProbabilitySignal: Bool {
         postseasonQualificationProbability != nil || postseasonProbabilityUnavailableReason != nil
     }

@@ -134,7 +134,7 @@ private struct HomeFallbackStandingsRow: View {
 
                 HStack(spacing: 10) {
                     metric(title: "승률", value: snapshot.winPercentageText)
-                    metric(title: "최근 6", value: snapshot.recentResultsText)
+                    metric(title: snapshot.recentResultsMetricTitle, value: snapshot.recentResultsText)
                 }
             }
 

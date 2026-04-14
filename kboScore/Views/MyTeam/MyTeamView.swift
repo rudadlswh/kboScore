@@ -22,6 +22,11 @@ struct MyTeamView: View {
                         }
 
                         Group {
+                            SectionTitleView(title: "직관 기록")
+                            MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
+                        }
+
+                        Group {
                             SectionTitleView(title: "오늘 경기")
 
                             if let todayGame = appModel.myTeamTodayGame {
@@ -111,6 +116,43 @@ struct MyTeamView: View {
                 GameDetailView(gameID: gameID)
             }
         }
+    }
+}
+
+private struct MyTeamAttendanceSummaryView: View {
+    @Environment(AppModel.self) private var appModel
+    let summary: AttendedGameSummary
+
+    var body: some View {
+        if summary.hasCompletedGames {
+            HStack(spacing: 8) {
+                attendanceMetric(title: "직관", value: summary.gamesText)
+                attendanceMetric(title: "기록", value: summary.recordText)
+                attendanceMetric(title: "승률", value: summary.winPercentageText)
+            }
+            .cardSurface(padding: 12, cornerRadius: 18)
+        } else {
+            EmptyStateView(
+                systemImage: "checkmark.circle",
+                title: "직관 완료 경기 없음",
+                message: "경기 상세에서 직관한 경기로 표시하면 이곳에 승률을 모아 보여드립니다."
+            )
+        }
+    }
+
+    private func attendanceMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline.weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(title == "승률" ? appModel.currentTheme.accent : .primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

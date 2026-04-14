@@ -73,6 +73,7 @@ private struct StandingsRow: View {
                     Text(snapshot.team.displayName)
                         .font(.subheadline.weight(.bold))
                         .lineLimit(1)
+                    winningStreakIndicator
                     Text(snapshot.recordText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -110,6 +111,15 @@ private struct StandingsRow: View {
             .monospacedDigit()
             .foregroundStyle(appModel.currentTheme.accent)
             .frame(width: 28)
+    }
+
+    private var winningStreakIndicator: some View {
+        Text("🔥")
+            .font(.caption)
+            .opacity(snapshot.showsWinningStreakFire ? 1 : 0)
+            .frame(width: 16)
+            .accessibilityLabel("3연승 이상")
+            .accessibilityHidden(snapshot.showsWinningStreakFire == false)
     }
 
     private func standingsMetric(title: String, value: String) -> some View {
