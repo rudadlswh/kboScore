@@ -614,10 +614,23 @@ final class AppModel {
         for game in knownScheduleGames(filter: .myTeam) {
             let key = game.attendanceStorageKey
             guard seenKeys.insert(key).inserted,
-                  isGameAttended(game),
-                  let result = game.finalResult(for: favoriteTeamID) else {
+                  isGameAttended(game) else {
+                #if DEBUG
+                debugLogAttendanceSummaryCandidate(game, favoriteTeamID: favoriteTeamID, result: nil, included: false)
+                #endif
                 continue
             }
+
+            guard let result = game.finalResult(for: favoriteTeamID) else {
+                #if DEBUG
+                debugLogAttendanceSummaryCandidate(game, favoriteTeamID: favoriteTeamID, result: nil, included: false)
+                #endif
+                continue
+            }
+
+            #if DEBUG
+            debugLogAttendanceSummaryCandidate(game, favoriteTeamID: favoriteTeamID, result: result, included: true)
+            #endif
 
             switch result {
             case .win:
@@ -954,18 +967,23 @@ final class AppModel {
     }
 
     func isGameAttended(_ game: GameDetail) -> Bool {
-        attendedGameKeys.contains(game.attendanceStorageKey)
+        attendedGameKeys.isDisjoint(with: attendanceEquivalentKeys(for: game)) == false
     }
 
     func toggleGameAttendance(for game: GameDetail) {
         var updatedKeys = attendedGameKeys
-        let key = game.attendanceStorageKey
-        if updatedKeys.contains(key) {
-            updatedKeys.remove(key)
+        let equivalentKeys = attendanceEquivalentKeys(for: game)
+        let key = canonicalAttendanceStorageKey(for: game, equivalentKeys: equivalentKeys)
+        let isAttended = updatedKeys.isDisjoint(with: equivalentKeys) == false
+        if isAttended {
+            updatedKeys.subtract(equivalentKeys)
         } else {
             updatedKeys.insert(key)
         }
         attendedGameKeys = updatedKeys
+        #if DEBUG
+        debugLogAttendanceToggle(game: game, storedKey: key, equivalentKeys: equivalentKeys, isAttended: !isAttended)
+        #endif
         persistAttendedGameKeys()
     }
 
@@ -1076,7 +1094,7 @@ final class AppModel {
         defer { loadingScheduleMonths.remove(key) }
 
         do {
-            let schedule = try await repository.fetchMonthlySchedule(for: key)
+            let schedule = try await repository.fetchMonthlySchedule(for: key, bypassingCache: forceRefresh)
             let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
             let normalizedSchedule = await reconcileOfficialScheduleStartTimesIfNeeded(
                 in: schedule,
@@ -1906,12 +1924,12 @@ final class AppModel {
         var uniqueGames: [UUID: GameDetail] = [:]
 
         for game in games {
-            uniqueGames[game.id] = game
+            uniqueGames[game.id] = preferredKnownScheduleGame(existing: uniqueGames[game.id], candidate: game)
         }
 
         for monthGames in monthlyScheduleGames.values {
             for game in monthGames {
-                uniqueGames[game.id] = game
+                uniqueGames[game.id] = preferredKnownScheduleGame(existing: uniqueGames[game.id], candidate: game)
             }
         }
 
@@ -1924,6 +1942,63 @@ final class AppModel {
             return mergedGames.filter { $0.involves(teamID: favoriteTeamID) }
         }
     }
+
+    private func preferredKnownScheduleGame(existing: GameDetail?, candidate: GameDetail) -> GameDetail {
+        guard let existing else { return candidate }
+        if candidate.hasCompleteFinalScore != existing.hasCompleteFinalScore {
+            return candidate.hasCompleteFinalScore ? candidate : existing
+        }
+        if candidate.status.isFinishedLike != existing.status.isFinishedLike {
+            return candidate.status.isFinishedLike ? candidate : existing
+        }
+        return candidate
+    }
+
+    private func attendanceEquivalentKeys(for game: GameDetail) -> Set<String> {
+        var keys = game.attendanceStorageAliases
+
+        for candidate in games where candidate.id == game.id {
+            keys.formUnion(candidate.attendanceStorageAliases)
+        }
+
+        for monthGames in monthlyScheduleGames.values {
+            for candidate in monthGames where candidate.id == game.id {
+                keys.formUnion(candidate.attendanceStorageAliases)
+            }
+        }
+
+        return keys
+    }
+
+    private func canonicalAttendanceStorageKey(for game: GameDetail, equivalentKeys: Set<String>) -> String {
+        if let providerKey = equivalentKeys
+            .filter({ $0.hasPrefix("provider:") })
+            .sorted()
+            .first(where: { key in
+                let value = String(key.dropFirst("provider:".count))
+                return UUID(uuidString: value) == nil
+            }) {
+            return providerKey
+        }
+        return game.attendanceStorageKey
+    }
+
+    #if DEBUG
+    private func debugLogAttendanceToggle(game: GameDetail, storedKey: String, equivalentKeys: Set<String>, isAttended: Bool) {
+        print("[AttendanceDebug] toggle gameID=\(game.id.uuidString) provider=\(game.officialGameCenterID ?? "nil") storedKey=\(storedKey) equivalentKeys=\(equivalentKeys.sorted()) attended=\(isAttended)")
+    }
+
+    private func debugLogAttendanceSummaryCandidate(
+        _ game: GameDetail,
+        favoriteTeamID: String,
+        result: TeamGameResult?,
+        included: Bool
+    ) {
+        let equivalentKeys = attendanceEquivalentKeys(for: game)
+        guard attendedGameKeys.isDisjoint(with: equivalentKeys) == false else { return }
+        print("[AttendanceDebug] myTeamCandidate gameID=\(game.id.uuidString) provider=\(game.officialGameCenterID ?? "nil") key=\(game.attendanceStorageKey) equivalentKeys=\(equivalentKeys.sorted()) attended=true favoritePass=\(game.involves(teamID: favoriteTeamID)) completedPass=\(game.hasCompleteFinalScore) result=\(String(describing: result)) included=\(included)")
+    }
+    #endif
 
     private func myTeamMonthScheduleSource(for date: Date) -> [GameDetail] {
         let key = KBOMonthScheduleKey(date: date, calendar: calendar)

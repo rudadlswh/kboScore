@@ -176,6 +176,18 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         return "id:\(id.uuidString.lowercased())"
     }
 
+    nonisolated var attendanceStorageAliases: Set<String> {
+        var aliases: Set<String> = ["id:\(id.uuidString.lowercased())"]
+        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.isEmpty == false {
+            aliases.insert("provider:\(providerGameID)")
+        }
+        if let officialGameCenterID = Self.providerGameID(from: note) {
+            aliases.insert("provider:\(officialGameCenterID)")
+        }
+        return aliases
+    }
+
     var finalWinningTeam: Team? {
         guard hasCompleteFinalScore, let awayScore, let homeScore, awayScore != homeScore else {
             return nil
