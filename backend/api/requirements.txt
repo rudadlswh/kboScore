@@ -1,4 +1,0 @@
-fastapi
-uvicorn[standard]
-psycopg[binary]
-sqlalchemy>=2,<3

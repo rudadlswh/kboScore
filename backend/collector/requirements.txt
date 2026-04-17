@@ -1,4 +1,0 @@
-psycopg[binary]
-httpx[http2]
-PyJWT
-cryptography
