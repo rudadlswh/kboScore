@@ -7,3 +7,29 @@ backend/collector/.pytest_cache/
 backend/.pytest_cache/
 
 .idea/
+
+# Python
+backend/.venv/
+**/__pycache__/
+*.pyc
+
+# Xcode
+build/
+DerivedData/
+*.xcuserdatad/
+
+# IDE
+.idea/
+
+# Python
+backend/.venv/
+**/__pycache__/
+*.pyc
+
+# Xcode
+build/
+DerivedData/
+*.xcuserdatad/
+
+# IDE
+.idea/

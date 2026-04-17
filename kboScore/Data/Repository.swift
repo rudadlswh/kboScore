@@ -37,6 +37,13 @@ protocol KBONotificationDataSource: Sendable {
 
 protocol KBOMonthScheduleDataSource: Sendable {
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail]
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail]
+}
+
+extension KBOMonthScheduleDataSource {
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await fetchMonthlySchedule(for: month)
+    }
 }
 
 protocol KBOStandingsDataSource: Sendable {

@@ -233,6 +233,58 @@ struct kboScoreTests {
         #expect(model.myTeamAttendanceSummary.completedGames == 2)
     }
 
+    @Test func attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
+        let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(base.teams.first(where: { $0.id == "hanwha" }))
+        let gameID = UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!
+        let scheduledStart = isoDate("2026-04-01T18:30:00+09:00")
+        let bootstrapGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 14,
+            homeScore: 11,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "db_export provider_game_id=20260401KTHH0"
+        )
+        let staleMonthlyGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [staleMonthlyGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [kt, hanwha],
+                games: [bootstrapGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "hanwha"
+
+        model.toggleGameAttendance(for: bootstrapGame)
+        #expect(model.myTeamAttendanceSummary.completedGames == 1)
+        #expect(model.myTeamAttendanceSummary.losses == 1)
+
+        await model.loadScheduleIfNeeded(for: scheduledStart)
+
+        #expect(model.isGameAttended(staleMonthlyGame))
+        #expect(model.myTeamAttendanceSummary.completedGames == 1)
+        #expect(model.myTeamAttendanceSummary.losses == 1)
+    }
+
     @Test func scheduleCalendarDaysExposeAttendedGameMarker() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -269,6 +321,67 @@ struct kboScoreTests {
 
         #expect(model.isGameAttended(attendedGame))
         #expect(day.hasAttendedGame)
+    }
+
+    @Test func scheduleCalendarMarkerUsesEquivalentAttendanceIdentityForMonthlyDuplicate() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
+        let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(base.teams.first(where: { $0.id == "hanwha" }))
+        let gameID = UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!
+        let scheduledStart = isoDate("2026-04-01T18:30:00+09:00")
+        let bootstrapGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 14,
+            homeScore: 11,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "db_export provider_game_id=20260401KTHH0"
+        )
+        let monthlyGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 14,
+            homeScore: 11,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [monthlyGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [kt, hanwha],
+                games: [bootstrapGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "hanwha"
+
+        model.toggleGameAttendance(for: bootstrapGame)
+        await model.loadScheduleIfNeeded(for: scheduledStart)
+
+        let calendar = Calendar(identifier: .gregorian)
+        let matchingDay = model.scheduleCalendarDays(for: scheduledStart, filter: .all).first {
+            calendar.isDate($0.date, inSameDayAs: scheduledStart)
+        }
+        let day = try #require(matchingDay)
+
+        #expect(model.isGameAttended(monthlyGame))
+        #expect(day.hasAttendedGame)
+
+        model.toggleGameAttendance(for: bootstrapGame)
+        #expect(model.isGameAttended(monthlyGame) == false)
+        let dayAfterUnmark = try #require(model.scheduleCalendarDays(for: scheduledStart, filter: .all).first {
+            calendar.isDate($0.date, inSameDayAs: scheduledStart)
+        })
+        #expect(dayAfterUnmark.hasAttendedGame == false)
     }
 
     @Test func standingsExcludeExhibitionGamesAndRankByWinPercentage() async throws {
@@ -653,6 +766,7 @@ struct kboScoreTests {
 
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
+        #expect(KBODataMapper.mapGameStatus(code: "finished", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
@@ -967,8 +1081,8 @@ struct kboScoreTests {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/games": StubResponse(statusCode: 200, data: bootstrapData),
-            "https://example.com/api/bootstrap": StubResponse(statusCode: 200, data: bootstrapData),
+            "https://example.com/api/v1/games": StubResponse(statusCode: 200, data: bootstrapData),
+            "https://example.com/api/v1/bootstrap": StubResponse(statusCode: 200, data: bootstrapData),
             "https://example.com/api/notifications": StubResponse(statusCode: 200, data: bootstrapData)
         ]
         defer { URLProtocolStub.testResponses = [:] }
@@ -1099,7 +1213,7 @@ struct kboScoreTests {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/games": StubResponse(statusCode: 200, data: officialGameList)
+            "https://example.com/api/v1/games": StubResponse(statusCode: 200, data: officialGameList)
         ]
         defer { URLProtocolStub.testResponses = [:] }
 
@@ -1162,7 +1276,7 @@ struct kboScoreTests {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/schedule/month?year=2026&month=3": StubResponse(statusCode: 200, data: officialSchedule)
+            "https://example.com/api/v1/schedule/month?year=2026&month=3": StubResponse(statusCode: 200, data: officialSchedule)
         ]
         defer { URLProtocolStub.testResponses = [:] }
 
@@ -1177,6 +1291,47 @@ struct kboScoreTests {
         })
     }
 
+    @Test func liveRepositoryMapsBackendFinishedMonthlyScheduleGame() async throws {
+        let month = KBOMonthScheduleKey(year: 2026, month: 4)
+        let payload = """
+        {
+          "year": 2026,
+          "month": 4,
+          "totalCount": 1,
+          "games": [
+            {
+              "gameId": "6b1ef981-021c-4f41-9e65-31e25f7095ee",
+              "scheduledAt": "2026-04-01T18:30:00+09:00",
+              "status": "finished",
+              "seasonClassification": "unknown",
+              "stadium": "대전",
+              "homeTeam": {"teamId": "HANWHA", "nameKo": "한화 이글스", "shortName": "한화"},
+              "awayTeam": {"teamId": "KT", "nameKo": "KT 위즈", "shortName": "KT"},
+              "homeScore": 11,
+              "awayScore": 14,
+              "inningState": null
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
+        URLProtocolStub.testResponses = [
+            "https://example.com/api/v1/schedule/month?year=2026&month=4": StubResponse(statusCode: 200, data: payload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let games = try await repository.fetchMonthlySchedule(for: month)
+        let game = try #require(games.first)
+
+        #expect(game.id == UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee"))
+        #expect(game.awayTeam.id == "kt")
+        #expect(game.homeTeam.id == "hanwha")
+        #expect(game.status == .final)
+        #expect(game.awayScore == 14)
+        #expect(game.homeScore == 11)
+    }
+
     @Test func liveRepositoryFallsBackToMonthlyScheduleWhenBootstrapEndpointIsMissing() async throws {
         let month = KBOMonthScheduleKey(year: 2026, month: 3)
         let backendMonthlyPayload = try makeBackendMonthPayloadJSON()
@@ -1187,13 +1342,13 @@ struct kboScoreTests {
             nowProvider: { ISO8601DateFormatter().date(from: "2026-03-27T12:00:00+09:00")! }
         )
         URLProtocolStub.testResponses = [
-            "https://example.com/api/bootstrap": StubResponse(
+            "https://example.com/api/v1/bootstrap": StubResponse(
                 statusCode: 404,
                 data: """
                 {"detail":"Not Found"}
                 """.data(using: .utf8)!
             ),
-            "https://example.com/api/schedule/month?year=\(month.year)&month=\(month.month)": StubResponse(
+            "https://example.com/api/v1/schedule/month?year=\(month.year)&month=\(month.month)": StubResponse(
                 statusCode: 200,
                 data: backendMonthlyPayload
             )
@@ -1737,11 +1892,11 @@ struct kboScoreTests {
 
     @Test func liveRepositoryBuildsLocalhostBackendRequestURLs() async throws {
         let session = makeStubSession()
-        let repository = LiveKBORepository(baseURL: URL(string: "http://localhost:8088")!, session: session)
+        let repository = LiveKBORepository(baseURL: URL(string: "http://localhost:8080")!, session: session)
         let payload = try fixtureData(named: "2026-preseason-bootstrap")
 
         URLProtocolStub.testResponses = [
-            "http://localhost:8088/games": StubResponse(statusCode: 200, data: payload)
+            "http://localhost:8080/v1/games": StubResponse(statusCode: 200, data: payload)
         ]
         URLProtocolStub.lastRequest = nil
         defer {
@@ -1752,7 +1907,7 @@ struct kboScoreTests {
         _ = try await repository.fetchGames()
         let request = try #require(URLProtocolStub.lastRequest)
 
-        #expect(request.url?.absoluteString == "http://localhost:8088/games")
+        #expect(request.url?.absoluteString == "http://localhost:8080/v1/games")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
     }
@@ -2704,7 +2859,7 @@ struct kboScoreTests {
         let live = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         let repository = FallbackKBORepository(primary: live, fallback: MockKBORepository(), runtimeState: nil)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/bootstrap": StubResponse(statusCode: 500, data: Data())
+            "https://example.com/api/v1/bootstrap": StubResponse(statusCode: 500, data: Data())
         ]
         defer { URLProtocolStub.testResponses = [:] }
 
@@ -2719,7 +2874,7 @@ struct kboScoreTests {
         let live = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         let repository = FallbackKBORepository(primary: live, fallback: MockKBORepository(), runtimeState: nil)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/schedule/month?year=2026&month=3": StubResponse(statusCode: 500, data: Data())
+            "https://example.com/api/v1/schedule/month?year=2026&month=3": StubResponse(statusCode: 500, data: Data())
         ]
         defer { URLProtocolStub.testResponses = [:] }
 
@@ -2795,6 +2950,32 @@ struct kboScoreTests {
 
         #expect(first.count == second.count)
         #expect(await counter.value == 1)
+    }
+
+    @Test func cachedRepositoryBypassesFreshMonthlyScheduleCacheWhenRequested() async throws {
+        let counter = FetchCounter()
+        let fullSchedule = stubGames()
+        let refreshedSchedule = Array(fullSchedule.prefix(1))
+        let repository = CachedKBORepository(
+            base: StubRepository(
+                fetchMonthlySchedule: { _ in
+                    let attempt = await counter.incrementAndReturn()
+                    return attempt == 1 ? fullSchedule : refreshedSchedule
+                }
+            ),
+            configuration: RepositoryCacheConfiguration(bootstrapTTL: 1, gamesTTL: 1, notificationsTTL: 1, monthlyScheduleTTL: 60),
+            runtimeState: nil
+        )
+
+        let key = KBOMonthScheduleKey(year: 2026, month: 3)
+        let first = try await repository.fetchMonthlySchedule(for: key)
+        let refreshed = try await repository.fetchMonthlySchedule(for: key, bypassingCache: true)
+        let cachedAfterRefresh = try await repository.fetchMonthlySchedule(for: key)
+
+        #expect(first.count == fullSchedule.count)
+        #expect(refreshed.count == refreshedSchedule.count)
+        #expect(cachedAfterRefresh.count == refreshedSchedule.count)
+        #expect(await counter.value == 2)
     }
 
     @Test func cachedRepositoryFallsBackToPersistedGamesCacheAcrossInstances() async throws {
@@ -3004,7 +3185,7 @@ struct kboScoreTests {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
         URLProtocolStub.testResponses = [
-            "https://example.com/api/schedule/month?year=2026&month=3": StubResponse(statusCode: 200, data: backendMonthlyPayload)
+            "https://example.com/api/v1/schedule/month?year=2026&month=3": StubResponse(statusCode: 200, data: backendMonthlyPayload)
         ]
         URLProtocolStub.lastRequest = nil
         defer {
@@ -3018,7 +3199,7 @@ struct kboScoreTests {
         print("[ScheduleDebugTest] requestedURL=\(requestedURL)")
         print("[ScheduleDebugTest] decodedGamesCount=\(schedule.count)")
 
-        #expect(requestedURL == "https://example.com/api/schedule/month?year=2026&month=3")
+        #expect(requestedURL == "https://example.com/api/v1/schedule/month?year=2026&month=3")
         #expect(schedule.count == 15)
 
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-01T00:00:00+09:00")!
@@ -3354,7 +3535,8 @@ private func makeGameDetail(
     homeScore: Int?,
     status: GameStatus,
     seasonClassification: GameSeasonClassification = .unknown,
-    note: String? = nil
+    note: String? = nil,
+    providerGameID: String? = nil
 ) -> GameDetail {
     GameDetail(
         id: id,
@@ -3374,7 +3556,7 @@ private func makeGameDetail(
         highlightText: nil,
         events: [],
         note: note,
-        providerGameID: nil
+        providerGameID: providerGameID
     )
 }
 
