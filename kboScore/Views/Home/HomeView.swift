@@ -54,7 +54,7 @@ struct HomeView: View {
                     } else {
                         LazyVStack(spacing: 8) {
                             ForEach(appModel.filteredHomeGames) { game in
-                                NavigationLink(value: game.id) {
+                                NavigationLink(value: appModel.gameNavigationIdentity(for: game)) {
                                     GameCardView(
                                         summary: game,
                                         showsHomeTeamBadge: true,
@@ -76,8 +76,8 @@ struct HomeView: View {
             .refreshable {
                 await appModel.refreshHome()
             }
-            .navigationDestination(for: UUID.self) { gameID in
-                GameDetailView(gameID: gameID)
+            .navigationDestination(for: String.self) { gameIdentity in
+                GameDetailView(gameIdentity: gameIdentity)
             }
         }
     }

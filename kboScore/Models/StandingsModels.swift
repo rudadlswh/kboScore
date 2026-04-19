@@ -99,6 +99,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let remainingRegularSeasonGames: Int
     let recentResults: [TeamGameResult]
     let unknownClassificationGames: Int
+    let virtualUnscheduledRemainingGames: Int
     let rankingResolution: StandingsRankingResolution
     let rankingResolutionPosition: Int?
     let postseasonQualificationProbability: Double?
@@ -116,6 +117,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         remainingRegularSeasonGames: Int,
         recentResults: [TeamGameResult],
         unknownClassificationGames: Int = 0,
+        virtualUnscheduledRemainingGames: Int = 0,
         rankingResolution: StandingsRankingResolution = .resolved,
         rankingResolutionPosition: Int? = nil,
         postseasonQualificationProbability: Double? = nil,
@@ -132,6 +134,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.remainingRegularSeasonGames = remainingRegularSeasonGames
         self.recentResults = recentResults
         self.unknownClassificationGames = unknownClassificationGames
+        self.virtualUnscheduledRemainingGames = virtualUnscheduledRemainingGames
         self.rankingResolution = rankingResolution
         self.rankingResolutionPosition = rankingResolutionPosition
         self.postseasonQualificationProbability = postseasonQualificationProbability
@@ -234,6 +237,14 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         guard shouldShowPostseasonProbability else { return nil }
         return postseasonProbabilityUnavailableReason
     }
+
+    var postseasonProbabilityEstimateText: String? {
+        guard postseasonQualificationProbability != nil,
+              virtualUnscheduledRemainingGames > 0 else {
+            return nil
+        }
+        return "공식 미편성 \(virtualUnscheduledRemainingGames)경기 포함 추정치"
+    }
 }
 
 extension TeamGameResult {
@@ -251,6 +262,7 @@ extension TeamGameResult {
 
 struct LocalStandingsProbabilitySignal: Hashable, Sendable {
     let unknownClassificationGames: Int
+    let virtualUnscheduledRemainingGames: Int
     let rankingResolution: StandingsRankingResolution
     let rankingResolutionPosition: Int?
     let postseasonQualificationProbability: Double?
@@ -258,11 +270,10 @@ struct LocalStandingsProbabilitySignal: Hashable, Sendable {
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
 }
 
-// Uses only local regular-season games. Unknown-classification rows or an
-// incomplete 144-game schedule make the result unavailable. When the schedule
-// is complete, remaining games are simulated with a deterministic seed from the
-// current snapshot, and postseason qualification is evaluated by win-percentage
-// groups with equal sharing at the cutoff.
+// Uses only local regular-season games. Unknown-classification rows still make
+// the result unavailable, but officially unscheduled season deficits are added
+// as simulation-only neutral games. These virtual games are never persisted or
+// exposed as scheduled games.
 struct LocalPostseasonQualificationCalculator: Sendable {
     nonisolated private static let fallbackPreviousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
@@ -300,7 +311,15 @@ struct LocalPostseasonQualificationCalculator: Sendable {
     ) -> [String: LocalStandingsProbabilitySignal] {
         let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), $0) })
         let completedRegularSeasonGames = games.filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
-        let remainingRegularSeasonGames = games.filter { $0.isRegularSeason && !$0.hasCompleteFinalScore }
+        let remainingRegularSeasonGames = games
+            .filter { $0.isRegularSeason && !$0.hasCompleteFinalScore }
+            .map(_SimulationGame.real)
+        let virtualRemainingGames = virtualRemainingGames(teams: teams, games: games)
+        let simulationRemainingGames = remainingRegularSeasonGames + virtualRemainingGames
+        let virtualUnscheduledCounts = remainingRegularSeasonGameCountsByTeamID(
+            teams: teams,
+            games: virtualRemainingGames
+        )
         let unknownClassificationCounts = unknownClassificationCountsByTeamID(teams: teams, games: games)
         let rankingSignals = currentRankingSignals(teams: teams, games: completedRegularSeasonGames)
         if unknownClassificationCounts.values.contains(where: { $0 > 0 }) {
@@ -309,16 +328,6 @@ struct LocalPostseasonQualificationCalculator: Sendable {
                 rankingSignals: rankingSignals,
                 unknownClassificationCounts: unknownClassificationCounts,
                 reason: .unknownClassificationGames
-            )
-        }
-
-        let scheduledGamesByTeamID = scheduledRegularSeasonGameCountsByTeamID(teams: teams, games: games)
-        if scheduledGamesByTeamID.values.contains(where: { $0 != regularSeasonLength }) {
-            return makeUnavailableSignals(
-                teams: teams,
-                rankingSignals: rankingSignals,
-                unknownClassificationCounts: unknownClassificationCounts,
-                reason: .incompleteRegularSeasonSchedule
             )
         }
 
@@ -335,14 +344,14 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         let qualificationStatuses = qualificationStatuses(
             teams: teams,
             currentRecords: records,
-            remainingGames: remainingRegularSeasonGames
+            remainingGames: simulationRemainingGames
         )
         let probabilities = qualificationProbabilities(
             teams: teams,
             teamsByID: teamsByID,
             currentRecords: records,
             completedGames: completedRegularSeasonGames,
-            remainingGames: remainingRegularSeasonGames,
+            remainingGames: simulationRemainingGames,
             qualificationStatuses: qualificationStatuses
         )
 
@@ -351,6 +360,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             let rankingSignal = rankingSignals[teamID]
             partialResult[teamID] = LocalStandingsProbabilitySignal(
                 unknownClassificationGames: unknownClassificationCounts[teamID, default: 0],
+                virtualUnscheduledRemainingGames: virtualUnscheduledCounts[teamID, default: 0],
                 rankingResolution: rankingSignal?.rankingResolution ?? .resolved,
                 rankingResolutionPosition: rankingSignal?.rankingResolutionPosition,
                 postseasonQualificationProbability: probabilities[teamID],
@@ -365,7 +375,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         teamsByID: [String: Team],
         currentRecords: [String: _ProbabilityRecord],
         completedGames: [GameDetail],
-        remainingGames: [GameDetail],
+        remainingGames: [_SimulationGame],
         qualificationStatuses: [String: PostseasonQualificationStatus]
     ) -> [String: Double] {
         guard remainingGames.isEmpty == false else {
@@ -378,7 +388,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             completedGames: completedGames
         )
         var qualificationTotals = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), 0.0) })
-        var generator = SplitMix64(state: deterministicSeed(teams: teams, games: completedGames + remainingGames))
+        var generator = SplitMix64(state: deterministicSeed(teams: teams, completedGames: completedGames, remainingGames: remainingGames))
 
         for _ in 0..<simulationCount {
             var simulatedRecords = currentRecords
@@ -388,8 +398,8 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             }
 
             for game in remainingGames {
-                let awayID = Self.canonicalTeamIdentifier(game.awayTeam.id)
-                let homeID = Self.canonicalTeamIdentifier(game.homeTeam.id)
+                let awayID = game.awayTeamID
+                let homeID = game.homeTeamID
                 guard var awayRecord = simulatedRecords[awayID],
                       var homeRecord = simulatedRecords[homeID],
                       teamsByID[awayID] != nil,
@@ -401,7 +411,8 @@ struct LocalPostseasonQualificationCalculator: Sendable {
                 let homeStrength = simulatedStrengths[homeID] ?? 0.5
                 let awayWinProbability = matchupWinProbability(
                     awayStrength: awayStrength,
-                    homeStrength: homeStrength
+                    homeStrength: homeStrength,
+                    isNeutralSite: game.isNeutralSite
                 )
 
                 if generator.nextUnitInterval() < awayWinProbability {
@@ -448,6 +459,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             let rankingSignal = rankingSignals[teamID]
             partialResult[teamID] = LocalStandingsProbabilitySignal(
                 unknownClassificationGames: unknownClassificationCounts[teamID, default: 0],
+                virtualUnscheduledRemainingGames: 0,
                 rankingResolution: rankingSignal?.rankingResolution ?? .resolved,
                 rankingResolutionPosition: rankingSignal?.rankingResolutionPosition,
                 postseasonQualificationProbability: nil,
@@ -470,6 +482,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             for record in group {
                 signals[record.teamID] = LocalStandingsProbabilitySignal(
                     unknownClassificationGames: 0,
+                    virtualUnscheduledRemainingGames: 0,
                     rankingResolution: requiresTiebreak ? .tiebreakGameRequired : .resolved,
                     rankingResolutionPosition: requiresTiebreak ? currentRank : nil,
                     postseasonQualificationProbability: nil,
@@ -565,18 +578,6 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return shares
     }
 
-    nonisolated private func scheduledRegularSeasonGameCountsByTeamID(
-        teams: [Team],
-        games: [GameDetail]
-    ) -> [String: Int] {
-        var counts = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), 0) })
-        for game in games where game.isRegularSeason {
-            counts[Self.canonicalTeamIdentifier(game.awayTeam.id), default: 0] += 1
-            counts[Self.canonicalTeamIdentifier(game.homeTeam.id), default: 0] += 1
-        }
-        return counts
-    }
-
     nonisolated private func completedRegularSeasonGameCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
@@ -587,6 +588,74 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             counts[Self.canonicalTeamIdentifier(game.homeTeam.id), default: 0] += 1
         }
         return counts
+    }
+
+    nonisolated private func virtualRemainingGames(
+        teams: [Team],
+        games: [GameDetail]
+    ) -> [_SimulationGame] {
+        let teamIDs = teams
+            .map { Self.canonicalTeamIdentifier($0.id) }
+            .sorted()
+        guard teamIDs.count > 1 else { return [] }
+
+        let targetPairGameCount = regularSeasonLength / max(1, teamIDs.count - 1)
+        guard targetPairGameCount > 0 else { return [] }
+
+        var pairCounts: [String: Int] = [:]
+        var teamGameCounts = Dictionary(uniqueKeysWithValues: teamIDs.map { ($0, 0) })
+
+        for game in games where game.isRegularSeason {
+            let awayID = Self.canonicalTeamIdentifier(game.awayTeam.id)
+            let homeID = Self.canonicalTeamIdentifier(game.homeTeam.id)
+            guard teamGameCounts[awayID] != nil,
+                  teamGameCounts[homeID] != nil,
+                  awayID != homeID else {
+                continue
+            }
+
+            pairCounts[teamPairKey(awayID, homeID), default: 0] += 1
+            teamGameCounts[awayID, default: 0] += 1
+            teamGameCounts[homeID, default: 0] += 1
+        }
+
+        if teamGameCounts.values.allSatisfy({ $0 >= regularSeasonLength }) {
+            return []
+        }
+
+        var remainingSlotsByTeamID = teamGameCounts.mapValues {
+            max(0, regularSeasonLength - $0)
+        }
+        var virtualGames: [_SimulationGame] = []
+
+        for firstIndex in teamIDs.indices {
+            for secondIndex in teamIDs.index(after: firstIndex)..<teamIDs.endIndex {
+                let firstTeamID = teamIDs[firstIndex]
+                let secondTeamID = teamIDs[secondIndex]
+                let pair = teamPairKey(firstTeamID, secondTeamID)
+                var deficit = max(0, targetPairGameCount - pairCounts[pair, default: 0])
+                var virtualIndex = 0
+
+                while deficit > 0,
+                      remainingSlotsByTeamID[firstTeamID, default: 0] > 0,
+                      remainingSlotsByTeamID[secondTeamID, default: 0] > 0 {
+                    virtualGames.append(
+                        _SimulationGame(
+                            awayTeamID: firstTeamID,
+                            homeTeamID: secondTeamID,
+                            isNeutralSite: true,
+                            seedKey: "virtual:\(firstTeamID):\(secondTeamID):\(virtualIndex)"
+                        )
+                    )
+                    remainingSlotsByTeamID[firstTeamID, default: 0] -= 1
+                    remainingSlotsByTeamID[secondTeamID, default: 0] -= 1
+                    deficit -= 1
+                    virtualIndex += 1
+                }
+            }
+        }
+
+        return virtualGames
     }
 
     nonisolated private func unknownClassificationCountsByTeamID(
@@ -604,7 +673,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
     nonisolated private func qualificationStatuses(
         teams: [Team],
         currentRecords: [String: _ProbabilityRecord],
-        remainingGames: [GameDetail]
+        remainingGames: [_SimulationGame]
     ) -> [String: PostseasonQualificationStatus] {
         let remainingGamesByTeamID = remainingRegularSeasonGameCountsByTeamID(
             teams: teams,
@@ -789,15 +858,21 @@ struct LocalPostseasonQualificationCalculator: Sendable {
 
     nonisolated private func matchupWinProbability(
         awayStrength: Double,
-        homeStrength: Double
+        homeStrength: Double,
+        isNeutralSite: Bool
     ) -> Double {
-        boundedStrength(
+        let venueAdjustment = isNeutralSite ? 0 : StandingsMetrics.postseasonHomeFieldLogitAdjustment
+        return boundedStrength(
             logistic(
                 logit(boundedStrength(awayStrength))
                 - logit(boundedStrength(homeStrength))
-                - StandingsMetrics.postseasonHomeFieldLogitAdjustment
+                - venueAdjustment
             )
         )
+    }
+
+    nonisolated private func teamPairKey(_ lhs: String, _ rhs: String) -> String {
+        lhs <= rhs ? "\(lhs)|\(rhs)" : "\(rhs)|\(lhs)"
     }
 
     nonisolated private func minimumPossibleWinPercentage(
@@ -820,12 +895,12 @@ struct LocalPostseasonQualificationCalculator: Sendable {
 
     nonisolated private func remainingRegularSeasonGameCountsByTeamID(
         teams: [Team],
-        games: [GameDetail]
+        games: [_SimulationGame]
     ) -> [String: Int] {
         var counts = Dictionary(uniqueKeysWithValues: teams.map { (Self.canonicalTeamIdentifier($0.id), 0) })
         for game in games {
-            counts[Self.canonicalTeamIdentifier(game.awayTeam.id), default: 0] += 1
-            counts[Self.canonicalTeamIdentifier(game.homeTeam.id), default: 0] += 1
+            counts[game.awayTeamID, default: 0] += 1
+            counts[game.homeTeamID, default: 0] += 1
         }
         return counts
     }
@@ -843,7 +918,11 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         1 / (1 + exp(-value))
     }
 
-    nonisolated private func deterministicSeed(teams: [Team], games: [GameDetail]) -> UInt64 {
+    nonisolated private func deterministicSeed(
+        teams: [Team],
+        completedGames: [GameDetail],
+        remainingGames: [_SimulationGame]
+    ) -> UInt64 {
         var hash: UInt64 = 1_469_598_103_934_665_603
 
         func mix(_ string: String) {
@@ -857,7 +936,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             mix(Self.canonicalTeamIdentifier(team.id))
         }
 
-        for game in games.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
+        for game in completedGames.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             mix(game.id.uuidString)
             mix(Self.canonicalTeamIdentifier(game.awayTeam.id))
             mix(Self.canonicalTeamIdentifier(game.homeTeam.id))
@@ -870,6 +949,13 @@ struct LocalPostseasonQualificationCalculator: Sendable {
             if let homeScore = game.homeScore {
                 mix(String(homeScore))
             }
+        }
+
+        for game in remainingGames.sorted(by: { $0.seedKey < $1.seedKey }) {
+            mix(game.seedKey)
+            mix(game.awayTeamID)
+            mix(game.homeTeamID)
+            mix(game.isNeutralSite ? "neutral" : "scheduled")
         }
 
         return hash == 0 ? 0x9E37_79B9_7F4A_7C15 : hash
@@ -939,6 +1025,22 @@ private struct _ScoringAggregate: Hashable, Sendable {
         runsScored += scored
         runsAllowed += allowed
         gamesPlayed += 1
+    }
+}
+
+private struct _SimulationGame: Hashable, Sendable {
+    let awayTeamID: String
+    let homeTeamID: String
+    let isNeutralSite: Bool
+    let seedKey: String
+
+    nonisolated static func real(_ game: GameDetail) -> _SimulationGame {
+        _SimulationGame(
+            awayTeamID: game.awayTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            homeTeamID: game.homeTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            isNeutralSite: false,
+            seedKey: "real:\(game.id.uuidString)"
+        )
     }
 }
 

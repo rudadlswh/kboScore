@@ -30,7 +30,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "오늘 경기")
 
                             if let todayGame = appModel.myTeamTodayGame {
-                                NavigationLink(value: todayGame.id) {
+                                NavigationLink(value: appModel.gameNavigationIdentity(for: todayGame)) {
                                     GameCardView(summary: todayGame.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -66,7 +66,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "다음 경기")
 
                             if let nextGame = appModel.myTeamNextGame {
-                                NavigationLink(value: nextGame.id) {
+                                NavigationLink(value: appModel.gameNavigationIdentity(for: nextGame)) {
                                     GameCardView(summary: nextGame.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -83,7 +83,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "최근 결과")
 
                             if let recentResult = appModel.myTeamRecentResult {
-                                NavigationLink(value: recentResult.id) {
+                                NavigationLink(value: appModel.gameNavigationIdentity(for: recentResult)) {
                                     GameCardView(summary: recentResult.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -112,8 +112,8 @@ struct MyTeamView: View {
             .refreshable {
                 await appModel.refreshMyTeam()
             }
-            .navigationDestination(for: UUID.self) { gameID in
-                GameDetailView(gameID: gameID)
+            .navigationDestination(for: String.self) { gameIdentity in
+                GameDetailView(gameIdentity: gameIdentity)
             }
         }
     }

@@ -193,8 +193,9 @@ struct KBOGameDTO: Codable, Sendable {
         events: [KBOGameEventDTO],
         note: String?
     ) {
-        self.id = id
-        self.providerGameID = providerGameID
+        let resolvedProviderGameID = providerGameID ?? Self.providerGameID(from: note)
+        self.id = GameIdentifier.canonicalUUID(id: id, providerGameID: resolvedProviderGameID)
+        self.providerGameID = resolvedProviderGameID
         self.scheduledStart = scheduledStart
         self.venue = venue
         self.awayTeamID = awayTeamID
@@ -216,7 +217,6 @@ struct KBOGameDTO: Codable, Sendable {
 
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         let decodedOfficialProviderGameID = try container.decodeIfPresent(String.self, forKey: .officialProviderGameID)
         let decodedOfficialProviderGameIDSnake = try container.decodeIfPresent(String.self, forKey: .official_provider_game_id)
         let decodedProviderGameID = try container.decodeIfPresent(String.self, forKey: .providerGameID)
@@ -227,6 +227,9 @@ struct KBOGameDTO: Codable, Sendable {
             decodedProviderGameID?.nilIfBlank ??
             decodedProviderGameIDSnake?.nilIfBlank ??
             Self.providerGameID(from: decodedNote)
+        let decodedRawID = try? container.decodeIfPresent(String.self, forKey: .id)
+        let decodedUUID = try? container.decodeIfPresent(UUID.self, forKey: .id)
+        id = GameIdentifier.canonicalUUID(id: decodedRawID ?? decodedUUID?.uuidString, providerGameID: providerGameID) ?? UUID()
         scheduledStart = try container.decodeFlexibleDate(forKey: .scheduledStart) ?? .distantPast
         venue = try container.decodeIfPresent(String.self, forKey: .venue)
         note = decodedNote

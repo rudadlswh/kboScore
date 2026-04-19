@@ -92,6 +92,11 @@ private struct StandingsRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                } else if let estimateText = snapshot.postseasonProbabilityEstimateText {
+                    Text(estimateText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
 

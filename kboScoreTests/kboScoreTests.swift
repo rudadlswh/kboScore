@@ -7,6 +7,7 @@
 
 import Foundation
 import Testing
+import UserNotifications
 @testable import kboScore
 
 @MainActor
@@ -384,6 +385,340 @@ struct kboScoreTests {
         #expect(dayAfterUnmark.hasAttendedGame == false)
     }
 
+    @Test func scheduleDetailLookupUsesProviderIdentityAcrossDifferentRawIDs() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
+        let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(base.teams.first(where: { $0.id == "hanwha" }))
+        let providerID = "20260401KTHH0"
+        let scheduledStart = isoDate("2026-04-01T18:30:00+09:00")
+        let bootstrapGame = makeGameDetail(
+            id: UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 14,
+            homeScore: 11,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "db_export provider_game_id=\(providerID)"
+        )
+        let monthlyGame = makeGameDetail(
+            id: GameIdentifier.uuid(from: "20260401-HAN-KT")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: providerID
+        )
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [monthlyGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [kt, hanwha],
+                games: [bootstrapGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "hanwha"
+
+        model.toggleGameAttendance(for: bootstrapGame)
+        await model.loadScheduleIfNeeded(for: scheduledStart)
+
+        let selectedGames = model.scheduleGames(on: scheduledStart, filter: .all)
+        let selectedGame = try #require(selectedGames.first)
+        let navigationIdentity = model.gameNavigationIdentity(for: selectedGame)
+        let detailGame = try #require(model.game(withIdentity: navigationIdentity))
+
+        #expect(selectedGames.count == 1)
+        #expect(navigationIdentity == providerID)
+        #expect(detailGame.id == bootstrapGame.id)
+        #expect(detailGame.status == .final)
+        #expect(model.isGameAttended(monthlyGame))
+        #expect(model.myTeamAttendanceSummary.completedGames == 1)
+    }
+
+    @Test func scheduleRainoutTransitionSchedulesLocalNotificationOnce() async throws {
+        let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let lotte = try #require(base.teams.first(where: { $0.id == "lotte" }))
+        let providerID = "20260417LTLG0"
+        let bootstrapGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000001")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: providerID
+        )
+        let cancelledScheduleGame = makeGameDetail(
+            id: GameIdentifier.uuid(from: "20260417-LG-LOTTE")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "우천 취소",
+            providerGameID: providerID
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [cancelledScheduleGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [lg, lotte],
+                games: [bootstrapGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshSchedule(for: scheduledStart)
+        await model.refreshSchedule(for: scheduledStart)
+
+        #expect(collector.requests.count == 1)
+        #expect(collector.requests.first?.content.body == "[LG] 금일 경기는 우천으로 인해 취소되었습니다.")
+    }
+
+    @Test func homeRainoutTransitionSchedulesLocalNotificationOnce() async throws {
+        let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let providerID = "20260417OBLG0"
+        let upcomingGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000002")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: providerID
+        )
+        let rainoutGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000002")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .rainDelay,
+            seasonClassification: .regularSeason,
+            providerGameID: providerID
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchGames: { [rainoutGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [upcomingGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshHome()
+        await model.refreshHome()
+
+        #expect(collector.requests.count == 1)
+        #expect(collector.requests.first?.content.userInfo["kbo_live"] != nil)
+    }
+
+    @Test func nonTodayCancelledGameDoesNotScheduleLocalNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
+        let scheduledStart = isoDate("2026-04-16T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let upcomingGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000003")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260416OBLG0"
+        )
+        let cancelledGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000003")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "우천 취소",
+            providerGameID: "20260416OBLG0"
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchGames: { [cancelledGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [upcomingGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshHome()
+
+        #expect(collector.requests.isEmpty)
+    }
+
+    @Test func finalizedGameDoesNotScheduleCancellationNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let upcomingGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000004")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260417OBLG1"
+        )
+        let finalizedGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000004")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260417OBLG1"
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchGames: { [finalizedGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [upcomingGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshHome()
+
+        #expect(collector.requests.isEmpty)
+    }
+
+    @Test func nonFavoriteCancelledGameDoesNotScheduleLocalNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(base.teams.first(where: { $0.id == "hanwha" }))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let providerID = "20260417KTHH0"
+        let upcomingGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000005")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            providerGameID: providerID
+        )
+        let cancelledGame = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000005")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "우천 취소",
+            providerGameID: providerID
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchGames: { [cancelledGame] }),
+            bootstrap: KBOBootstrapData(
+                teams: [kt, hanwha, lg],
+                games: [upcomingGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshHome()
+
+        #expect(collector.requests.isEmpty)
+    }
+
     @Test func standingsExcludeExhibitionGamesAndRankByWinPercentage() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -671,7 +1006,7 @@ struct kboScoreTests {
         #expect(doosanSnapshot.remainingRegularSeasonGames == 143)
     }
 
-    @Test func standingsUseLocalProbabilityUnavailableReasonWhenScheduleIsIncomplete() async throws {
+    @Test func standingsUseVirtualUnscheduledGamesWhenScheduleIsIncomplete() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
         let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
@@ -703,8 +1038,10 @@ struct kboScoreTests {
         #expect(standings.first?.team.id == "lg")
         #expect(standings.first?.wins == 1)
         #expect(standings.first?.losses == 0)
-        #expect(standings.first?.postseasonQualificationProbability == nil)
-        #expect(standings.first?.postseasonProbabilityUnavailableReason == .incompleteRegularSeasonSchedule)
+        #expect(standings.first?.postseasonQualificationProbability != nil)
+        #expect(standings.first?.postseasonProbabilityUnavailableReason == nil)
+        #expect(standings.first?.virtualUnscheduledRemainingGames == 143)
+        #expect(standings.first?.postseasonProbabilityEstimateText == "공식 미편성 143경기 포함 추정치")
     }
 
     @Test func bundledBootstrapCompatibilityInfersRegularSeasonFromProviderGameIdentifier() async throws {
@@ -782,6 +1119,27 @@ struct kboScoreTests {
         #expect(mapped.notifications.isEmpty == false)
         #expect(mapped.games.contains { $0.status == .rainDelay })
         #expect(mapped.games.contains { $0.status == .upcoming && $0.awayScore == nil && $0.homeScore == nil })
+    }
+
+    @Test func gameDTOPrefersProviderGameIDForCanonicalIdentity() async throws {
+        let data = """
+        {
+          "id": "20260401-HAN-KT",
+          "providerGameID": "20260401KTHH0",
+          "scheduledStart": "2026-04-01T18:30:00+09:00",
+          "venue": "대전",
+          "awayTeamID": "kt",
+          "homeTeamID": "hanwha",
+          "statusCode": "UPCOMING",
+          "statusText": "경기 예정"
+        }
+        """.data(using: .utf8)!
+
+        let dto = try JSONDecoder().decode(KBOGameDTO.self, from: data)
+
+        #expect(dto.providerGameID == "20260401KTHH0")
+        #expect(dto.id == GameIdentifier.uuid(from: "20260401KTHH0"))
+        #expect(dto.id != GameIdentifier.uuid(from: "20260401-HAN-KT"))
     }
 
     @Test func mapperUsesStructuredSeasonClassificationWhenAvailable() async throws {
@@ -2393,6 +2751,30 @@ struct kboScoreTests {
         #expect(team1Probability > team10Probability)
     }
 
+    @Test func localProbabilityCalculatorAddsVirtualGamesForOfficialPairDeficits() throws {
+        let teams = makeProbabilityTestTeams()
+        let games = makePairDeficitRegularSeasonSchedule(
+            teams: teams,
+            gamesPerPair: 15,
+            completedGamesPerPair: 1
+        )
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 144,
+            simulationCount: 200
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+        let team1Signal = try #require(signals["team1"])
+        let team10Signal = try #require(signals["team10"])
+
+        #expect(games.count == 675)
+        #expect(team1Signal.postseasonQualificationProbability != nil)
+        #expect(team1Signal.postseasonProbabilityUnavailableReason == nil)
+        #expect(team1Signal.unknownClassificationGames == 0)
+        #expect(team1Signal.virtualUnscheduledRemainingGames == 9)
+        #expect(team10Signal.virtualUnscheduledRemainingGames == 9)
+    }
+
     @Test func localProbabilityCalculatorReturnsDeterministicProbabilitiesForSameSnapshot() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -2609,10 +2991,12 @@ struct kboScoreTests {
             ties: 2,
             remainingRegularSeasonGames: 52,
             recentResults: [],
+            virtualUnscheduledRemainingGames: 9,
             postseasonQualificationProbability: 0.784
         )
 
         #expect(snapshot.postseasonQualificationText == "78.4%")
+        #expect(snapshot.postseasonProbabilityEstimateText == "공식 미편성 9경기 포함 추정치")
     }
 
     @Test func snapshotClampsExtremeNonCertainPostseasonProbabilityDisplay() {
@@ -3439,6 +3823,15 @@ private final class TestLiveActivityController: FavoriteTeamLiveActivityControll
     }
 }
 
+@MainActor
+private final class NotificationRequestCollector {
+    private(set) var requests: [UNNotificationRequest] = []
+
+    func append(_ request: UNNotificationRequest) {
+        requests.append(request)
+    }
+}
+
 private struct StubRepository: KBORepository {
     var fetchBootstrapDataHandler: @Sendable () async throws -> KBOBootstrapData = {
         stubBootstrap()
@@ -3635,6 +4028,44 @@ private func makeProbabilityThresholdSchedule(
                 )
             )
             identifierIndex += 1
+        }
+    }
+
+    return games
+}
+
+private func makePairDeficitRegularSeasonSchedule(
+    teams: [Team],
+    gamesPerPair: Int,
+    completedGamesPerPair: Int
+) -> [GameDetail] {
+    precondition(completedGamesPerPair <= gamesPerPair)
+    var games: [GameDetail] = []
+    var identifierIndex = 1
+
+    for firstIndex in teams.indices {
+        for secondIndex in teams.index(after: firstIndex)..<teams.endIndex {
+            for pairGameIndex in 0..<gamesPerPair {
+                let awayTeam = pairGameIndex.isMultiple(of: 2) ? teams[firstIndex] : teams[secondIndex]
+                let homeTeam = pairGameIndex.isMultiple(of: 2) ? teams[secondIndex] : teams[firstIndex]
+                let identifier = String(format: "67000000-0000-0000-0000-%012d", identifierIndex)
+                let isCompleted = pairGameIndex < completedGamesPerPair
+                games.append(
+                    makeGameDetail(
+                        id: UUID(uuidString: identifier)!,
+                        scheduledStart: isoDate("2026-04-01T18:30:00+09:00"),
+                        venue: "잠실",
+                        awayTeam: awayTeam,
+                        homeTeam: homeTeam,
+                        awayScore: isCompleted ? 3 : nil,
+                        homeScore: isCompleted ? 5 : nil,
+                        status: isCompleted ? .final : .upcoming,
+                        seasonClassification: .regularSeason,
+                        note: isCompleted ? "db_export provider_game_id=2026PAIR\(identifierIndex)" : nil
+                    )
+                )
+                identifierIndex += 1
+            }
         }
     }
 

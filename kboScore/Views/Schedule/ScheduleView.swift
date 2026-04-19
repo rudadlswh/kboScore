@@ -41,8 +41,8 @@ struct ScheduleView: View {
             .task(id: scheduleTaskID) {
                 await normalizeDisplayedMonth()
             }
-            .navigationDestination(for: UUID.self) { gameID in
-                GameDetailView(gameID: gameID)
+            .navigationDestination(for: String.self) { gameIdentity in
+                GameDetailView(gameIdentity: gameIdentity)
             }
         }
     }
@@ -175,13 +175,17 @@ private struct ScheduleCalendarCardView: View {
                             .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(dayBorderColor(for: day), lineWidth: day.isToday || isSelected(day) ? 1 : 0)
+                                    .stroke(dayTodayBorderColor(for: day), lineWidth: day.isToday ? 1 : 0)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(daySelectionBorderColor(for: day), lineWidth: isSelected(day) ? 2 : 0)
                             )
                             .overlay(alignment: .topTrailing) {
                                 if day.hasAttendedGame {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(isSelected(day) ? .white : appModel.currentTheme.accent)
+                                        .foregroundStyle(appModel.currentTheme.accent)
                                         .padding(4)
                                 }
                             }
@@ -233,7 +237,7 @@ private struct ScheduleCalendarCardView: View {
                         }
 
                         ForEach(selectedGames) { game in
-                            NavigationLink(value: game.id) {
+                            NavigationLink(value: appModel.gameNavigationIdentity(for: game)) {
                                 ScheduleGameRow(
                                     game: game,
                                     favoriteTeamID: appModel.settings.favoriteTeamID,
@@ -325,7 +329,7 @@ private struct ScheduleCalendarCardView: View {
 
     private func dayNumberColor(for day: MyTeamCalendarDay) -> Color {
         if isSelected(day) {
-            return .white
+            return appModel.currentTheme.accent
         }
         return day.isInDisplayedMonth ? .primary : .secondary.opacity(0.6)
     }
@@ -335,13 +339,13 @@ private struct ScheduleCalendarCardView: View {
     }
 
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
-        if isSelected(day) {
-            return appModel.currentTheme.accent
-        }
-        if day.isToday {
-            return .clear
-        }
-        if let favoriteTeamResult = day.favoriteTeamResult {
+        switch day.dominantStatus {
+        case .cancelled:
+            return KBOLivePalette.cancellation.opacity(0.08)
+        case .final:
+            guard let favoriteTeamResult = day.favoriteTeamResult else {
+                return .clear
+            }
             switch favoriteTeamResult {
             case .win:
                 return KBOLivePalette.upcoming.opacity(0.18)
@@ -350,18 +354,17 @@ private struct ScheduleCalendarCardView: View {
             case .tie:
                 return appModel.currentTheme.chipBackground
             }
+        case .live, .rainDelay, .upcoming, nil:
+            return .clear
         }
-        return Color.clear
     }
 
-    private func dayBorderColor(for day: MyTeamCalendarDay) -> Color {
-        if day.isToday {
-            return KBOLivePalette.upcoming.opacity(0.9)
-        }
-        if isSelected(day) {
-            return appModel.currentTheme.accent
-        }
-        return .clear
+    private func dayTodayBorderColor(for day: MyTeamCalendarDay) -> Color {
+        day.isToday ? KBOLivePalette.upcoming.opacity(0.9) : .clear
+    }
+
+    private func daySelectionBorderColor(for day: MyTeamCalendarDay) -> Color {
+        isSelected(day) ? appModel.currentTheme.accent : .clear
     }
 }
 

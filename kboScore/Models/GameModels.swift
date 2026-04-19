@@ -161,29 +161,49 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         status == .final && awayScore != nil && homeScore != nil
     }
 
-    var officialGameCenterID: String? {
+    nonisolated var officialGameCenterID: String? {
         providerGameID ?? Self.providerGameID(from: note)
+    }
+
+    nonisolated var canonicalGameIdentityValue: String {
+        GameIdentifier.canonicalRawValue(id: id, providerGameID: officialGameCenterID)
+    }
+
+    nonisolated var canonicalGameIdentityKey: String {
+        GameIdentifier.canonicalKey(id: id, providerGameID: officialGameCenterID)
+    }
+
+    nonisolated var gameIdentityAliases: Set<String> {
+        var aliases: Set<String> = [GameIdentifier.idKey(id), matchupIdentityKey]
+        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.isEmpty == false {
+            aliases.insert(GameIdentifier.providerKey(providerGameID))
+        }
+        if let officialGameCenterID = Self.providerGameID(from: note) {
+            aliases.insert(GameIdentifier.providerKey(officialGameCenterID))
+        }
+        return aliases
     }
 
     nonisolated var attendanceStorageKey: String {
         if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
-            return "provider:\(providerGameID)"
+            return GameIdentifier.providerKey(providerGameID)
         }
         if let officialGameCenterID = Self.providerGameID(from: note) {
-            return "provider:\(officialGameCenterID)"
+            return GameIdentifier.providerKey(officialGameCenterID)
         }
-        return "id:\(id.uuidString.lowercased())"
+        return GameIdentifier.idKey(id)
     }
 
     nonisolated var attendanceStorageAliases: Set<String> {
-        var aliases: Set<String> = ["id:\(id.uuidString.lowercased())"]
+        var aliases: Set<String> = [GameIdentifier.idKey(id)]
         if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
-            aliases.insert("provider:\(providerGameID)")
+            aliases.insert(GameIdentifier.providerKey(providerGameID))
         }
         if let officialGameCenterID = Self.providerGameID(from: note) {
-            aliases.insert("provider:\(officialGameCenterID)")
+            aliases.insert(GameIdentifier.providerKey(officialGameCenterID))
         }
         return aliases
     }
@@ -227,6 +247,16 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
             return nil
         }
         return String(token)
+    }
+
+    nonisolated private var matchupIdentityKey: String {
+        let startSecond = Int(scheduledStart.timeIntervalSince1970.rounded())
+        return [
+            "match",
+            String(startSecond),
+            awayTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            homeTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        ].joined(separator: ":")
     }
 }
 

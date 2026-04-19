@@ -10,11 +10,80 @@ import Foundation
 
 enum GameIdentifier {
     nonisolated static func uuid(from rawValue: String?) -> UUID? {
-        guard let rawValue, rawValue.isEmpty == false else { return nil }
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawValue.isEmpty == false else { return nil }
         if let parsed = UUID(uuidString: rawValue) {
             return parsed
         }
         return stableUUID(from: rawValue)
+    }
+
+    nonisolated static func canonicalRawValue(id: UUID, providerGameID: String?) -> String {
+        trimmedProviderGameID(providerGameID) ?? id.uuidString.lowercased()
+    }
+
+    nonisolated static func canonicalKey(id: UUID, providerGameID: String?) -> String {
+        if let providerGameID = trimmedProviderGameID(providerGameID) {
+            return providerKey(providerGameID)
+        }
+        return idKey(id)
+    }
+
+    nonisolated static func canonicalUUID(id rawID: String?, providerGameID: String?) -> UUID? {
+        if let providerGameID = trimmedProviderGameID(providerGameID) {
+            return uuid(from: providerGameID)
+        }
+        return uuid(from: rawID)
+    }
+
+    nonisolated static func canonicalUUID(id: UUID, providerGameID: String?) -> UUID {
+        if let providerGameID = trimmedProviderGameID(providerGameID),
+           let providerUUID = uuid(from: providerGameID) {
+            return providerUUID
+        }
+        return id
+    }
+
+    nonisolated static func idKey(_ id: UUID) -> String {
+        "id:\(id.uuidString.lowercased())"
+    }
+
+    nonisolated static func providerKey(_ providerGameID: String) -> String {
+        "provider:\(providerGameID)"
+    }
+
+    nonisolated static func lookupKeys(from rawValue: String) -> [String] {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return [] }
+
+        if trimmed.hasPrefix("provider:") {
+            let provider = String(trimmed.dropFirst("provider:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return provider.isEmpty ? [] : [providerKey(provider)]
+        }
+
+        if trimmed.hasPrefix("id:") {
+            let id = String(trimmed.dropFirst("id:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let uuid = UUID(uuidString: id) {
+                return [idKey(uuid)]
+            }
+            return uuid(from: id).map { [idKey($0)] } ?? []
+        }
+
+        if let uuid = UUID(uuidString: trimmed) {
+            return [idKey(uuid)]
+        }
+
+        return [providerKey(trimmed)]
+    }
+
+    nonisolated private static func trimmedProviderGameID(_ providerGameID: String?) -> String? {
+        guard let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              providerGameID.isEmpty == false else {
+            return nil
+        }
+        return providerGameID
     }
 
     nonisolated private static func stableUUID(from value: String) -> UUID {

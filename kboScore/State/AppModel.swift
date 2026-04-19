@@ -13,6 +13,9 @@ import UserNotifications
 import WidgetKit
 #endif
 
+typealias GameCancellationNotificationScheduler = (UNNotificationRequest) async throws -> Void
+typealias CurrentDateProvider = () -> Date
+
 enum RefreshScope: Hashable, Sendable {
     case home
     case myTeam
@@ -65,6 +68,7 @@ final class AppModel {
     private static let settingsStorageKey = "kbo_live_app_settings"
     private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
     private static let attendedGamesStorageKey = "kbo_live_attended_game_keys"
+    private static let cancellationNotificationStorageKey = "kbo_live_cancellation_notification_keys"
     private static let staleThreshold: TimeInterval = 90
     private static let previousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
@@ -83,6 +87,9 @@ final class AppModel {
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
+    private let cancellationNotificationScheduler: GameCancellationNotificationScheduler
+    private let currentDateProvider: CurrentDateProvider
+    private let cancellationNotificationCoordinator = GameCancellationNotificationCoordinator()
     private let officialGameCenterClient = OfficialKBOGameCenterClient()
     private let localPostseasonQualificationCalculator = LocalPostseasonQualificationCalculator()
     private let calendar = Calendar(identifier: .gregorian)
@@ -124,6 +131,7 @@ final class AppModel {
     var notificationRegistrationLastAttemptAt: Date?
     var notificationRegistrationEndpointDescription: String?
     private(set) var attendedGameKeys: Set<String> = []
+    private var notifiedCancellationKeys: Set<String> = []
     var settings: AppSettings {
         didSet {
             persistSettings()
@@ -159,11 +167,17 @@ final class AppModel {
         notificationRegistrationClient: any NotificationRegistrationClient = NoOpNotificationRegistrationClient(),
         liveActivityController: (any FavoriteTeamLiveActivityControlling)? = nil,
         bootstrap: KBOBootstrapData? = nil,
-        usePersistedSettings: Bool = true
+        usePersistedSettings: Bool = true,
+        currentDateProvider: @escaping CurrentDateProvider = Date.init,
+        cancellationNotificationScheduler: @escaping GameCancellationNotificationScheduler = { request in
+            try await UNUserNotificationCenter.current().add(request)
+        }
     ) {
         self.repository = repository
         self.repositoryRuntimeState = repositoryRuntimeState
         self.notificationRegistrationClient = notificationRegistrationClient
+        self.cancellationNotificationScheduler = cancellationNotificationScheduler
+        self.currentDateProvider = currentDateProvider
         #if canImport(ActivityKit)
         self.liveActivityController = liveActivityController ?? FavoriteTeamLiveActivityManager()
         #else
@@ -173,6 +187,7 @@ final class AppModel {
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
         let persistedDeviceToken = Self.loadPersistedDeviceToken()
         let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
+        let persistedCancellationNotificationKeys = usePersistedSettings ? Self.loadPersistedCancellationNotificationKeys() : []
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
         var initialSettings = persistedSettings ?? .default
         initialSettings.favoriteTeamID = Self.canonicalTeamIdentifier(initialSettings.favoriteTeamID)
@@ -192,6 +207,7 @@ final class AppModel {
         self.debugLocalBootstrapLoadedAt = nil
         self.apnsDeviceToken = persistedDeviceToken
         self.attendedGameKeys = persistedAttendedGameKeys
+        self.notifiedCancellationKeys = persistedCancellationNotificationKeys
         self.notificationRegistrationEndpointDescription = notificationRegistrationClient.debugEndpointDescription
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
@@ -395,6 +411,7 @@ final class AppModel {
                 remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
                 recentResults: snapshot.recentResults,
                 unknownClassificationGames: snapshot.unknownClassificationGames,
+                virtualUnscheduledRemainingGames: snapshot.virtualUnscheduledRemainingGames,
                 rankingResolution: snapshot.rankingResolution,
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
@@ -587,8 +604,13 @@ final class AppModel {
 
     var myTeamNextGame: GameDetail? {
         guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
+        let todayIdentity = myTeamTodayGame?.canonicalGameIdentityKey
         return games
-            .filter { $0.involves(teamID: favoriteTeamID) && $0.status == .upcoming && $0.id != myTeamTodayGame?.id }
+            .filter {
+                $0.involves(teamID: favoriteTeamID) &&
+                    $0.status == .upcoming &&
+                    $0.canonicalGameIdentityKey != todayIdentity
+            }
             .sorted { $0.scheduledStart < $1.scheduledStart }
             .first
     }
@@ -759,6 +781,7 @@ final class AppModel {
         while cursor < lastWeek.end {
             let cursorKey = scheduleDayKey(for: cursor)
             let dayGames = gamesByDayKey[cursorKey] ?? []
+            let myTeamDayGames = calendarMyTeamGames(for: dayGames)
             #if DEBUG
             if calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month) {
                 print("[ScheduleDebug] calendarLookup date=\(cursorKey) gameCount=\(dayGames.count)")
@@ -771,10 +794,10 @@ final class AppModel {
                     isToday: calendar.isDateInToday(cursor),
                     gameCount: dayGames.count,
                     hasAttendedGame: dayGames.contains(where: isGameAttended),
-                    dominantStatus: dominantStatus(for: dayGames),
+                    dominantStatus: dominantStatus(for: myTeamDayGames),
                     opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
                     favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter),
-                    favoriteTeamResult: calendarFavoriteTeamResult(for: dayGames)
+                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames)
                 )
             )
             guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
@@ -898,7 +921,32 @@ final class AppModel {
     }
 
     func game(withID gameID: UUID) -> GameDetail? {
-        games.first { $0.id == gameID }
+        game(withIdentity: gameID.uuidString)
+    }
+
+    func game(withIdentity gameIdentity: String) -> GameDetail? {
+        let lookupKeys = GameIdentifier.lookupKeys(from: gameIdentity)
+        guard lookupKeys.isEmpty == false else { return nil }
+
+        let providerKeys = lookupKeys.filter { $0.hasPrefix("provider:") }
+        if let providerMatch = preferredGame(matchingAnyOf: providerKeys) {
+            return providerMatch
+        }
+
+        let idKeys = lookupKeys.filter { $0.hasPrefix("id:") }
+        if let idMatch = preferredGame(matchingAnyOf: idKeys) {
+            return idMatch
+        }
+
+        return nil
+    }
+
+    func gameNavigationIdentity(for game: GameDetail) -> String {
+        game.canonicalGameIdentityValue
+    }
+
+    func gameNavigationIdentity(for summary: GameSummary) -> String {
+        game(withID: summary.id)?.canonicalGameIdentityValue ?? summary.id.uuidString
     }
 
     func shouldShowLiveActivityAction(for game: GameDetail) -> Bool {
@@ -1094,26 +1142,38 @@ final class AppModel {
         defer { loadingScheduleMonths.remove(key) }
 
         do {
+            let previousKnownGames = allKnownGames()
             let schedule = try await repository.fetchMonthlySchedule(for: key, bypassingCache: forceRefresh)
             let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
             let normalizedSchedule = await reconcileOfficialScheduleStartTimesIfNeeded(
                 in: schedule,
                 snapshot: snapshot
             )
-            monthlyScheduleGames[key] = normalizedSchedule.sorted { $0.scheduledStart < $1.scheduledStart }
+            monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalizedSchedule, for: key)
+                .sorted { $0.scheduledStart < $1.scheduledStart }
             failedScheduleMonths.remove(key)
+            await notifyCancellationTransitions(
+                previousGames: previousKnownGames,
+                updatedGames: monthlyScheduleGames[key] ?? []
+            )
             await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         } catch {
             failedScheduleMonths.insert(key)
             let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
             if monthlyScheduleGames[key] == nil {
+                let previousKnownGames = allKnownGames()
                 let fallback = fallbackMonthSchedule(for: key)
                 if fallback.isEmpty == false {
                     let normalizedFallback = await reconcileOfficialScheduleStartTimesIfNeeded(
                         in: fallback,
                         snapshot: snapshot
                     )
-                    monthlyScheduleGames[key] = normalizedFallback
+                    monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalizedFallback, for: key)
+                        .sorted { $0.scheduledStart < $1.scheduledStart }
+                    await notifyCancellationTransitions(
+                        previousGames: previousKnownGames,
+                        updatedGames: monthlyScheduleGames[key] ?? []
+                    )
                     await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
                 }
             }
@@ -1144,12 +1204,14 @@ final class AppModel {
                 }
                 await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
             } else {
+                let previousKnownGames = allKnownGames()
                 let fetchedGames = try await repository.fetchGames()
                 let snapshot = await repositoryRuntimeState?.snapshot()
                 games = await reconcileOfficialScheduleStartTimesIfNeeded(
                     in: fetchedGames,
                     snapshot: snapshot
                 )
+                await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: games)
                 scheduleLocalStandingsProbabilityRefresh()
                 if repositoryRuntimeState == nil {
                     markRefreshSuccess(for: .games, at: Date(), isStale: false)
@@ -1245,7 +1307,9 @@ final class AppModel {
             in: bootstrap,
             snapshot: snapshot
         )
+        let previousKnownGames = allKnownGames()
         apply(normalizedBootstrap)
+        await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: games)
         invalidateMonthlyScheduleCache()
     }
 
@@ -1525,6 +1589,20 @@ final class AppModel {
         return Set(decoded)
     }
 
+    private func persistCancellationNotificationKeys() {
+        guard usesPersistedSettings else { return }
+        guard let encoded = try? JSONEncoder().encode(Array(notifiedCancellationKeys).sorted()) else { return }
+        UserDefaults.standard.set(encoded, forKey: Self.cancellationNotificationStorageKey)
+    }
+
+    private static func loadPersistedCancellationNotificationKeys() -> Set<String> {
+        guard let data = UserDefaults.standard.data(forKey: Self.cancellationNotificationStorageKey),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+        return Set(decoded)
+    }
+
     private func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
         guard let payload = ScoreNotificationPayloadExtractor.payload(from: userInfo) else { return }
         routeNotification(payload)
@@ -1627,10 +1705,10 @@ final class AppModel {
     }
 
     private func resolvedRawGameID(for game: GameDetail) -> String {
-        if let officialGame = games.first(where: { $0.id == game.id }) {
-            return officialGame.id.uuidString
+        if let officialGame = self.game(withIdentity: game.canonicalGameIdentityValue) {
+            return officialGame.canonicalGameIdentityValue
         }
-        return game.id.uuidString
+        return game.canonicalGameIdentityValue
     }
 
     private func homePriority(for summary: GameSummary) -> Int {
@@ -1702,6 +1780,11 @@ final class AppModel {
             return .cancelled
         }
         return nil
+    }
+
+    private func calendarMyTeamGames(for games: [GameDetail]) -> [GameDetail] {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return [] }
+        return games.filter { $0.involves(teamID: favoriteTeamID) }
     }
 
     private func calendarOpponentTeam(for games: [GameDetail], filter: ScheduleFilter) -> Team? {
@@ -1830,6 +1913,7 @@ final class AppModel {
             remainingRegularSeasonGames: max(0, 144 - (wins + losses + ties)),
             recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(recentResultsLimit)),
             unknownClassificationGames: probabilitySignal?.unknownClassificationGames ?? 0,
+            virtualUnscheduledRemainingGames: probabilitySignal?.virtualUnscheduledRemainingGames ?? 0,
             rankingResolution: probabilitySignal?.rankingResolution ?? .resolved,
             rankingResolutionPosition: probabilitySignal?.rankingResolutionPosition,
             postseasonQualificationProbability: probabilitySignal?.postseasonQualificationProbability,
@@ -1913,6 +1997,99 @@ final class AppModel {
         return Self.previousRegularSeasonRankByTeamID[teamID]
     }
 
+    private func notifyCancellationTransitions(
+        previousGames: [GameDetail],
+        updatedGames: [GameDetail]
+    ) async {
+        guard settings.notificationPreferences.rainDelay,
+              notificationAuthorizationStatus.allowsNotifications,
+              let favoriteTeamID = settings.favoriteTeamID else {
+            return
+        }
+
+        var attemptedFingerprints: Set<String> = []
+        for updatedGame in updatedGames {
+            guard updatedGame.involves(teamID: favoriteTeamID),
+                  isTodayInKorea(updatedGame),
+                  let currentState = cancellationNotificationState(for: updatedGame),
+                  let previousGame = equivalentGame(to: updatedGame, in: previousGames) else {
+                continue
+            }
+
+            let previousState = cancellationNotificationState(for: previousGame)
+            guard previousState != currentState else { continue }
+
+            let fingerprint = cancellationNotificationFingerprint(for: updatedGame, state: currentState)
+            guard notifiedCancellationKeys.contains(fingerprint) == false,
+                  attemptedFingerprints.insert(fingerprint).inserted else {
+                continue
+            }
+
+            let request = cancellationNotificationCoordinator.makeRequest(
+                for: updatedGame,
+                favoriteTeam: favoriteTeam,
+                fingerprint: fingerprint,
+                isWeatherRelated: currentState.isWeatherRelated
+            )
+
+            do {
+                try await cancellationNotificationScheduler(request)
+                notifiedCancellationKeys.insert(fingerprint)
+                persistCancellationNotificationKeys()
+            } catch {
+                continue
+            }
+        }
+    }
+
+    private func cancellationNotificationState(for game: GameDetail) -> GameCancellationNotificationState? {
+        switch game.status {
+        case .cancelled:
+            return GameCancellationNotificationState(
+                status: game.status,
+                isWeatherRelated: isWeatherRelatedCancellation(game)
+            )
+        case .rainDelay:
+            return GameCancellationNotificationState(status: game.status, isWeatherRelated: true)
+        case .upcoming, .live, .final:
+            return nil
+        }
+    }
+
+    private func cancellationNotificationFingerprint(
+        for game: GameDetail,
+        state: GameCancellationNotificationState
+    ) -> String {
+        [
+            game.canonicalGameIdentityKey,
+            scheduleDayKey(for: game.scheduledStart),
+            state.status.rawValue,
+            state.isWeatherRelated ? "weather" : "generic"
+        ].joined(separator: "|")
+    }
+
+    private func equivalentGame(to game: GameDetail, in candidates: [GameDetail]) -> GameDetail? {
+        let lookupAliases = identityAliases(for: game)
+        return candidates.reduce(nil) { preferred, candidate in
+            guard identityAliases(for: candidate).isDisjoint(with: lookupAliases) == false else {
+                return preferred
+            }
+            return preferredKnownScheduleGame(existing: preferred, candidate: candidate)
+        }
+    }
+
+    private func isTodayInKorea(_ game: GameDetail) -> Bool {
+        scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
+    }
+
+    private func isWeatherRelatedCancellation(_ game: GameDetail) -> Bool {
+        let text = ([game.note, game.highlightText, game.inningText].compactMap { $0 } + game.events.map(\.headline))
+            .joined(separator: " ")
+            .lowercased()
+        let weatherTokens = ["우천", "강우", "폭우", "호우", "기상", "rain", "weather"]
+        return weatherTokens.contains { text.contains($0) }
+    }
+
     private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {
         let monthStarts = knownScheduleGames(filter: filter)
             .map { startOfMonth(for: $0.scheduledStart) }
@@ -1921,19 +2098,7 @@ final class AppModel {
     }
 
     private func knownScheduleGames(filter: ScheduleFilter) -> [GameDetail] {
-        var uniqueGames: [UUID: GameDetail] = [:]
-
-        for game in games {
-            uniqueGames[game.id] = preferredKnownScheduleGame(existing: uniqueGames[game.id], candidate: game)
-        }
-
-        for monthGames in monthlyScheduleGames.values {
-            for game in monthGames {
-                uniqueGames[game.id] = preferredKnownScheduleGame(existing: uniqueGames[game.id], candidate: game)
-            }
-        }
-
-        let mergedGames = Array(uniqueGames.values)
+        let mergedGames = mergeEquivalentGames(games + monthlyScheduleGames.values.flatMap { $0 })
         switch filter {
         case .all:
             return mergedGames
@@ -1943,28 +2108,111 @@ final class AppModel {
         }
     }
 
+    private func mergeMonthlyScheduleGames(_ monthGames: [GameDetail], for key: KBOMonthScheduleKey) -> [GameDetail] {
+        let stateGamesInMonth = games.filter {
+            let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
+            return components.year == key.year && components.month == key.month
+        }
+        return mergeEquivalentGames(monthGames + stateGamesInMonth)
+    }
+
+    private func mergeEquivalentGames(_ sourceGames: [GameDetail]) -> [GameDetail] {
+        var gamesByMergeKey: [String: GameDetail] = [:]
+        var mergeKeyByAlias: [String: String] = [:]
+
+        for candidate in sourceGames {
+            let candidateAliases = identityAliases(for: candidate)
+            let mergeKey = candidateAliases
+                .compactMap { mergeKeyByAlias[$0] }
+                .sorted()
+                .first ?? candidate.canonicalGameIdentityKey
+
+            let selected = preferredKnownScheduleGame(existing: gamesByMergeKey[mergeKey], candidate: candidate)
+            gamesByMergeKey[mergeKey] = selected
+
+            let selectedAliases = identityAliases(for: selected)
+            for alias in candidateAliases.union(selectedAliases) {
+                mergeKeyByAlias[alias] = mergeKey
+            }
+        }
+
+        return Array(gamesByMergeKey.values)
+    }
+
     private func preferredKnownScheduleGame(existing: GameDetail?, candidate: GameDetail) -> GameDetail {
         guard let existing else { return candidate }
         if candidate.hasCompleteFinalScore != existing.hasCompleteFinalScore {
             return candidate.hasCompleteFinalScore ? candidate : existing
         }
-        if candidate.status.isFinishedLike != existing.status.isFinishedLike {
-            return candidate.status.isFinishedLike ? candidate : existing
+        let candidatePriority = gameStateMergePriority(candidate)
+        let existingPriority = gameStateMergePriority(existing)
+        if candidatePriority != existingPriority {
+            return candidatePriority > existingPriority ? candidate : existing
+        }
+        let candidateHasProvider = candidate.officialGameCenterID != nil
+        let existingHasProvider = existing.officialGameCenterID != nil
+        if candidateHasProvider != existingHasProvider {
+            return candidateHasProvider ? candidate : existing
         }
         return candidate
     }
 
-    private func attendanceEquivalentKeys(for game: GameDetail) -> Set<String> {
-        var keys = game.attendanceStorageAliases
+    private func gameStateMergePriority(_ game: GameDetail) -> Int {
+        switch game.status {
+        case .final, .cancelled:
+            return 3
+        case .live, .rainDelay:
+            return 2
+        case .upcoming:
+            return 1
+        }
+    }
 
-        for candidate in games where candidate.id == game.id {
-            keys.formUnion(candidate.attendanceStorageAliases)
+    private func preferredGame(matchingAnyOf lookupKeys: [String]) -> GameDetail? {
+        guard lookupKeys.isEmpty == false else { return nil }
+        let lookupKeySet = Set(lookupKeys)
+        let matches = allKnownGames().filter { game in
+            identityAliases(for: game).isDisjoint(with: lookupKeySet) == false
+        }
+        return matches.reduce(nil) { preferred, candidate in
+            preferredKnownScheduleGame(existing: preferred, candidate: candidate)
+        }
+    }
+
+    private func equivalentGames(to game: GameDetail) -> [GameDetail] {
+        var equivalentAliases = identityAliases(for: game)
+        var didExpand = true
+
+        while didExpand {
+            didExpand = false
+            for candidate in allKnownGames() {
+                let candidateAliases = identityAliases(for: candidate)
+                guard equivalentAliases.isDisjoint(with: candidateAliases) == false else { continue }
+                let previousCount = equivalentAliases.count
+                equivalentAliases.formUnion(candidateAliases)
+                didExpand = equivalentAliases.count != previousCount
+            }
         }
 
-        for monthGames in monthlyScheduleGames.values {
-            for candidate in monthGames where candidate.id == game.id {
-                keys.formUnion(candidate.attendanceStorageAliases)
-            }
+        return allKnownGames().filter { candidate in
+            identityAliases(for: candidate).isDisjoint(with: equivalentAliases) == false
+        }
+    }
+
+    private func allKnownGames() -> [GameDetail] {
+        games + monthlyScheduleGames.values.flatMap { $0 }
+    }
+
+    private func identityAliases(for game: GameDetail) -> Set<String> {
+        game.gameIdentityAliases
+    }
+
+    private func attendanceEquivalentKeys(for game: GameDetail) -> Set<String> {
+        let equivalentGames = equivalentGames(to: game)
+        var keys = game.attendanceStorageAliases
+
+        for candidate in equivalentGames {
+            keys.formUnion(candidate.attendanceStorageAliases)
         }
 
         return keys
@@ -2077,5 +2325,51 @@ final class AppModel {
         let month = components.month ?? 1
         let day = components.day ?? 1
         return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+}
+
+private struct GameCancellationNotificationState: Equatable {
+    let status: GameStatus
+    let isWeatherRelated: Bool
+}
+
+private struct GameCancellationNotificationCoordinator {
+    func makeRequest(
+        for game: GameDetail,
+        favoriteTeam: Team?,
+        fingerprint: String,
+        isWeatherRelated: Bool
+    ) -> UNNotificationRequest {
+        let title = "우천/취소 알림"
+        let body = notificationBody(favoriteTeam: favoriteTeam, isWeatherRelated: isWeatherRelated)
+        let payload = ScoreNotificationPayload(
+            gameID: game.canonicalGameIdentityValue,
+            eventType: .rainDelay,
+            title: title,
+            body: body,
+            teamIDs: [game.awayTeam.id, game.homeTeam.id],
+            routeHint: .gameDetail
+        )
+
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.userInfo = payload.userInfo()
+
+        let requestID = GameIdentifier.uuid(from: fingerprint)?.uuidString ?? UUID().uuidString
+        return UNNotificationRequest(
+            identifier: "game-cancellation-\(requestID)",
+            content: content,
+            trigger: nil
+        )
+    }
+
+    private func notificationBody(favoriteTeam: Team?, isWeatherRelated: Bool) -> String {
+        let message = isWeatherRelated
+            ? "금일 경기는 우천으로 인해 취소되었습니다."
+            : "금일 경기는 취소되었습니다."
+        guard let favoriteTeam else { return message }
+        return "[\(favoriteTeam.displayName)] \(message)"
     }
 }

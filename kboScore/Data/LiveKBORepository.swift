@@ -1391,7 +1391,7 @@ struct LiveKBORepository: KBORepository, Sendable {
                 settings: nil
             )
             #if DEBUG
-            print("[LiveAPI] bootstrap fallback active endpoint=v1/schedule/month month=\(month.year)-\(month.month)")
+            print("[LiveAPI] bootstrap fallback active endpoint=api/v1/games/month month=\(month.year)-\(month.month)")
             #endif
             await runtimeState?.record(source: .live, delivery: .live)
             return KBODataMapper.mapBootstrap(fallbackBootstrap)
@@ -1566,7 +1566,7 @@ struct LiveKBORepository: KBORepository, Sendable {
             case .teams:
                 "v1/teams"
             case .monthlySchedule(let month):
-                "v1/schedule/month?year=\(month.year)&month=\(month.month)"
+                "api/v1/games/month?year=\(month.year)&month=\(month.month)"
             }
         }
     }

@@ -11,11 +11,19 @@ struct GameDetailView: View {
     @Environment(AppModel.self) private var appModel
     @State private var screenModel = GameDetailScreenModel()
 
-    let gameID: UUID
+    let gameIdentity: String
+
+    init(gameID: UUID) {
+        self.gameIdentity = gameID.uuidString
+    }
+
+    init(gameIdentity: String) {
+        self.gameIdentity = gameIdentity
+    }
 
     var body: some View {
         ScrollView {
-            if let game = appModel.game(withID: gameID) {
+            if let game = appModel.game(withIdentity: gameIdentity) {
                 let presentation = GameDetailPresentation(game: game, payload: screenModel.detail)
                 let availableSections = GameDetailSection.availableSections(for: presentation.status)
 
@@ -47,7 +55,7 @@ struct GameDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await appModel.refreshHome()
-            guard let refreshedGame = appModel.game(withID: gameID) else { return }
+            guard let refreshedGame = appModel.game(withIdentity: gameIdentity) else { return }
             await screenModel.load(for: refreshedGame, forceRefresh: true)
         }
     }
