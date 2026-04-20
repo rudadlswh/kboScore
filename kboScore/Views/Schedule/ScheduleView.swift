@@ -31,9 +31,20 @@ struct ScheduleView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
             }
-            .background(KBOLivePalette.background)
+            .background {
+                if let palette = appModel.favoriteStadiumPalette {
+                    LinearGradient(
+                        colors: [palette.background, palette.sectionBackground],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                } else {
+                    KBOLivePalette.background
+                }
+            }
             .navigationTitle("일정")
             .navigationBarTitleDisplayMode(.inline)
+            .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()
             .refreshable {
                 await appModel.refreshSchedule(for: displayedMonth)
@@ -77,16 +88,20 @@ private struct ScheduleCalendarCardView: View {
     @Binding var scheduleFilter: ScheduleFilter
 
     private let weekdaySymbols = ["일", "월", "화", "수", "목", "금", "토"]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("일정 필터", selection: $scheduleFilter) {
-                ForEach(ScheduleFilter.allCases) { filter in
-                    Text(filter.rawValue)
-                        .tag(filter)
+            if let palette = appModel.favoriteStadiumPalette {
+                DoosanScheduleFilterControl(selection: $scheduleFilter, palette: palette)
+            } else {
+                Picker("일정 필터", selection: $scheduleFilter) {
+                    ForEach(ScheduleFilter.allCases) { filter in
+                        Text(filter.rawValue)
+                            .tag(filter)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .tint(appModel.currentTheme.accent)
             }
-            .pickerStyle(.segmented)
 
             if isDisplayedMonthAvailable {
                 HStack {
@@ -97,9 +112,12 @@ private struct ScheduleCalendarCardView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.currentTheme.accent)
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
                             .frame(width: 34, height: 34)
-                            .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(
+                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
                             .opacity(previousAvailableMonth == nil ? 0.4 : 1)
                     }
                     .buttonStyle(.plain)
@@ -110,9 +128,10 @@ private struct ScheduleCalendarCardView: View {
                     VStack(spacing: 2) {
                         Text(appModel.calendarMonthTitle(for: displayedMonth))
                             .font(.headline.weight(.bold))
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                         Text(monthSummaryText)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     }
 
                     Spacer()
@@ -124,9 +143,12 @@ private struct ScheduleCalendarCardView: View {
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.currentTheme.accent)
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
                             .frame(width: 34, height: 34)
-                            .background(appModel.currentTheme.chipBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .background(
+                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            )
                             .opacity(nextAvailableMonth == nil ? 0.4 : 1)
                     }
                     .buttonStyle(.plain)
@@ -137,7 +159,7 @@ private struct ScheduleCalendarCardView: View {
                     ForEach(weekdaySymbols, id: \.self) { symbol in
                         Text(symbol)
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                             .frame(maxWidth: .infinity)
                     }
 
@@ -167,7 +189,10 @@ private struct ScheduleCalendarCardView: View {
                                             .foregroundStyle(.white)
                                             .padding(.horizontal, 4)
                                             .padding(.vertical, 1)
-                                            .background(appModel.currentTheme.accent, in: Capsule())
+                                            .background(
+                                                appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent,
+                                                in: Capsule()
+                                            )
                                     }
                                 }
                             }
@@ -175,18 +200,19 @@ private struct ScheduleCalendarCardView: View {
                             .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(dayTodayBorderColor(for: day), lineWidth: day.isToday ? 1 : 0)
+                                    .stroke(dayTodayBorderColor(for: day), lineWidth: day.isToday ? (appModel.isStadiumFavoriteSelected ? 0.75 : 1) : 0)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(daySelectionBorderColor(for: day), lineWidth: isSelected(day) ? 2 : 0)
+                                    .stroke(daySelectionBorderColor(for: day), lineWidth: isSelected(day) ? (appModel.isStadiumFavoriteSelected ? 1.4 : 2) : 0)
                             )
                             .overlay(alignment: .topTrailing) {
                                 if day.hasAttendedGame {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundStyle(appModel.currentTheme.accent)
-                                        .padding(4)
+                                    FavoriteTeamAttendanceMarker(
+                                        favoriteTeamID: appModel.settings.favoriteTeamID,
+                                        size: 15
+                                    )
+                                        .padding(3)
                                 }
                             }
                         }
@@ -200,19 +226,19 @@ private struct ScheduleCalendarCardView: View {
                             .controlSize(.small)
                         Text("공식 월간 일정 불러오는 중")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     }
                 } else if let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
                     Text(statusMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 }
 
                 #if DEBUG
                 if let debugSummary = appModel.scheduleDebugSummary(for: displayedMonth) {
                     Text(debugSummary)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 }
                 #endif
 
@@ -227,13 +253,17 @@ private struct ScheduleCalendarCardView: View {
                         HStack {
                             Text(selectedDayTitle)
                                 .font(.subheadline.weight(.bold))
+                                .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                             Spacer()
                             Text("경기 \(selectedGames.count)")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(appModel.currentTheme.accent)
+                                .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(appModel.currentTheme.chipBackground, in: Capsule())
+                                .background(
+                                    appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.chipBackground,
+                                    in: Capsule()
+                                )
                         }
 
                         ForEach(selectedGames) { game in
@@ -254,7 +284,7 @@ private struct ScheduleCalendarCardView: View {
                         .controlSize(.small)
                     Text("경기 있는 달로 이동 중")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 }
             } else {
                 EmptyStateView(
@@ -267,7 +297,7 @@ private struct ScheduleCalendarCardView: View {
         .cardSurface(
             padding: 12,
             cornerRadius: 18,
-            fillColor: appModel.currentTheme.scoreboardBackground
+            fillColor: appModel.favoriteStadiumPalette?.sectionBackground ?? appModel.currentTheme.scoreboardBackground
         )
     }
 
@@ -329,22 +359,53 @@ private struct ScheduleCalendarCardView: View {
 
     private func dayNumberColor(for day: MyTeamCalendarDay) -> Color {
         if isSelected(day) {
-            return appModel.currentTheme.accent
+            return appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent
+        }
+        if let palette = appModel.favoriteStadiumPalette {
+            return day.isInDisplayedMonth ? palette.textPrimary : palette.textSecondary.opacity(0.6)
         }
         return day.isInDisplayedMonth ? .primary : .secondary.opacity(0.6)
     }
 
     private func markerColor(for day: MyTeamCalendarDay) -> Color {
-        day.dominantStatus?.tintColor ?? appModel.currentTheme.accent
+        if let palette = appModel.favoriteStadiumPalette {
+            return day.dominantStatus?.stadiumTintColor(palette) ?? palette.primary
+        }
+        return day.dominantStatus?.tintColor ?? appModel.currentTheme.accent
     }
 
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            if day.isInDisplayedMonth == false {
+                return palette.sectionBackground.opacity(0.65)
+            }
+
+            switch day.dominantStatus {
+            case .cancelled:
+                return stadiumNoGameDayBackground(for: day, palette: palette)
+            case .final:
+                guard let favoriteTeamResult = day.favoriteTeamResult else {
+                    return palette.elevatedCard
+                }
+                switch favoriteTeamResult {
+                case .win:
+                    return palette.winDayFill
+                case .loss:
+                    return palette.statusRed.opacity(0.26)
+                case .tie:
+                    return palette.elevatedCard
+                }
+            case .live, .rainDelay, .upcoming, nil:
+                return day.hasGames ? palette.elevatedCard : stadiumNoGameDayBackground(for: day, palette: palette)
+            }
+        }
+
         switch day.dominantStatus {
         case .cancelled:
-            return KBOLivePalette.cancellation.opacity(0.08)
+            return defaultNoGameDayBackground
         case .final:
             guard let favoriteTeamResult = day.favoriteTeamResult else {
-                return .clear
+                return defaultNoGameDayBackground
             }
             switch favoriteTeamResult {
             case .win:
@@ -355,16 +416,65 @@ private struct ScheduleCalendarCardView: View {
                 return appModel.currentTheme.chipBackground
             }
         case .live, .rainDelay, .upcoming, nil:
-            return .clear
+            return defaultNoGameDayBackground
         }
     }
 
+    private func stadiumNoGameDayBackground(for day: MyTeamCalendarDay, palette: StadiumPalette) -> Color {
+        isSelected(day) ? palette.elevatedCardStrong : palette.recessedSurface
+    }
+
+    private var defaultNoGameDayBackground: Color {
+        .clear
+    }
+
     private func dayTodayBorderColor(for day: MyTeamCalendarDay) -> Color {
-        day.isToday ? KBOLivePalette.upcoming.opacity(0.9) : .clear
+        if let palette = appModel.favoriteStadiumPalette {
+            return day.isToday ? palette.secondary.opacity(0.85) : .clear
+        }
+        return day.isToday ? KBOLivePalette.upcoming.opacity(0.9) : .clear
     }
 
     private func daySelectionBorderColor(for day: MyTeamCalendarDay) -> Color {
-        isSelected(day) ? appModel.currentTheme.accent : .clear
+        if let palette = appModel.favoriteStadiumPalette {
+            return isSelected(day) ? palette.primary : .clear
+        }
+        return isSelected(day) ? appModel.currentTheme.accent : .clear
+    }
+}
+
+private struct DoosanScheduleFilterControl: View {
+    @Binding var selection: ScheduleFilter
+    let palette: StadiumPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(ScheduleFilter.allCases) { filter in
+                Button {
+                    selection = filter
+                } label: {
+                    Text(filter.rawValue)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(selection == filter ? Color.white : palette.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(selection == filter ? palette.primary : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == filter ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(palette.recessedSurface)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.ghostBorder, lineWidth: 0.75)
+        }
     }
 }
 
@@ -382,30 +492,32 @@ private struct ScheduleGameRow: View {
                 HStack(spacing: 6) {
                     Text(titleText)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                     Text(homeAwayLabel)
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(appModel.currentTheme.accent)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(appModel.currentTheme.chipBackground, in: Capsule())
+                        .background(
+                            appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.chipBackground,
+                            in: Capsule()
+                        )
                     if appModel.isGameAttended(game) {
-                        Text("직관")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(appModel.currentTheme.accent)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(appModel.currentTheme.accent.opacity(0.12), in: Capsule())
+                        FavoriteTeamAttendanceMarker(
+                            favoriteTeamID: favoriteTeamID,
+                            size: 18
+                        )
                     }
                 }
 
                 Text(subtitleText)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
 
                 if let finalResultText {
                     Text(finalResultText)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                 }
             }
 
@@ -414,16 +526,24 @@ private struct ScheduleGameRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(game.scheduledStart.formatted(date: .omitted, time: .shortened))
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .primary)
                 Text(game.status.title)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(game.status.tintColor)
+                    .foregroundStyle(appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(game.status.tintColor.opacity(0.10), in: Capsule())
+                    .background(
+                        (appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
+                            .opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
+                        in: Capsule()
+                    )
             }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            appModel.favoriteStadiumPalette?.elevatedCard ?? Color(.secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
     }
 
     private var leadingTeam: Team {
@@ -471,6 +591,53 @@ private struct ScheduleGameRow: View {
             }
         }
         return "리그"
+    }
+}
+
+private struct FavoriteTeamAttendanceMarker: View {
+    let favoriteTeamID: String?
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let imageAssetName {
+                Image(imageAssetName)
+                    .renderingMode(.original)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Text("⭐")
+                    .font(.system(size: size * 0.82))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement()
+        .accessibilityLabel("직관 경기")
+    }
+
+    private var imageAssetName: String? {
+        switch favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "doosan":
+            return "attendance-cheering-doosan"
+        case "hanwha":
+            return "attendance-cheering-hanwha"
+        case "kia":
+            return "attendance-cheering-kia"
+        case "kiwoom":
+            return "attendance-cheering-kiwoom"
+        case "lg":
+            return "attendance-cheering-lg"
+        case "lotte":
+            return "attendance-cheering-lotte"
+        case "nc":
+            return "attendance-cheering-nc"
+        case "samsung":
+            return "attendance-cheering-samsung"
+        case "ssg":
+            return "attendance-cheering-ssg"
+        default:
+            return nil
+        }
     }
 }
 

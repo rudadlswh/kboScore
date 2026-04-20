@@ -24,7 +24,10 @@ struct LiveActivityActionButton: View {
             .font(.subheadline.weight(.semibold))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(backgroundStyle, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(backgroundStyle)
+            )
             .foregroundStyle(foregroundStyle)
         }
         .buttonStyle(.plain)
@@ -32,12 +35,29 @@ struct LiveActivityActionButton: View {
         .opacity(appModel.isLiveActivityActionEnabled(for: game) ? 1 : 0.55)
     }
 
-    private var backgroundStyle: Color {
-        appModel.isLiveActivityActionEnabled(for: game) ? appModel.currentTheme.accent : Color(.secondarySystemBackground)
+    private var backgroundStyle: AnyShapeStyle {
+        if let palette = appModel.favoriteStadiumPalette {
+            if appModel.isLiveActivityActionEnabled(for: game) {
+                return AnyShapeStyle(
+                    LinearGradient(
+                        colors: [palette.secondary.opacity(0.95), palette.primary],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            }
+            return AnyShapeStyle(palette.sectionBackground)
+        }
+        return AnyShapeStyle(
+            appModel.isLiveActivityActionEnabled(for: game) ? appModel.currentTheme.accent : Color(.secondarySystemBackground)
+        )
     }
 
     private var foregroundStyle: Color {
-        appModel.isLiveActivityActionEnabled(for: game) ? .white : .secondary
+        if let palette = appModel.favoriteStadiumPalette {
+            return appModel.isLiveActivityActionEnabled(for: game) ? palette.textPrimary : palette.textSecondary
+        }
+        return appModel.isLiveActivityActionEnabled(for: game) ? .white : .secondary
     }
 }
 

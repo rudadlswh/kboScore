@@ -358,6 +358,10 @@ final class AppModel {
         }
     }
 
+    var isDoosanFavoriteSelected: Bool {
+        Self.canonicalTeamIdentifier(settings.favoriteTeamID) == "doosan"
+    }
+
     var favoriteTeam: Team? {
         teams.first { $0.id == settings.favoriteTeamID }
     }
@@ -425,14 +429,14 @@ final class AppModel {
         guard let weekNumber = homeFallbackWeekNumber else {
             return "직전 완료 경기 기준 순위"
         }
-        return "\(weekNumber)주차 순위"
+        return "주간 순위"
     }
 
     var homeFallbackSubtitleText: String {
         guard let weekNumber = homeFallbackWeekNumber else {
             return "오늘 경기가 없어 기준일 이전 완료 경기로 표시합니다."
         }
-        return "오늘 경기가 없어 \(weekNumber)주차 기준 순위를 표시합니다."
+        return "오늘 경기가 없어 직전주차 기준 순위를 표시합니다."
     }
 
     var todayGamesCount: Int {

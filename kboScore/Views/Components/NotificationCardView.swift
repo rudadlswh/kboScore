@@ -12,13 +12,16 @@ struct NotificationCardView: View {
     let item: NotificationItem
 
     var body: some View {
+        let palette = appModel.favoriteStadiumPalette
+        let typeTint = palette.map { item.type.stadiumTintColor($0) } ?? item.type.tintColor
+
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(item.type.tintColor.opacity(item.isRead ? 0.12 : 0.2))
+                    .fill(typeTint.opacity(item.isRead ? (palette == nil ? 0.12 : 0.20) : (palette == nil ? 0.2 : 0.28)))
                 Image(systemName: item.type.systemImage)
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(item.type.tintColor)
+                    .foregroundStyle(typeTint)
             }
             .frame(width: 38, height: 38)
 
@@ -26,27 +29,27 @@ struct NotificationCardView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(item.type.title)
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(item.type.tintColor)
+                        .foregroundStyle(typeTint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(item.type.tintColor.opacity(0.12), in: Capsule())
+                        .background(typeTint.opacity(0.12), in: Capsule())
 
                     Spacer(minLength: 6)
 
                     if !item.isRead {
                         Circle()
-                            .fill(appModel.currentTheme.accent)
+                            .fill(palette?.primary ?? appModel.currentTheme.accent)
                             .frame(width: 7, height: 7)
                     }
 
                     Text(item.sentAt.relativeKoreanText)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette?.textSecondary ?? .secondary)
                 }
 
                 Text(item.body)
                     .font(.subheadline.weight(item.isRead ? .semibold : .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(palette?.textPrimary ?? .primary)
                     .multilineTextAlignment(.leading)
 
                 if !relatedTeams.isEmpty {
@@ -55,24 +58,28 @@ struct NotificationCardView: View {
                             TeamMarkView(team: team, size: 22)
                             Text(team.displayName)
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(palette?.textSecondary ?? .secondary)
                         }
                     }
                 }
 
                 Text(item.title)
                     .font(.caption)
-                    .foregroundStyle(item.isRead ? Color.secondary : Color.primary.opacity(0.7))
+                    .foregroundStyle(
+                        palette.map { item.isRead ? $0.textSecondary : $0.textPrimary.opacity(0.84) }
+                            ?? (item.isRead ? Color.secondary : Color.primary.opacity(0.7))
+                    )
             }
         }
         .cardSurface(
             padding: 12,
             cornerRadius: 18,
-            fillColor: item.isRead ? Color(.secondarySystemBackground) : item.type.tintColor.opacity(0.06)
+            fillColor: palette.map { item.isRead ? $0.sectionBackground : $0.elevatedCardStrong }
+                ?? (item.isRead ? Color(.secondarySystemBackground) : typeTint.opacity(0.06))
         )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(item.type.tintColor.opacity(item.isRead ? 0.35 : 0.9))
+                .fill(typeTint.opacity(item.isRead ? 0.35 : 0.9))
                 .frame(width: 4)
         }
     }

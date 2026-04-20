@@ -29,6 +29,14 @@ struct GameCardView: View {
     }
 
     var body: some View {
+        if let palette = appModel.favoriteStadiumPalette {
+            stadiumBody(palette)
+        } else {
+            defaultBody
+        }
+    }
+
+    private var defaultBody: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 StatusBadge(
@@ -59,12 +67,12 @@ struct GameCardView: View {
 
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 8) {
-                    TeamRow(
+                    TeamRowDefault(
                         team: summary.awayTeam,
                         score: summary.awayScore,
                         status: summary.status
                     )
-                    TeamRow(
+                    TeamRowDefault(
                         team: summary.homeTeam,
                         score: summary.homeScore,
                         status: summary.status,
@@ -114,12 +122,106 @@ struct GameCardView: View {
         }
     }
 
+    private func stadiumBody(_ palette: StadiumPalette) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                StatusBadge(
+                    status: summary.status,
+                    tintColor: statusTintColor,
+                    backgroundColor: statusBadgeBackgroundColor
+                )
+
+                if summary.isMyTeamGame {
+                    Text("MY")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(palette.textPrimary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(palette.elevatedCardStrong)
+                        )
+                }
+
+                Spacer(minLength: 8)
+
+                Text(summary.secondaryText)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(summary.status.isLiveLike ? statusTintColor : palette.textSecondary)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    TeamRowDoosan(
+                        team: summary.awayTeam,
+                        score: summary.awayScore,
+                        status: summary.status,
+                        palette: palette,
+                        isWinningRow: awayTeamIsWinning
+                    )
+                    TeamRowDoosan(
+                        team: summary.homeTeam,
+                        score: summary.homeScore,
+                        status: summary.status,
+                        palette: palette,
+                        isWinningRow: homeTeamIsWinning,
+                        showsHomeBadge: showsHomeTeamBadge
+                    )
+                }
+
+                Spacer(minLength: 6)
+
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(summary.displayScore)
+                        .font(.system(size: 32, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(summary.status.isLiveLike ? statusTintColor : palette.textPrimary)
+                    Label(summary.venue, systemImage: "mappin.and.ellipse")
+                        .font(.caption2)
+                        .foregroundStyle(palette.textSecondary)
+                        .lineLimit(1)
+                }
+            }
+
+            if let recentEvent = summary.recentEvent {
+                HStack(spacing: 8) {
+                    Image(systemName: summary.status.isFinishedLike ? "flag.pattern.checkered" : "waveform.path.ecg")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(statusTintColor)
+                    Text(recentEvent)
+                        .font(.footnote.weight(summary.status.isLiveLike ? .semibold : .regular))
+                        .foregroundStyle(palette.textPrimary.opacity(summary.status.isLiveLike ? 0.92 : 0.72))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(palette.recessedSurface.opacity(summary.status.isLiveLike ? 0.96 : 0.75))
+                )
+            }
+        }
+        .cardSurface(padding: 14, cornerRadius: 18, fillColor: cardBackgroundColor)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(statusTintColor.opacity(summary.status.isLiveLike ? 0.95 : 0.3))
+                .frame(width: 5)
+        }
+    }
+
     private var usesWhiteLiveStyle: Bool {
         liveColorStyle == .white && summary.status == .live
     }
 
     private var statusTintColor: Color {
-        usesWhiteLiveStyle ? Color.white : summary.status.tintColor
+        usesWhiteLiveStyle ? Color.white : baseStatusTintColor
+    }
+
+    private var baseStatusTintColor: Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            return summary.status.stadiumTintColor(palette)
+        }
+        return summary.status.tintColor
     }
 
     private var statusBadgeBackgroundColor: Color? {
@@ -127,15 +229,36 @@ struct GameCardView: View {
     }
 
     private var cardBackgroundColor: Color {
-        usesWhiteLiveStyle ? Color.white.opacity(0.18) : summary.status.cardBackgroundColor
+        if usesWhiteLiveStyle {
+            return appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color.white.opacity(0.18)
+        }
+        if let palette = appModel.favoriteStadiumPalette {
+            return summary.status.stadiumCardBackgroundColor(palette)
+        }
+        return summary.status.cardBackgroundColor
     }
 
     private var liveTextShadowColor: Color {
         usesWhiteLiveStyle ? Color.black.opacity(0.42) : .clear
     }
+
+    private var awayTeamIsWinning: Bool {
+        isWinningScore(away: summary.awayScore, home: summary.homeScore, checksAway: true)
+    }
+
+    private var homeTeamIsWinning: Bool {
+        isWinningScore(away: summary.awayScore, home: summary.homeScore, checksAway: false)
+    }
+
+    private func isWinningScore(away: Int?, home: Int?, checksAway: Bool) -> Bool {
+        guard let away, let home, away != home, summary.status != .upcoming else {
+            return false
+        }
+        return checksAway ? away > home : home > away
+    }
 }
 
-private struct TeamRow: View {
+private struct TeamRowDefault: View {
     let team: Team
     let score: Int?
     let status: GameStatus
@@ -164,21 +287,63 @@ private struct TeamRow: View {
     }
 }
 
-private struct HomeTeamBadge: View {
+private struct TeamRowDoosan: View {
+    let team: Team
+    let score: Int?
+    let status: GameStatus
+    let palette: StadiumPalette
+    var isWinningRow: Bool = false
+    var showsHomeBadge: Bool = false
+
     var body: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(isWinningRow ? palette.secondary : Color.clear)
+                .frame(width: 2, height: 24)
+            TeamMarkView(team: team, size: 28)
+            HStack(spacing: 4) {
+                Text(team.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isWinningRow ? palette.textPrimary : palette.textSecondary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                if showsHomeBadge {
+                    HomeTeamBadge()
+                }
+            }
+            Spacer(minLength: 8)
+            if status != .upcoming, let score {
+                Text("\(score)")
+                    .font(.headline.weight(isWinningRow ? .heavy : .bold))
+                    .foregroundStyle(isWinningRow ? palette.textPrimary : palette.textSecondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+}
+
+private struct HomeTeamBadge: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        let palette = appModel.favoriteStadiumPalette
+
         Text("홈")
             .font(.caption2.weight(.bold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(palette?.textSecondary ?? .secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(
                 Capsule()
-                    .fill(Color.secondary.opacity(0.14))
+                    .fill(palette?.sectionBackground ?? Color.secondary.opacity(0.14))
             )
-            .overlay(
-                Capsule()
-                    .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
-            )
+            .overlay {
+                if palette == nil {
+                    Capsule()
+                        .strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
+                }
+            }
             .accessibilityLabel("홈팀")
     }
 }

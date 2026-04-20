@@ -17,15 +17,40 @@ struct FilterChip: View {
         Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.7))
+                .foregroundStyle(foregroundColor)
                 .padding(.horizontal, 15)
-                .padding(.vertical, 9)
+                .padding(.vertical, appModel.isStadiumFavoriteSelected ? 10 : 9)
+                .frame(minHeight: appModel.isStadiumFavoriteSelected ? 44 : nil)
                 .background(
                     Capsule()
-                        .fill(isSelected ? appModel.currentTheme.accent : Color(.secondarySystemBackground))
+                        .fill(backgroundStyle)
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private var foregroundColor: Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            return isSelected ? palette.textPrimary : palette.textSecondary
+        }
+        return isSelected ? .white : Color.primary.opacity(0.7)
+    }
+
+    private var backgroundStyle: AnyShapeStyle {
+        if let palette = appModel.favoriteStadiumPalette {
+            if isSelected {
+                return AnyShapeStyle(
+                    LinearGradient(
+                        colors: [palette.secondary.opacity(0.95), palette.primary],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            }
+            return AnyShapeStyle(palette.elevatedCardStrong)
+        }
+
+        return AnyShapeStyle(isSelected ? appModel.currentTheme.accent : Color(.secondarySystemBackground))
     }
 }
 

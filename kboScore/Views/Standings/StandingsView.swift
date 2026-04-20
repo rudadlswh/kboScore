@@ -13,27 +13,26 @@ struct StandingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    if appModel.standingsSnapshots.isEmpty {
-                        EmptyStateView(
-                            systemImage: "list.number",
-                            title: "정규시즌 순위 데이터 없음",
-                            message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
-                        )
-                    } else {
-                        LazyVStack(spacing: 8) {
-                            ForEach(appModel.standingsSnapshots) { snapshot in
-                                StandingsRow(snapshot: snapshot)
-                            }
-                        }
-                    }
+                if let palette = appModel.favoriteStadiumPalette {
+                    stadiumContent(palette)
+                } else {
+                    defaultContent
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
             }
-            .background(KBOLivePalette.background)
+            .background {
+                if let palette = appModel.favoriteStadiumPalette {
+                    LinearGradient(
+                        colors: [palette.background, palette.sectionBackground],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                } else {
+                    KBOLivePalette.background
+                }
+            }
             .navigationTitle("순위")
             .navigationBarTitleDisplayMode(.inline)
+            .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()
             .refreshable {
                 await appModel.refreshHome()
@@ -41,20 +40,63 @@ struct StandingsView: View {
         }
     }
 
-//    private var standingsHeader: some View {
-//        VStack(alignment: .leading, spacing: 6) {
-//            Text("정규시즌 순위")
-//                .font(.headline.weight(.bold))
-//            Text("현재 앱 데이터에서 시범경기를 제외한 종료 경기 기준")
-//                .font(.caption)
-//                .foregroundStyle(.secondary)
-//        }
-//        .cardSurface(
-//            padding: 12,
-//            cornerRadius: 18,
-//            fillColor: appModel.currentTheme.scoreboardBackground
-//        )
-//    }
+    private var defaultContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if appModel.standingsSnapshots.isEmpty {
+                EmptyStateView(
+                    systemImage: "list.number",
+                    title: "정규시즌 순위 데이터 없음",
+                    message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
+                )
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(appModel.standingsSnapshots) { snapshot in
+                        StandingsRow(snapshot: snapshot)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private func stadiumContent(_ palette: StadiumPalette) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            standingsHeader(palette)
+
+            if appModel.standingsSnapshots.isEmpty {
+                EmptyStateView(
+                    systemImage: "list.number",
+                    title: "정규시즌 순위 데이터 없음",
+                    message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
+                )
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(appModel.standingsSnapshots) { snapshot in
+                        StandingsRow(snapshot: snapshot)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private func standingsHeader(_ palette: StadiumPalette) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("리그 스코어보드")
+                .font(.headline.weight(.heavy))
+                .foregroundStyle(palette.textPrimary)
+            Text("정규시즌 종료 경기 기준 순위 · 승률 중심 정렬")
+                .font(.caption)
+                .foregroundStyle(palette.textSecondary)
+        }
+        .cardSurface(
+            padding: 12,
+            cornerRadius: 18,
+            fillColor: palette.sectionBackground
+        )
+    }
 }
 
 private struct StandingsRow: View {
@@ -72,11 +114,12 @@ private struct StandingsRow: View {
                 HStack(spacing: 6) {
                     Text(snapshot.team.displayName)
                         .font(.subheadline.weight(.bold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                         .lineLimit(1)
                     winningStreakIndicator
                     Text(snapshot.recordText)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 }
 
                 HStack(spacing: 10) {
@@ -90,32 +133,50 @@ private struct StandingsRow: View {
                 if let unavailableReason = snapshot.visiblePostseasonProbabilityUnavailableReason {
                     Text(unavailableReason.displayText)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                         .lineLimit(1)
                 } else if let estimateText = snapshot.postseasonProbabilityEstimateText {
                     Text(estimateText)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                         .lineLimit(1)
                 }
             }
 
             Spacer(minLength: 8)
         }
-        .cardSurface(padding: 12, cornerRadius: 18, fillColor: Color(.secondarySystemBackground))
+        .cardSurface(
+            padding: 12,
+            cornerRadius: 18,
+            fillColor: appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.secondarySystemBackground)
+        )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(appModel.currentTheme.accent.opacity(0.9))
+                .fill((appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent).opacity(0.9))
                 .frame(width: 4)
         }
     }
 
     private var rankBadge: some View {
-        Text("\(snapshot.rank)")
-            .font(.headline.weight(.heavy))
-            .monospacedDigit()
-            .foregroundStyle(appModel.currentTheme.accent)
-            .frame(width: 28)
+        Group {
+            if let palette = appModel.favoriteStadiumPalette {
+                Text("\(snapshot.rank)")
+                    .font(.title3.weight(.black))
+                    .monospacedDigit()
+                    .foregroundStyle(palette.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(palette.recessedSurface)
+                    )
+            } else {
+                Text("\(snapshot.rank)")
+                    .font(.headline.weight(.heavy))
+                    .monospacedDigit()
+                    .foregroundStyle(appModel.currentTheme.accent)
+                    .frame(width: 28)
+            }
+        }
     }
 
     private var winningStreakIndicator: some View {
@@ -131,10 +192,10 @@ private struct StandingsRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Text(value)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                 .lineLimit(1)
         }
     }

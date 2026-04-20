@@ -18,6 +18,115 @@ enum KBOLivePalette {
     static let cancellation = Color(red: 0.44, green: 0.48, blue: 0.56)
 }
 
+enum DoosanPalette {
+    static let primary = Color(red: 0.9686, green: 0.1490, blue: 0.1647) // #f7262a
+    static let secondary = Color(red: 1.0, green: 0.7059, blue: 0.6706) // #ffb4ab
+    static let statusRed = Color(red: 0.7529, green: 0.0, blue: 0.0784) // #c00014
+
+    static let background = Color(red: 0.0667, green: 0.0627, blue: 0.1804) // #11102e
+    static let sectionBackground = Color(red: 0.1137, green: 0.1098, blue: 0.2275) // #1d1c3a
+    static let elevatedCard = Color(red: 0.1569, green: 0.1529, blue: 0.2706) // #282745
+    static let elevatedCardStrong = Color(red: 0.1961, green: 0.1922, blue: 0.3176) // #323151
+    static let recessedSurface = Color(red: 0.0431, green: 0.0392, blue: 0.1569) // #0b0a28
+    static let glassSurface = Color(red: 0.2157, green: 0.2118, blue: 0.3373).opacity(0.60) // #373656 @ 60%
+    static let navigationSurface = background
+    static let tabBarSurface = Color(red: 0.0353, green: 0.0314, blue: 0.1294) // #090821
+    static let tabBarSelectionSurface = Color(red: 0.1569, green: 0.1529, blue: 0.2706).opacity(0.96) // #282745
+    static let bellControlSurface = Color(red: 0.0431, green: 0.0392, blue: 0.1569) // #0b0a28
+
+    static let textPrimary = Color.white.opacity(0.96)
+    static let textSecondary = Color(red: 0.7843, green: 0.7725, blue: 0.8078) // #c8c5ce
+    static let ghostBorder = Color(red: 0.2784, green: 0.2745, blue: 0.3020).opacity(0.15) // #47464d @ 15%
+    static let ambientShadow = Color(red: 0.0431, green: 0.0392, blue: 0.1569).opacity(0.40)
+    static let weather = Color(red: 0.95, green: 0.72, blue: 0.28)
+}
+
+struct StadiumPalette: Sendable {
+    let id: String
+    let primary: Color
+    let secondary: Color
+    let statusRed: Color
+    let background: Color
+    let sectionBackground: Color
+    let elevatedCard: Color
+    let elevatedCardStrong: Color
+    let recessedSurface: Color
+    let glassSurface: Color
+    let navigationSurface: Color
+    let tabBarSurface: Color
+    let tabBarSelectionSurface: Color
+    let bellControlSurface: Color
+    let textPrimary: Color
+    let textSecondary: Color
+    let ghostBorder: Color
+    let ambientShadow: Color
+    let weather: Color
+    let winDayFill: Color
+
+    static let doosan = StadiumPalette(
+        id: "doosan",
+        primary: DoosanPalette.primary,
+        secondary: DoosanPalette.secondary,
+        statusRed: DoosanPalette.statusRed,
+        background: DoosanPalette.background,
+        sectionBackground: DoosanPalette.sectionBackground,
+        elevatedCard: DoosanPalette.elevatedCard,
+        elevatedCardStrong: DoosanPalette.elevatedCardStrong,
+        recessedSurface: DoosanPalette.recessedSurface,
+        glassSurface: DoosanPalette.glassSurface,
+        navigationSurface: DoosanPalette.navigationSurface,
+        tabBarSurface: DoosanPalette.tabBarSurface,
+        tabBarSelectionSurface: DoosanPalette.tabBarSelectionSurface,
+        bellControlSurface: DoosanPalette.bellControlSurface,
+        textPrimary: DoosanPalette.textPrimary,
+        textSecondary: DoosanPalette.textSecondary,
+        ghostBorder: DoosanPalette.ghostBorder,
+        ambientShadow: DoosanPalette.ambientShadow,
+        weather: DoosanPalette.weather,
+        winDayFill: Color(red: 0.38, green: 0.78, blue: 1.0).opacity(0.30)
+    )
+
+    static let hanwha = StadiumPalette(
+        id: "hanwha",
+        primary: Color(red: 1.0, green: 0.5686, blue: 0.3647), // #ff915d
+        secondary: Color(red: 1.0, green: 0.4745, blue: 0.2118), // #ff7936
+        statusRed: Color(red: 0.9765, green: 0.3922, blue: 0.0), // #f96400
+        background: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0e0e0e
+        sectionBackground: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
+        elevatedCard: Color(red: 0.0980, green: 0.0980, blue: 0.0980), // #191919
+        elevatedCardStrong: Color(red: 0.1490, green: 0.1490, blue: 0.1490), // #262626
+        recessedSurface: Color(red: 0.0353, green: 0.0353, blue: 0.0353), // #090909
+        glassSurface: Color(red: 0.1490, green: 0.1490, blue: 0.1490).opacity(0.62),
+        navigationSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549),
+        tabBarSurface: Color(red: 0.0314, green: 0.0314, blue: 0.0314),
+        tabBarSelectionSurface: Color(red: 0.1490, green: 0.1490, blue: 0.1490).opacity(0.96),
+        bellControlSurface: Color(red: 0.0745, green: 0.0745, blue: 0.0745),
+        textPrimary: Color(red: 0.9765, green: 0.9765, blue: 0.9765), // #f9f9f9
+        textSecondary: Color(red: 0.7608, green: 0.7373, blue: 0.7176),
+        ghostBorder: Color(red: 0.2824, green: 0.2824, blue: 0.2824).opacity(0.18),
+        ambientShadow: Color(red: 1.0, green: 0.4745, blue: 0.2118).opacity(0.22),
+        weather: Color(red: 1.0, green: 0.7333, blue: 0.3412),
+        winDayFill: Color(red: 1.0, green: 0.5686, blue: 0.3647).opacity(0.30)
+    )
+}
+
+extension AppModel {
+    var favoriteStadiumPalette: StadiumPalette? {
+        switch settings.favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "doosan":
+            .doosan
+        case "hanwha":
+            .hanwha
+        default:
+            nil
+        }
+    }
+
+    var isStadiumFavoriteSelected: Bool {
+        favoriteStadiumPalette != nil
+    }
+}
+
 extension GameStatus {
     var tintColor: Color {
         switch self {
@@ -48,6 +157,66 @@ extension GameStatus {
             KBOLivePalette.cancellation.opacity(0.08)
         }
     }
+
+    var doosanTintColor: Color {
+        switch self {
+        case .live:
+            DoosanPalette.statusRed
+        case .upcoming:
+            DoosanPalette.secondary
+        case .final:
+            DoosanPalette.textSecondary.opacity(0.86)
+        case .rainDelay:
+            DoosanPalette.weather
+        case .cancelled:
+            DoosanPalette.statusRed
+        }
+    }
+
+    var doosanCardBackgroundColor: Color {
+        switch self {
+        case .live:
+            DoosanPalette.elevatedCardStrong
+        case .upcoming:
+            DoosanPalette.elevatedCard
+        case .final:
+            DoosanPalette.sectionBackground
+        case .rainDelay:
+            DoosanPalette.elevatedCardStrong
+        case .cancelled:
+            DoosanPalette.sectionBackground
+        }
+    }
+
+    func stadiumTintColor(_ palette: StadiumPalette) -> Color {
+        switch self {
+        case .live:
+            palette.statusRed
+        case .upcoming:
+            palette.secondary
+        case .final:
+            palette.textSecondary.opacity(0.86)
+        case .rainDelay:
+            palette.weather
+        case .cancelled:
+            palette.statusRed
+        }
+    }
+
+    func stadiumCardBackgroundColor(_ palette: StadiumPalette) -> Color {
+        switch self {
+        case .live:
+            palette.elevatedCardStrong
+        case .upcoming:
+            palette.elevatedCard
+        case .final:
+            palette.sectionBackground
+        case .rainDelay:
+            palette.elevatedCardStrong
+        case .cancelled:
+            palette.sectionBackground
+        }
+    }
 }
 
 extension NotificationType {
@@ -61,6 +230,32 @@ extension NotificationType {
             Color(red: 0.59, green: 0.42, blue: 0.02)
         case .rainDelay:
             KBOLivePalette.live
+        }
+    }
+
+    var doosanTintColor: Color {
+        switch self {
+        case .scoreChange, .leadChange:
+            DoosanPalette.primary
+        case .gameStart:
+            DoosanPalette.secondary
+        case .gameEnd:
+            DoosanPalette.textSecondary
+        case .rainDelay:
+            DoosanPalette.weather
+        }
+    }
+
+    func stadiumTintColor(_ palette: StadiumPalette) -> Color {
+        switch self {
+        case .scoreChange, .leadChange:
+            palette.primary
+        case .gameStart:
+            palette.secondary
+        case .gameEnd:
+            palette.textSecondary
+        case .rainDelay:
+            palette.weather
         }
     }
 
@@ -81,21 +276,34 @@ extension NotificationType {
 }
 
 struct CardSurface: ViewModifier {
+    @Environment(AppModel.self) private var appModel
     let padding: CGFloat
     let cornerRadius: CGFloat
-    let fillColor: Color
+    let fillColor: Color?
+    let showsGhostBorder: Bool
 
     func body(content: Content) -> some View {
-        content
+        let stadiumPalette = appModel.favoriteStadiumPalette
+        let resolvedFillColor = fillColor ?? (stadiumPalette?.elevatedCard ?? Color(.secondarySystemBackground))
+
+        return content
             .padding(padding)
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(fillColor)
+                    .fill(resolvedFillColor)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.primary.opacity(0.04), lineWidth: 1)
-            )
+            .overlay {
+                if let stadiumPalette {
+                    if showsGhostBorder {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(stadiumPalette.ghostBorder, lineWidth: 0.75)
+                    }
+                } else {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(Color.primary.opacity(0.04), lineWidth: 1)
+                }
+            }
+            .shadow(color: stadiumPalette?.ambientShadow.opacity(0.34) ?? .clear, radius: 12, y: 6)
     }
 }
 
@@ -103,22 +311,86 @@ extension View {
     func cardSurface(
         padding: CGFloat = 16,
         cornerRadius: CGFloat = 20,
-        fillColor: Color = Color(.secondarySystemBackground)
+        fillColor: Color? = nil,
+        showsGhostBorder: Bool = false
     ) -> some View {
-        modifier(CardSurface(padding: padding, cornerRadius: cornerRadius, fillColor: fillColor))
+        modifier(
+            CardSurface(
+                padding: padding,
+                cornerRadius: cornerRadius,
+                fillColor: fillColor,
+                showsGhostBorder: showsGhostBorder
+            )
+        )
+    }
+
+    func doosanNavigationChrome(isEnabled: Bool) -> some View {
+        modifier(DoosanNavigationChromeModifier(isEnabled: isEnabled))
+    }
+
+    func doosanInlineNavigationTitle(isEnabled: Bool) -> some View {
+        modifier(DoosanInlineNavigationTitleModifier(isEnabled: isEnabled))
+    }
+
+    func stadiumNavigationChrome(_ palette: StadiumPalette?) -> some View {
+        modifier(StadiumNavigationChromeModifier(palette: palette))
+    }
+}
+
+private struct StadiumNavigationChromeModifier: ViewModifier {
+    let palette: StadiumPalette?
+
+    func body(content: Content) -> some View {
+        if let palette {
+            content
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(palette.navigationSurface, for: .navigationBar)
+        } else {
+            content
+        }
+    }
+}
+
+private struct DoosanNavigationChromeModifier: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(DoosanPalette.navigationSurface, for: .navigationBar)
+        } else {
+            content
+        }
+    }
+}
+
+private struct DoosanInlineNavigationTitleModifier: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.navigationBarTitleDisplayMode(.inline)
+        } else {
+            content
+        }
     }
 }
 
 struct TeamMarkView: View {
+    @Environment(AppModel.self) private var appModel
     let team: Team
     var size: CGFloat = 38
 
     var body: some View {
         let identity = team.identity
+        let stadiumPalette = appModel.favoriteStadiumPalette
 
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(team.identity.theme.badgeBackground)
+                .fill(stadiumPalette?.recessedSurface ?? identity.theme.badgeBackground)
 
             if identity.hasLogoAsset {
                 Image(identity.logoAssetName)
@@ -128,15 +400,22 @@ struct TeamMarkView: View {
             } else {
                 Text(identity.monogram)
                     .font(.system(size: size * 0.28, weight: .bold, design: .rounded))
-                    .foregroundStyle(identity.theme.badgeForeground)
+                    .foregroundStyle(stadiumPalette?.textSecondary ?? identity.theme.badgeForeground)
             }
         }
         .frame(width: size, height: size)
         .overlay(
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                .stroke(
+                    stadiumPalette?.ghostBorder ?? Color.primary.opacity(0.06),
+                    lineWidth: stadiumPalette == nil ? 1 : 0.7
+                )
         )
-        .shadow(color: identity.theme.shadowTint, radius: size * 0.12, y: size * 0.06)
+        .shadow(
+            color: stadiumPalette?.ambientShadow.opacity(0.28) ?? identity.theme.shadowTint,
+            radius: stadiumPalette == nil ? size * 0.12 : size * 0.14,
+            y: stadiumPalette == nil ? size * 0.06 : size * 0.08
+        )
     }
 }
 
@@ -159,30 +438,58 @@ struct BasesDiamondView: View {
 }
 
 struct OutCountView: View {
+    @Environment(AppModel.self) private var appModel
     let outs: Int
 
     var body: some View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(index < outs ? KBOLivePalette.live : Color(.systemGray5))
+                    .fill(index < outs ? activeColor : inactiveColor)
                     .frame(width: 10, height: 10)
             }
         }
     }
+
+    private var activeColor: Color {
+        appModel.favoriteStadiumPalette?.statusRed ?? KBOLivePalette.live
+    }
+
+    private var inactiveColor: Color {
+        appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.systemGray5)
+    }
 }
 
 private struct DiamondBase: View {
+    @Environment(AppModel.self) private var appModel
     let isFilled: Bool
 
     var body: some View {
         RoundedRectangle(cornerRadius: 3, style: .continuous)
-            .fill(isFilled ? KBOLivePalette.primary : Color(.systemBackground))
+            .fill(fillColor)
             .overlay(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(KBOLivePalette.primary.opacity(0.35), lineWidth: 1)
+                    .stroke(borderColor, lineWidth: lineWidth)
             )
             .frame(width: 14, height: 14)
             .rotationEffect(.degrees(45))
+    }
+
+    private var fillColor: Color {
+        if let stadiumPalette = appModel.favoriteStadiumPalette {
+            return isFilled ? stadiumPalette.primary : stadiumPalette.recessedSurface
+        }
+        return isFilled ? KBOLivePalette.primary : Color(.systemBackground)
+    }
+
+    private var borderColor: Color {
+        if let stadiumPalette = appModel.favoriteStadiumPalette {
+            return stadiumPalette.secondary.opacity(0.45)
+        }
+        return KBOLivePalette.primary.opacity(0.35)
+    }
+
+    private var lineWidth: CGFloat {
+        appModel.isStadiumFavoriteSelected ? 0.75 : 1
     }
 }

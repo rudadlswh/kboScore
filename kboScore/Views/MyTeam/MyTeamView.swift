@@ -42,13 +42,18 @@ struct MyTeamView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("현재 경기 알림")
                                             .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                                         Text("득점, 리드 변경, 종료 알림을 이 경기 기준으로 받습니다.")
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                                     }
                                 }
                                 .toggleStyle(.switch)
-                                .cardSurface(padding: 12, cornerRadius: 18)
+                                .cardSurface(
+                                    padding: 12,
+                                    cornerRadius: 18,
+                                    fillColor: appModel.favoriteStadiumPalette?.sectionBackground
+                                )
 
                                 if appModel.shouldShowLiveActivityAction(for: todayGame) {
                                     LiveActivityActionButton(game: todayGame)
@@ -106,8 +111,20 @@ struct MyTeamView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
             }
-            .background(KBOLivePalette.background)
+            .background {
+                if let palette = appModel.favoriteStadiumPalette {
+                    LinearGradient(
+                        colors: [palette.background, palette.sectionBackground],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                } else {
+                    KBOLivePalette.background
+                }
+            }
             .navigationTitle("마이팀")
+            .doosanInlineNavigationTitle(isEnabled: appModel.isStadiumFavoriteSelected)
+            .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()
             .refreshable {
                 await appModel.refreshMyTeam()
@@ -130,7 +147,11 @@ private struct MyTeamAttendanceSummaryView: View {
                 attendanceMetric(title: "기록", value: summary.recordText)
                 attendanceMetric(title: "승률", value: summary.winPercentageText)
             }
-            .cardSurface(padding: 12, cornerRadius: 18)
+            .cardSurface(
+                padding: 12,
+                cornerRadius: 18,
+                fillColor: appModel.favoriteStadiumPalette?.sectionBackground
+            )
         } else {
             EmptyStateView(
                 systemImage: "checkmark.circle",
@@ -144,11 +165,15 @@ private struct MyTeamAttendanceSummaryView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Text(value)
                 .font(.subheadline.weight(.heavy))
                 .monospacedDigit()
-                .foregroundStyle(title == "승률" ? appModel.currentTheme.accent : .primary)
+                .foregroundStyle(
+                    title == "승률"
+                        ? (appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
+                        : (appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                )
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
         }
@@ -204,8 +229,8 @@ private struct MyTeamHeaderView: View {
         .background(
             LinearGradient(
                 colors: [
-                    appModel.currentTheme.heroStart.opacity(0.96),
-                    appModel.currentTheme.heroEnd.opacity(0.84)
+                    appModel.favoriteStadiumPalette?.background.opacity(0.96) ?? appModel.currentTheme.heroStart.opacity(0.96),
+                    appModel.favoriteStadiumPalette?.primary.opacity(0.80) ?? appModel.currentTheme.heroEnd.opacity(0.84)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -214,18 +239,27 @@ private struct MyTeamHeaderView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(
+                    appModel.favoriteStadiumPalette?.ghostBorder ?? Color.white.opacity(0.08),
+                    lineWidth: appModel.isStadiumFavoriteSelected ? 0.75 : 1
+                )
         )
-        .shadow(color: appModel.currentTheme.shadowTint, radius: 12, y: 6)
+        .shadow(
+            color: appModel.favoriteStadiumPalette?.ambientShadow.opacity(0.40) ?? appModel.currentTheme.shadowTint,
+            radius: appModel.isStadiumFavoriteSelected ? 14 : 12,
+            y: appModel.isStadiumFavoriteSelected ? 8 : 6
+        )
     }
 }
 
 private struct SectionTitleView: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
 
     var body: some View {
         Text(title)
             .font(.subheadline.weight(.bold))
+            .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .primary)
             .padding(.top, 2)
     }
 }

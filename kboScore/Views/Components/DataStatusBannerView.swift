@@ -8,17 +8,20 @@
 import SwiftUI
 
 struct DataStatusBannerView: View {
+    @Environment(AppModel.self) private var appModel
     let message: String
 
     var body: some View {
+        let palette = appModel.favoriteStadiumPalette
+
         HStack(spacing: 8) {
             Image(systemName: "clock.badge.exclamationmark")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(KBOLivePalette.primary)
+                .foregroundStyle(palette?.secondary ?? KBOLivePalette.primary)
 
             Text(message)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(palette?.textSecondary ?? .secondary)
 
             Spacer(minLength: 0)
         }
@@ -26,11 +29,14 @@ struct DataStatusBannerView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white)
+                .fill(palette?.sectionBackground ?? Color.white)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(KBOLivePalette.primary.opacity(0.12), lineWidth: 1)
+                .stroke(
+                    palette?.ghostBorder ?? KBOLivePalette.primary.opacity(0.12),
+                    lineWidth: palette == nil ? 1 : 0.75
+                )
         )
     }
 }

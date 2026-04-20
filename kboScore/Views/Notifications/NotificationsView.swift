@@ -21,6 +21,7 @@ struct NotificationsView: View {
                     if !appModel.filteredNotifications.isEmpty {
                         Text("최근 알림")
                             .font(.headline.weight(.bold))
+                            .foregroundStyle(appModel.isDoosanFavoriteSelected ? DoosanPalette.textPrimary : .primary)
                     }
 
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -70,11 +71,39 @@ struct NotificationsView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
             }
-            .background(KBOLivePalette.background)
+            .background(
+                Group {
+                    if appModel.isDoosanFavoriteSelected {
+                        LinearGradient(
+                            colors: [DoosanPalette.background, DoosanPalette.sectionBackground],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    } else {
+                        KBOLivePalette.background
+                    }
+                }
+            )
             .navigationTitle("알림")
+            .modifier(NotificationsNavigationBarModifier(isDoosan: appModel.isDoosanFavoriteSelected))
             .refreshable {
                 await appModel.refreshNotifications()
             }
+        }
+    }
+}
+
+private struct NotificationsNavigationBarModifier: ViewModifier {
+    let isDoosan: Bool
+
+    func body(content: Content) -> some View {
+        if isDoosan {
+            content
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(DoosanPalette.glassSurface, for: .navigationBar)
+        } else {
+            content
         }
     }
 }

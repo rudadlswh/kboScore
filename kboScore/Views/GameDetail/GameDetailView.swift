@@ -50,9 +50,23 @@ struct GameDetailView: View {
                 .padding(12)
             }
         }
-        .background(KBOLivePalette.background)
+        .background {
+            if let palette = appModel.favoriteStadiumPalette {
+                LinearGradient(
+                    colors: [palette.background, palette.sectionBackground],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+            } else {
+                KBOLivePalette.background
+            }
+        }
+        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? Color.primary)
         .navigationTitle("경기 상세")
         .navigationBarTitleDisplayMode(.inline)
+        .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
+        .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
         .refreshable {
             await appModel.refreshHome()
             guard let refreshedGame = appModel.game(withIdentity: gameIdentity) else { return }
@@ -60,14 +74,23 @@ struct GameDetailView: View {
         }
     }
 
+    @ViewBuilder
     private func sectionPicker(availableSections: [GameDetailSection]) -> some View {
-        Picker("상세 섹션", selection: $screenModel.selectedSection) {
-            ForEach(availableSections) { section in
-                Text(section.rawValue)
-                    .tag(section)
+        if let palette = appModel.favoriteStadiumPalette {
+            DoosanGameDetailSectionPicker(
+                selection: $screenModel.selectedSection,
+                sections: availableSections,
+                palette: palette
+            )
+        } else {
+            Picker("상세 섹션", selection: $screenModel.selectedSection) {
+                ForEach(availableSections) { section in
+                    Text(section.rawValue)
+                        .tag(section)
+                }
             }
+            .pickerStyle(.segmented)
         }
-        .pickerStyle(.segmented)
     }
 
     @ViewBuilder
@@ -214,6 +237,7 @@ struct GameDetailView: View {
 
     @ViewBuilder
     private func actionButtons(for game: GameDetail) -> some View {
+        let palette = appModel.favoriteStadiumPalette
         HStack(spacing: 10) {
             if appModel.shouldShowLiveActivityAction(for: game) {
                 LiveActivityActionButton(game: game)
@@ -229,8 +253,11 @@ struct GameDetailView: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .foregroundStyle(appModel.isGameAttended(game) ? appModel.currentTheme.accent : .primary)
+                .background(
+                    palette?.elevatedCard ?? Color(.secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+                .foregroundStyle(appModel.isGameAttended(game) ? (palette?.primary ?? appModel.currentTheme.accent) : (palette?.textPrimary ?? .primary))
             }
             .buttonStyle(.plain)
 
@@ -238,10 +265,49 @@ struct GameDetailView: View {
                 Label("경기 공유하기", systemImage: "square.and.arrow.up")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .foregroundStyle(.primary)
+                .padding(.vertical, 12)
+                .background(
+                        palette?.elevatedCard ?? Color(.secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    )
+                    .foregroundStyle(palette?.textPrimary ?? .primary)
             }
+        }
+    }
+}
+
+private struct DoosanGameDetailSectionPicker: View {
+    @Binding var selection: GameDetailSection
+    let sections: [GameDetailSection]
+    let palette: StadiumPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(sections) { section in
+                Button {
+                    selection = section
+                } label: {
+                    Text(section.rawValue)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(selection == section ? Color.white : palette.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(selection == section ? palette.primary : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == section ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(palette.recessedSurface)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.ghostBorder, lineWidth: 0.75)
         }
     }
 }
@@ -347,9 +413,11 @@ private struct GameDetailPresentation {
 }
 
 private struct GameStatusSummaryCard: View {
+    @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
 
     var body: some View {
+        let palette = appModel.favoriteStadiumPalette
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 ScoreColumn(
@@ -362,7 +430,7 @@ private struct GameStatusSummaryCard: View {
                 VStack(spacing: 8) {
                     Text(statusTitle)
                         .font(.headline.weight(.bold))
-                        .foregroundStyle(presentation.status.tintColor)
+                        .foregroundStyle(palette.map { presentation.status.stadiumTintColor($0) } ?? presentation.status.tintColor)
                     if presentation.status != .upcoming {
                         Text("\(presentation.displayAwayScore) : \(presentation.displayHomeScore)")
                             .font(.system(size: 36, weight: .heavy, design: .rounded))
@@ -374,7 +442,7 @@ private struct GameStatusSummaryCard: View {
                     }
                     Text(subtitleText)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(palette?.textSecondary ?? .secondary)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -405,7 +473,7 @@ private struct GameStatusSummaryCard: View {
         .cardSurface(
             padding: 14,
             cornerRadius: 22,
-            fillColor: presentation.status.cardBackgroundColor
+            fillColor: palette.map { presentation.status.stadiumCardBackgroundColor($0) } ?? presentation.status.cardBackgroundColor
         )
     }
 
@@ -471,6 +539,7 @@ private struct LiveSituationRow: View {
 }
 
 private struct CountMetric: View {
+    @Environment(AppModel.self) private var appModel
     let label: String
     let value: Int?
 
@@ -478,7 +547,7 @@ private struct CountMetric: View {
         VStack(spacing: 4) {
             Text(label)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Text(value.map(String.init) ?? "-")
                 .font(.headline.weight(.bold))
                 .monospacedDigit()
@@ -546,6 +615,7 @@ private struct ScheduledInfoRow: View {
 }
 
 private struct StatusTile<Content: View>: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
     let content: Content
 
@@ -558,12 +628,15 @@ private struct StatusTile<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color(.systemBackground).opacity(0.82), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.systemBackground).opacity(0.82),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
     }
 }
 
@@ -605,6 +678,7 @@ private struct OverviewMetadataCard: View {
 }
 
 private struct MetaValueTile: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
     let value: String
 
@@ -612,32 +686,37 @@ private struct MetaValueTile: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
         .padding(10)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(
+            appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
     }
 }
 
 private struct OverviewJumpButton: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
+        let palette = appModel.favoriteStadiumPalette
         Button(action: action) {
             Text(title)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                .foregroundStyle(isSelected ? Color.white : (palette?.textPrimary ?? Color.primary))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
                 .background(
                     Capsule()
-                        .fill(isSelected ? KBOLivePalette.primary : Color(.secondarySystemBackground))
+                        .fill(isSelected ? (palette?.primary ?? KBOLivePalette.primary) : (palette?.recessedSurface ?? Color(.secondarySystemBackground)))
                 )
         }
         .buttonStyle(.plain)
@@ -645,6 +724,7 @@ private struct OverviewJumpButton: View {
 }
 
 private struct GameLineScoreCard: View {
+    @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
 
     var body: some View {
@@ -673,40 +753,41 @@ private struct GameLineScoreCard: View {
         case .upcoming:
             Text("경기 시작 후 이닝별 득점과 팀 합계가 표시됩니다.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         default:
             VStack(spacing: 8) {
                 FallbackLineScoreRow(team: presentation.game.awayTeam, runs: presentation.awayScore)
                 FallbackLineScoreRow(team: presentation.game.homeTeam, runs: presentation.homeScore, isHome: true)
                 Text("현재 데이터 소스에서 이닝별 점수는 아직 제공되지 않습니다.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             }
         }
     }
 }
 
 private struct LineScoreHeaderRow: View {
+    @Environment(AppModel.self) private var appModel
     let inningLabels: [String]
 
     var body: some View {
         HStack(spacing: 6) {
             Text("TEAM")
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 .frame(width: 72, alignment: .leading)
 
             ForEach(inningLabels.indices, id: \.self) { index in
                 Text(inningLabels[index])
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     .frame(width: 30)
             }
 
             ForEach(["R", "H", "E", "B"], id: \.self) { label in
                 Text(label)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     .frame(width: 34)
             }
         }
@@ -714,6 +795,7 @@ private struct LineScoreHeaderRow: View {
 }
 
 private struct LineScoreValueRow: View {
+    @Environment(AppModel.self) private var appModel
     let team: Team
     let inningValues: [String]
     let totals: GameCenterTeamLineTotals
@@ -749,12 +831,13 @@ private struct LineScoreValueRow: View {
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isHome ? Color(.tertiarySystemBackground) : Color(.secondarySystemBackground))
+                .fill(appModel.favoriteStadiumPalette.map { isHome ? $0.elevatedCardStrong : $0.recessedSurface } ?? (isHome ? Color(.tertiarySystemBackground) : Color(.secondarySystemBackground)))
         )
     }
 }
 
 private struct FallbackLineScoreRow: View {
+    @Environment(AppModel.self) private var appModel
     let team: Team
     let runs: Int?
     var isHome: Bool = false
@@ -773,7 +856,7 @@ private struct FallbackLineScoreRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text("R")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 Text(runs.map(String.init) ?? "-")
                     .font(.title3.weight(.heavy))
                     .monospacedDigit()
@@ -782,7 +865,7 @@ private struct FallbackLineScoreRow: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isHome ? Color(.tertiarySystemBackground) : Color(.secondarySystemBackground))
+                .fill(appModel.favoriteStadiumPalette.map { isHome ? $0.elevatedCardStrong : $0.recessedSurface } ?? (isHome ? Color(.tertiarySystemBackground) : Color(.secondarySystemBackground)))
         )
     }
 }
@@ -880,6 +963,7 @@ private struct BattingSectionCard: View {
 }
 
 private struct PitchingSectionCard: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
     let section: GameCenterPitchingSection
 
@@ -896,10 +980,10 @@ private struct PitchingSectionCard: View {
                         if let result = line.result, result.isEmpty == false {
                             Text(result)
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(Color(.tertiarySystemBackground), in: Capsule())
+                                .background(appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground), in: Capsule())
                         }
                         Spacer()
                         Text(line.role ?? "")
@@ -953,6 +1037,7 @@ private struct ProbableStartersCard: View {
 }
 
 private struct StarterColumn: View {
+    @Environment(AppModel.self) private var appModel
     let team: Team
     let role: String
     let pitcherName: String?
@@ -964,7 +1049,7 @@ private struct StarterColumn: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(role)
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     Text(team.displayName)
                         .font(.subheadline.weight(.bold))
                         .lineLimit(1)
@@ -978,7 +1063,10 @@ private struct StarterColumn: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 }
 
@@ -1001,6 +1089,7 @@ private struct MatchupComparisonCard: View {
 }
 
 private struct MatchupColumn: View {
+    @Environment(AppModel.self) private var appModel
     let snapshot: GameCenterMatchupSnapshot
 
     var body: some View {
@@ -1017,11 +1106,15 @@ private struct MatchupColumn: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
     }
 }
 
 private struct MatchupMetric: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
     let value: String?
 
@@ -1029,7 +1122,7 @@ private struct MatchupMetric: View {
         HStack {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Spacer(minLength: 8)
             Text(value ?? "-")
                 .font(.caption.weight(.semibold))
@@ -1039,6 +1132,7 @@ private struct MatchupMetric: View {
 }
 
 private struct DetailMessageCard: View {
+    @Environment(AppModel.self) private var appModel
     let icon: String
     let title: String
     let message: String
@@ -1047,7 +1141,7 @@ private struct DetailMessageCard: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .font(.subheadline.weight(.bold))
-                .foregroundStyle(KBOLivePalette.primary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -1055,7 +1149,7 @@ private struct DetailMessageCard: View {
                     .font(.subheadline.weight(.bold))
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             }
         }
         .cardSurface()
@@ -1063,6 +1157,7 @@ private struct DetailMessageCard: View {
 }
 
 private struct DetailLoadingCard: View {
+    @Environment(AppModel.self) private var appModel
     let message: String
 
     var body: some View {
@@ -1071,7 +1166,7 @@ private struct DetailLoadingCard: View {
                 .controlSize(.small)
             Text(message)
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         }
         .cardSurface()
     }

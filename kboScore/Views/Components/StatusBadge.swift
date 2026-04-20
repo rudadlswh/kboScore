@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct StatusBadge: View {
+    @Environment(AppModel.self) private var appModel
     let status: GameStatus
     var tintColor: Color?
     var backgroundColor: Color?
@@ -19,7 +20,13 @@ struct StatusBadge: View {
     }
 
     var body: some View {
-        let resolvedTintColor = tintColor ?? status.tintColor
+        let palette = appModel.favoriteStadiumPalette
+        let resolvedTintColor = tintColor ?? (palette == nil ? status.tintColor : Color.white)
+        let resolvedBackground = backgroundColor ?? (
+            palette != nil
+                ? (tintColor == nil ? palette!.statusRed : status.stadiumTintColor(palette!).opacity(0.24))
+                : resolvedTintColor.opacity(0.12)
+        )
 
         Text(status.title)
             .font(.caption.weight(.bold))
@@ -28,7 +35,7 @@ struct StatusBadge: View {
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(backgroundColor ?? resolvedTintColor.opacity(0.12))
+                    .fill(resolvedBackground)
             )
     }
 }
