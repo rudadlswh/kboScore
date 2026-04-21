@@ -62,7 +62,7 @@ struct StandingsView: View {
 
     private func stadiumContent(_ palette: StadiumPalette) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            standingsHeader(palette)
+            //standingsHeader(palette)
 
             if appModel.standingsSnapshots.isEmpty {
                 EmptyStateView(

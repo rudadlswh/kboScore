@@ -63,6 +63,10 @@ struct StadiumPalette: Sendable {
     let weather: Color
     let winDayFill: Color
 
+    var usesLightForegroundStyle: Bool {
+        id == "samsung" || id == "ssg"
+    }
+
     static let doosan = StadiumPalette(
         id: "doosan",
         primary: DoosanPalette.primary,
@@ -108,6 +112,190 @@ struct StadiumPalette: Sendable {
         weather: Color(red: 1.0, green: 0.7333, blue: 0.3412),
         winDayFill: Color(red: 1.0, green: 0.5686, blue: 0.3647).opacity(0.30)
     )
+
+    static let kia = StadiumPalette(
+        id: "kia",
+        primary: Color(red: 0.8980, green: 0.0980, blue: 0.2157), // #E51937
+        secondary: Color(red: 0.4627, green: 0.8314, blue: 0.8941), // #76d4e4
+        statusRed: Color(red: 0.8980, green: 0.0980, blue: 0.2157), // #E51937
+        background: Color(red: 0.0235, green: 0.0824, blue: 0.1255), // #061520
+        sectionBackground: Color(red: 0.0314, green: 0.1176, blue: 0.1765), // #081e2d
+        elevatedCard: Color(red: 0.0471, green: 0.1569, blue: 0.2196), // #0c2838
+        elevatedCardStrong: Color(red: 0.0706, green: 0.2039, blue: 0.2784), // #123447
+        recessedSurface: Color(red: 0.0118, green: 0.0471, blue: 0.0745), // #030c13
+        glassSurface: Color(red: 0.0706, green: 0.2039, blue: 0.2784).opacity(0.58),
+        navigationSurface: Color(red: 0.0235, green: 0.0824, blue: 0.1255),
+        tabBarSurface: Color(red: 0.0078, green: 0.0314, blue: 0.0510), // #02080d
+        tabBarSelectionSurface: Color(red: 0.0471, green: 0.1569, blue: 0.2196).opacity(0.96),
+        bellControlSurface: Color(red: 0.0118, green: 0.0471, blue: 0.0745),
+        textPrimary: Color(red: 0.8353, green: 0.8941, blue: 0.9569), // #d5e4f4
+        textSecondary: Color(red: 0.6588, green: 0.7412, blue: 0.8118),
+        ghostBorder: Color(red: 0.8353, green: 0.8941, blue: 0.9569).opacity(0.12),
+        ambientShadow: Color(red: 0.4627, green: 0.8314, blue: 0.8941).opacity(0.18),
+        weather: Color(red: 0.4627, green: 0.8314, blue: 0.8941),
+        winDayFill: Color(red: 0.4627, green: 0.8314, blue: 0.8941).opacity(0.30)
+    )
+
+    static let kt = StadiumPalette(
+        id: "kt",
+        primary: Color(red: 0.9255, green: 0.1098, blue: 0.1412), // #EC1C24
+        secondary: Color(red: 1.0, green: 0.7059, blue: 0.6706), // #ffb4ab
+        statusRed: Color(red: 0.9255, green: 0.1098, blue: 0.1412), // #EC1C24
+        background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
+        sectionBackground: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0e0e0e
+        elevatedCard: Color(red: 0.1255, green: 0.1216, blue: 0.1216), // #201f1f
+        elevatedCardStrong: Color(red: 0.2078, green: 0.2078, blue: 0.2039), // #353534
+        recessedSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0e0e0e
+        glassSurface: Color(red: 0.2078, green: 0.2078, blue: 0.2039).opacity(0.60),
+        navigationSurface: Color(red: 0.0745, green: 0.0745, blue: 0.0745),
+        tabBarSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549),
+        tabBarSelectionSurface: Color(red: 0.2078, green: 0.2078, blue: 0.2039).opacity(0.96),
+        bellControlSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549),
+        textPrimary: Color(red: 0.8980, green: 0.8863, blue: 0.8824), // #e5e2e1
+        textSecondary: Color(red: 0.7451, green: 0.7843, blue: 0.8078), // #bec8ce
+        ghostBorder: Color(red: 0.3686, green: 0.2471, blue: 0.2353).opacity(0.15), // #5e3f3c
+        ambientShadow: Color.black.opacity(0.08),
+        weather: Color(red: 0.7451, green: 0.7843, blue: 0.8078), // #bec8ce
+        winDayFill: Color(red: 1.0, green: 0.7059, blue: 0.6706).opacity(0.30)
+    )
+
+    static let lg = StadiumPalette(
+        id: "lg",
+        primary: Color(red: 0.6471, green: 0.0, blue: 0.2039), // #A50034
+        secondary: Color(red: 1.0, green: 0.6980, blue: 0.7216), // #FFB2B8
+        statusRed: Color(red: 0.6471, green: 0.0, blue: 0.2039), // #A50034
+        background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
+        sectionBackground: Color(red: 0.1098, green: 0.1059, blue: 0.1059), // #1C1B1B
+        elevatedCard: Color(red: 0.1255, green: 0.1216, blue: 0.1216), // #201F1F
+        elevatedCardStrong: Color(red: 0.1647, green: 0.1647, blue: 0.1647), // #2A2A2A
+        recessedSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0E0E0E
+        glassSurface: Color(red: 0.1255, green: 0.1216, blue: 0.1216).opacity(0.80),
+        navigationSurface: Color(red: 0.0745, green: 0.0745, blue: 0.0745),
+        tabBarSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549),
+        tabBarSelectionSurface: Color(red: 0.1647, green: 0.1647, blue: 0.1647).opacity(0.96),
+        bellControlSurface: Color(red: 0.0549, green: 0.0549, blue: 0.0549),
+        textPrimary: Color(red: 0.9569, green: 0.9255, blue: 0.9333), // soft light foreground
+        textSecondary: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // #C6C6C6
+        ghostBorder: Color(red: 0.7765, green: 0.7765, blue: 0.7765).opacity(0.12),
+        ambientShadow: Color.black.opacity(0.18),
+        weather: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // silver technical accent
+        winDayFill: Color(red: 0.6471, green: 0.0, blue: 0.2039).opacity(0.30)
+    )
+
+    static let lotte = StadiumPalette(
+        id: "lotte",
+        primary: Color(red: 0.6627, green: 0.0, blue: 0.1137), // #a9001d
+        secondary: Color(red: 0.8196, green: 0.1059, blue: 0.1804), // #d11b2e
+        statusRed: Color(red: 0.8196, green: 0.1059, blue: 0.1804), // #d11b2e
+        background: Color(red: 0.0, green: 0.1059, blue: 0.2353), // #001b3c
+        sectionBackground: Color(red: 0.0235, green: 0.1412, blue: 0.2902), // #06244a
+        elevatedCard: Color(red: 0.0431, green: 0.1922, blue: 0.3647), // #0b315d
+        elevatedCardStrong: Color(red: 0.0745, green: 0.2353, blue: 0.4275), // #133c6d
+        recessedSurface: Color(red: 0.0, green: 0.0784, blue: 0.1765), // #00142d
+        glassSurface: Color(red: 0.0431, green: 0.1922, blue: 0.3647).opacity(0.70),
+        navigationSurface: Color(red: 0.0, green: 0.1059, blue: 0.2353),
+        tabBarSurface: Color(red: 0.0, green: 0.0784, blue: 0.1765),
+        tabBarSelectionSurface: Color(red: 0.0431, green: 0.1922, blue: 0.3647).opacity(0.96),
+        bellControlSurface: Color(red: 0.0, green: 0.0784, blue: 0.1765),
+        textPrimary: Color(red: 0.9686, green: 0.9765, blue: 0.9882),
+        textSecondary: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // #c6c6c6
+        ghostBorder: Color(red: 0.5843, green: 0.8078, blue: 0.9333).opacity(0.14), // #95ceee @ 14%
+        ambientShadow: Color(red: 0.0, green: 0.1059, blue: 0.2353).opacity(0.24),
+        weather: Color(red: 0.5843, green: 0.8078, blue: 0.9333), // #95ceee
+        winDayFill: Color(red: 0.8196, green: 0.1059, blue: 0.1804).opacity(0.30)
+    )
+
+    static let nc = StadiumPalette(
+        id: "nc",
+        primary: Color(red: 0.6824, green: 0.7765, blue: 1.0), // #aec6ff
+        secondary: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // #e3c191
+        statusRed: Color(red: 0.0, green: 0.1529, blue: 0.3647), // #00275d
+        background: Color(red: 0.0588, green: 0.0784, blue: 0.1059), // #0f141b
+        sectionBackground: Color(red: 0.0353, green: 0.0549, blue: 0.0824), // #090e15
+        elevatedCard: Color(red: 0.1059, green: 0.1255, blue: 0.1529), // #1b2027
+        elevatedCardStrong: Color(red: 0.1882, green: 0.2078, blue: 0.2392), // #30353d
+        recessedSurface: Color(red: 0.0235, green: 0.0392, blue: 0.0627), // deep content well variant
+        glassSurface: Color(red: 0.1059, green: 0.1255, blue: 0.1529).opacity(0.72),
+        navigationSurface: Color(red: 0.0588, green: 0.0784, blue: 0.1059),
+        tabBarSurface: Color(red: 0.0353, green: 0.0549, blue: 0.0824),
+        tabBarSelectionSurface: Color(red: 0.1882, green: 0.2078, blue: 0.2392).opacity(0.96),
+        bellControlSurface: Color(red: 0.0353, green: 0.0549, blue: 0.0824),
+        textPrimary: Color(red: 0.9569, green: 0.9686, blue: 0.9804),
+        textSecondary: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // gold label accent
+        ghostBorder: Color(red: 0.6824, green: 0.7765, blue: 1.0).opacity(0.14),
+        ambientShadow: Color(red: 0.0, green: 0.1529, blue: 0.3647).opacity(0.22),
+        weather: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // restrained gold technical accent
+        winDayFill: Color(red: 0.0, green: 0.1529, blue: 0.3647).opacity(0.32)
+    )
+
+    static let kiwoom = StadiumPalette(
+        id: "kiwoom",
+        primary: Color(red: 0.3412, green: 0.0196, blue: 0.0784), // #570514
+        secondary: Color(red: 0.8902, green: 0.0, blue: 0.4941), // #E3007E
+        statusRed: Color(red: 0.8902, green: 0.0, blue: 0.4941), // #E3007E
+        background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
+        sectionBackground: Color(red: 0.1098, green: 0.1059, blue: 0.1059), // #1c1b1b
+        elevatedCard: Color(red: 0.1647, green: 0.1647, blue: 0.1647), // #2a2a2a
+        elevatedCardStrong: Color(red: 0.2078, green: 0.2078, blue: 0.2039), // #353534
+        recessedSurface: Color(red: 0.0941, green: 0.0941, blue: 0.0941), // dark nested well
+        glassSurface: Color(red: 0.1647, green: 0.1647, blue: 0.1647).opacity(0.72),
+        navigationSurface: Color(red: 0.0745, green: 0.0745, blue: 0.0745),
+        tabBarSurface: Color(red: 0.1098, green: 0.1059, blue: 0.1059),
+        tabBarSelectionSurface: Color(red: 0.2078, green: 0.2078, blue: 0.2039).opacity(0.96),
+        bellControlSurface: Color(red: 0.1098, green: 0.1059, blue: 0.1059),
+        textPrimary: Color(red: 0.9569, green: 0.9412, blue: 0.9529), // bright editorial foreground
+        textSecondary: Color(red: 0.7216, green: 0.6706, blue: 0.7059), // muted on-surface-variant
+        ghostBorder: Color(red: 0.8902, green: 0.0, blue: 0.4941).opacity(0.14),
+        ambientShadow: Color(red: 0.3412, green: 0.0196, blue: 0.0784).opacity(0.20),
+        weather: Color(red: 0.8902, green: 0.0, blue: 0.4941), // neon signal accent for technical emphasis
+        winDayFill: Color(red: 0.3412, green: 0.0196, blue: 0.0784).opacity(0.34)
+    )
+
+    static let samsung = StadiumPalette(
+        id: "samsung",
+        primary: Color(red: 0.0, green: 0.3059, blue: 0.5451), // #004e8b
+        secondary: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // #c6c6c6
+        statusRed: Color(red: 0.0, green: 0.4, blue: 0.7020), // #0066b3
+        background: Color(red: 0.9686, green: 0.9765, blue: 1.0), // #f7f9ff
+        sectionBackground: Color(red: 0.9255, green: 0.9333, blue: 0.9529), // #eceef3
+        elevatedCard: Color.white, // #ffffff
+        elevatedCardStrong: Color(red: 0.9647, green: 0.9725, blue: 0.9882), // lifted white-blue surface
+        recessedSurface: Color(red: 0.9059, green: 0.9216, blue: 0.9529), // cool recessed well
+        glassSurface: Color(red: 0.9686, green: 0.9765, blue: 1.0).opacity(0.80),
+        navigationSurface: Color(red: 0.9686, green: 0.9765, blue: 1.0),
+        tabBarSurface: Color(red: 0.9255, green: 0.9333, blue: 0.9529),
+        tabBarSelectionSurface: Color.white.opacity(0.98),
+        bellControlSurface: Color(red: 0.9373, green: 0.9529, blue: 0.9843),
+        textPrimary: Color(red: 0.0941, green: 0.1098, blue: 0.1255), // #181c20
+        textSecondary: Color(red: 0.3725, green: 0.4, blue: 0.4510), // readable steel metadata
+        ghostBorder: Color(red: 0.7569, green: 0.7804, blue: 0.8275).opacity(0.15), // #c1c7d3 @ 15%
+        ambientShadow: Color(red: 0.0, green: 0.3059, blue: 0.5451).opacity(0.08),
+        weather: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // silver accent
+        winDayFill: Color(red: 0.0, green: 0.4, blue: 0.7020).opacity(0.24)
+    )
+
+    static let ssg = StadiumPalette(
+        id: "ssg",
+        primary: Color(red: 0.8078, green: 0.0549, blue: 0.1765), // #CE0E2D
+        secondary: Color(red: 0.6275, green: 0.6275, blue: 0.6275), // #A0A0A0
+        statusRed: Color(red: 0.6392, green: 0.0, blue: 0.1216), // #a3001f
+        background: Color(red: 0.9765, green: 0.9765, blue: 0.9765), // #f9f9f9
+        sectionBackground: Color(red: 0.9529, green: 0.9529, blue: 0.9529), // #f3f3f3
+        elevatedCard: Color.white, // #ffffff
+        elevatedCardStrong: Color(red: 0.9098, green: 0.9098, blue: 0.9098), // #e8e8e8
+        recessedSurface: Color(red: 0.9529, green: 0.9529, blue: 0.9529), // #f3f3f3
+        glassSurface: Color.white.opacity(0.80),
+        navigationSurface: Color(red: 0.9765, green: 0.9765, blue: 0.9765),
+        tabBarSurface: Color(red: 0.9529, green: 0.9529, blue: 0.9529),
+        tabBarSelectionSurface: Color.white.opacity(0.96),
+        bellControlSurface: Color(red: 0.9650, green: 0.9650, blue: 0.9650),
+        textPrimary: Color(red: 0.1294, green: 0.1098, blue: 0.1137), // deep editorial near-black
+        textSecondary: Color(red: 0.3922, green: 0.3882, blue: 0.3961), // silver-weighted metadata
+        ghostBorder: Color(red: 0.9020, green: 0.7412, blue: 0.7333).opacity(0.15), // outline fallback @ 15%
+        ambientShadow: Color(red: 0.2549, green: 0.0, blue: 0.0235).opacity(0.08), // #410006 tinted shadow
+        weather: Color(red: 0.7412, green: 0.9137, blue: 1.0), // #bde9ff
+        winDayFill: Color(red: 0.8078, green: 0.0549, blue: 0.1765).opacity(0.24)
+    )
 }
 
 extension AppModel {
@@ -117,6 +305,22 @@ extension AppModel {
             .doosan
         case "hanwha":
             .hanwha
+        case "kia":
+            .kia
+        case "kiwoom":
+            .kiwoom
+        case "kt":
+            .kt
+        case "lg":
+            .lg
+        case "lotte":
+            .lotte
+        case "nc":
+            .nc
+        case "samsung":
+            .samsung
+        case "ssg":
+            .ssg
         default:
             nil
         }
@@ -343,7 +547,7 @@ private struct StadiumNavigationChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         if let palette {
             content
-                .toolbarColorScheme(.dark, for: .navigationBar)
+                .toolbarColorScheme(palette.usesLightForegroundStyle ? .light : .dark, for: .navigationBar)
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarBackground(palette.navigationSurface, for: .navigationBar)
         } else {

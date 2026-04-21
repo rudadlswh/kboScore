@@ -185,6 +185,35 @@ private struct MyTeamHeaderView: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
 
+    private var headerLabelColor: Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            return palette.textSecondary.opacity(0.92)
+        }
+        return .white.opacity(0.82)
+    }
+
+    private var headerTitleColor: Color {
+        appModel.favoriteStadiumPalette?.textPrimary ?? .white
+    }
+
+    private var headerBodyColor: Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            return palette.textSecondary.opacity(0.9)
+        }
+        return .white.opacity(0.76)
+    }
+
+    private var headerControlForeground: Color {
+        appModel.favoriteStadiumPalette?.textPrimary ?? .white
+    }
+
+    private var headerControlBackground: Color {
+        if let palette = appModel.favoriteStadiumPalette {
+            return palette.elevatedCard.opacity(palette.usesLightForegroundStyle ? 0.9 : 0.16)
+        }
+        return Color.white.opacity(0.14)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             TeamMarkView(team: team, size: 48)
@@ -192,22 +221,18 @@ private struct MyTeamHeaderView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("마이팀")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.82))
+                    .foregroundStyle(headerLabelColor)
                 Text(team.displayName)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(headerTitleColor)
                 Text("오늘 경기 우선, 다음 일정과 최근 결과를 함께 봅니다.")
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.76))
+                    .foregroundStyle(headerBodyColor)
             }
 
             Spacer()
 
             Menu {
-                Button("선택 해제", role: .destructive) {
-                    appModel.settings.favoriteTeamID = nil
-                }
-
                 ForEach(appModel.teams) { candidate in
                     Button(candidate.displayName) {
                         appModel.settings.favoriteTeamID = candidate.id
@@ -216,11 +241,11 @@ private struct MyTeamHeaderView: View {
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(headerControlForeground)
                     .frame(width: 40, height: 40)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.white.opacity(0.14))
+                            .fill(headerControlBackground)
                     )
             }
             .buttonStyle(.plain)

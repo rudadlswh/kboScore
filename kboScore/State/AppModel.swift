@@ -345,7 +345,7 @@ final class AppModel {
 
     var notificationRegistrationPayloadPreviewText: String {
         guard let payload = currentNotificationRegistrationPayload else { return "토큰 대기 중" }
-        let favoriteTeam = payload.favoriteTeamID ?? "선택 안 함"
+        let favoriteTeam = payload.favoriteTeamID ?? "미설정"
         return "\(favoriteTeam) · \(payload.alertTypes.count)개 알림 유형"
     }
 

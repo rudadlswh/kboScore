@@ -37,9 +37,6 @@ struct SettingsView: View {
     private func defaultSections(appModel: AppModel, bindableAppModel: Bindable<AppModel>) -> some View {
         Section("응원 팀") {
             Picker("응원 팀 선택", selection: bindableAppModel.settings.favoriteTeamID) {
-                Text("선택 안 함")
-                    .tag(String?.none)
-
                 if let selectedTeamID = bindableAppModel.settings.favoriteTeamID.wrappedValue,
                    appModel.teams.contains(where: { $0.id == selectedTeamID }) == false {
                     Text(Team.displayName(
@@ -76,24 +73,6 @@ struct SettingsView: View {
             LabeledContent("조용한 시간", value: bindableAppModel.settings.quietHours.wrappedValue.description)
 
             Toggle("라이브 액티비티", isOn: bindableAppModel.settings.liveActivitiesEnabled)
-        }
-
-        Section("화면 모드") {
-            Picker("모드", selection: bindableAppModel.settings.appearance) {
-                ForEach(AppearanceOption.allCases) { option in
-                    Text(option.rawValue)
-                        .tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            Picker("팀 테마", selection: bindableAppModel.settings.teamThemeMode) {
-                ForEach(TeamThemeMode.allCases) { mode in
-                    Text(mode.rawValue)
-                        .tag(mode)
-                }
-            }
-            .pickerStyle(.navigationLink)
         }
 
         Section("정보") {
@@ -167,31 +146,6 @@ struct SettingsView: View {
         }
 
         Section {
-            Picker("모드", selection: bindableAppModel.settings.appearance) {
-                ForEach(AppearanceOption.allCases) { option in
-                    Text(option.rawValue)
-                        .tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .settingsRowStyle(palette)
-
-            Picker("팀 테마", selection: bindableAppModel.settings.teamThemeMode) {
-                ForEach(TeamThemeMode.allCases) { mode in
-                    Text(mode.rawValue)
-                        .tag(mode)
-                }
-            }
-            .pickerStyle(.navigationLink)
-            .settingsRowStyle(palette)
-        } header: {
-            SettingsSectionHeader(
-                title: "화면 모드",
-                subtitle: "밝기 모드와 팀 기반 색상 적용 방식을 선택합니다."
-            )
-        }
-
-        Section {
             InfoRow(title: "데이터 출처", value: "목 데이터 (실 API 연동 예정)")
                 .settingsRowStyle(palette)
             InfoRow(title: "개인정보 처리방침", value: "준비 중")
@@ -225,7 +179,7 @@ struct SettingsView: View {
 
     private func currentFavoriteTeamDisplayName(appModel: AppModel) -> String {
         guard let favoriteTeamID = appModel.settings.favoriteTeamID else {
-            return "선택 안 함"
+            return "미설정"
         }
         return appModel.teams.first(where: { $0.id == favoriteTeamID })?.displayName
             ?? Team.displayName(
@@ -252,13 +206,6 @@ private struct DoosanFavoriteTeamSelectionView: View {
                     .foregroundStyle(palette.textSecondary)
 
                 VStack(spacing: 8) {
-                    teamSelectionRow(
-                        title: "선택 안 함",
-                        subtitle: "팀 기준 기능을 사용하지 않습니다.",
-                        team: nil,
-                        value: nil
-                    )
-
                     if let selectedTeamID = selection,
                        appModel.teams.contains(where: { $0.id == selectedTeamID }) == false {
                         teamSelectionRow(
@@ -316,7 +263,7 @@ private struct DoosanFavoriteTeamSelectionView: View {
                 if let team {
                     TeamMarkView(team: team, size: 36)
                 } else {
-                    Image(systemName: "minus.circle.fill")
+                    Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(isSelected ? palette.primary : palette.textSecondary)
                         .frame(width: 36, height: 36)

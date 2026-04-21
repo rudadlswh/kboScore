@@ -151,6 +151,16 @@ private struct StadiumBottomNavigationBar: View {
         StadiumBottomNavigationItem(tab: .settings, title: "설정", systemImage: "gearshape.fill")
     ]
 
+    private func tabLabelColor(for item: StadiumBottomNavigationItem) -> Color {
+        if selection == item.tab {
+            return palette.primary
+        }
+        if palette.usesLightForegroundStyle {
+            return palette.textPrimary
+        }
+        return Color.white.opacity(0.94)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             LinearGradient(
@@ -174,6 +184,7 @@ private struct StadiumBottomNavigationBar: View {
                                 .symbolVariant(selection == item.tab ? .fill : .none)
                             Text(item.title)
                                 .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(tabLabelColor(for: item))
                         }
                         .frame(maxWidth: .infinity, minHeight: 54)
                         .foregroundStyle(selection == item.tab ? palette.primary : Color.white.opacity(0.94))
