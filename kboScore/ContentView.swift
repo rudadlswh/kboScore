@@ -38,12 +38,6 @@ struct ContentView: View {
                             Label("순위", systemImage: "list.number")
                         }
 
-                    MyTeamView()
-                        .tag(AppTab.myTeam)
-                        .tabItem {
-                            Label("마이팀", systemImage: "star.fill")
-                        }
-
                     ScheduleView()
                         .tag(AppTab.schedule)
                         .tabItem {
@@ -143,7 +137,6 @@ private struct StadiumBottomNavigationBar: View {
     private let items: [StadiumBottomNavigationItem] = [
         StadiumBottomNavigationItem(tab: .home, title: "홈", systemImage: "house.fill"),
         StadiumBottomNavigationItem(tab: .standings, title: "순위", systemImage: "list.number"),
-        StadiumBottomNavigationItem(tab: .myTeam, title: "마이팀", systemImage: "star.fill"),
         StadiumBottomNavigationItem(tab: .schedule, title: "일정", systemImage: "calendar"),
         StadiumBottomNavigationItem(tab: .settings, title: "설정", systemImage: "gearshape.fill")
     ]

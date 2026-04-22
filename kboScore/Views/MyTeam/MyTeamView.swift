@@ -138,7 +138,7 @@ struct MyTeamView: View {
     }
 }
 
-private struct MyTeamAttendanceSummaryView: View {
+struct MyTeamAttendanceSummaryView: View {
     @Environment(AppModel.self) private var appModel
     let summary: AttendedGameSummary
 
@@ -279,7 +279,7 @@ private struct MyTeamHeaderView: View {
     }
 }
 
-private struct SectionTitleView: View {
+struct SectionTitleView: View {
     @Environment(AppModel.self) private var appModel
     let title: String
 

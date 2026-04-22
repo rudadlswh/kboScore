@@ -51,6 +51,9 @@ struct HomeView: View {
                 DataStatusBannerView(message: statusMessage)
             }
 
+            SectionTitleView(title: "직관 기록")
+            MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
+
             if appModel.todayGames.isEmpty {
                 if appModel.homeFallbackStandingsSnapshots.isEmpty {
                     EmptyStateView(
@@ -96,6 +99,7 @@ struct HomeView: View {
                 DataStatusBannerView(message: statusMessage)
             }
 
+
             if appModel.todayGames.isEmpty {
                 if appModel.homeFallbackStandingsSnapshots.isEmpty {
                     EmptyStateView(
@@ -128,25 +132,9 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                SectionTitleView(title: "직관 기록")
+                MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
 
-                if secondaryHomeGames.isEmpty == false {
-                    Text("전체 경기")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(palette.textPrimary)
-                        .padding(.leading, 2)
-
-                    LazyVStack(spacing: 10) {
-                        ForEach(secondaryHomeGames) { game in
-                            NavigationLink(value: appModel.gameNavigationIdentity(for: game)) {
-                                GameCardView(
-                                    summary: game,
-                                    showsHomeTeamBadge: true
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
             }
         }
         .padding(.horizontal, 14)
@@ -157,9 +145,6 @@ struct HomeView: View {
         appModel.filteredHomeGames.first
     }
 
-    private var secondaryHomeGames: [GameSummary] {
-        Array(appModel.filteredHomeGames.dropFirst())
-    }
 }
 
 private struct HomeHeroGameCard: View {

@@ -57,7 +57,6 @@ enum ScheduleFilter: String, CaseIterable, Identifiable {
 enum AppTab: Hashable, Sendable {
     case home
     case standings
-    case myTeam
     case schedule
     case settings
 }
