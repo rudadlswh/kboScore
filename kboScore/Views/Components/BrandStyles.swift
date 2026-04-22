@@ -67,6 +67,14 @@ struct StadiumPalette: Sendable {
         id == "samsung" || id == "ssg"
     }
 
+    var tabBarForeground: Color {
+        usesLightForegroundStyle ? textPrimary : Color.white.opacity(0.94)
+    }
+
+    func tabBarForeground(isSelected: Bool) -> Color {
+        isSelected ? primary : tabBarForeground
+    }
+
     static let doosan = StadiumPalette(
         id: "doosan",
         primary: DoosanPalette.primary,

@@ -112,7 +112,7 @@
       <EnvironmentVariables>
          <EnvironmentVariable
             key = "KBO_BACKEND_BASE_URL"
-            value = "http://192.168.45.168:8088"
+            value = "http://192.168.45.118:8088"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

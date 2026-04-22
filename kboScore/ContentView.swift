@@ -109,11 +109,7 @@ private struct AppTabContainerStyleModifier: ViewModifier {
             ZStack(alignment: .bottom) {
                 content
                     .tint(stadiumPalette.primary)
-                    .toolbar(.hidden, for: .tabBar)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        Color.clear
-                            .frame(height: StadiumBottomNavigationBar.reservedContentInset)
-                    }
+                    .toolbar(.visible, for: .tabBar)
                     .background {
                         LinearGradient(
                             colors: [stadiumPalette.background, stadiumPalette.sectionBackground],
@@ -123,7 +119,8 @@ private struct AppTabContainerStyleModifier: ViewModifier {
                         .ignoresSafeArea()
                     }
 
-                StadiumBottomNavigationBar(selection: $selection, palette: stadiumPalette)
+                // Temporarily disabled so stadium mode falls back to the system TabView tab bar.
+                // StadiumBottomNavigationBar(selection: $selection, palette: stadiumPalette)
             }
             .overlay(alignment: .topTrailing) {
                 StadiumNotificationChromeOverlay(palette: stadiumPalette)
@@ -151,27 +148,14 @@ private struct StadiumBottomNavigationBar: View {
         StadiumBottomNavigationItem(tab: .settings, title: "설정", systemImage: "gearshape.fill")
     ]
 
-    private func tabLabelColor(for item: StadiumBottomNavigationItem) -> Color {
-        if selection == item.tab {
-            return palette.primary
-        }
-        if palette.usesLightForegroundStyle {
-            return palette.textPrimary
-        }
-        return Color.white.opacity(0.94)
+    private func tabForegroundColor(for item: StadiumBottomNavigationItem) -> Color {
+        palette.tabBarForeground(isSelected: selection == item.tab)
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            LinearGradient(
-                colors: [
-                    palette.background.opacity(0.0),
-                    palette.tabBarSurface.opacity(0.88)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 12)
+            Color.clear
+                .frame(height: 12)
 
             HStack(spacing: 7) {
                 ForEach(items) { item in
@@ -184,10 +168,9 @@ private struct StadiumBottomNavigationBar: View {
                                 .symbolVariant(selection == item.tab ? .fill : .none)
                             Text(item.title)
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(tabLabelColor(for: item))
                         }
                         .frame(maxWidth: .infinity, minHeight: 54)
-                        .foregroundStyle(selection == item.tab ? palette.primary : Color.white.opacity(0.94))
+                        .foregroundStyle(tabForegroundColor(for: item))
                         .background {
                             if selection == item.tab {
                                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -242,10 +225,6 @@ private struct StadiumBottomNavigationBar: View {
             .shadow(color: palette.ambientShadow.opacity(0.72), radius: 20, y: 8)
             .padding(.horizontal, 10)
             .padding(.bottom, 8)
-        }
-        .background {
-            palette.tabBarSurface
-                .ignoresSafeArea(edges: .bottom)
         }
     }
 }

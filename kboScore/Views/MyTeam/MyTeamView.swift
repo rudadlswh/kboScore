@@ -118,8 +118,10 @@ struct MyTeamView: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
+                    .ignoresSafeArea(edges: .bottom)
                 } else {
                     KBOLivePalette.background
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle("마이팀")

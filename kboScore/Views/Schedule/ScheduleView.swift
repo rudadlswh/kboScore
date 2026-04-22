@@ -38,8 +38,10 @@ struct ScheduleView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
+                    .ignoresSafeArea(edges: .bottom)
                 } else {
                     KBOLivePalette.background
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle("일정")

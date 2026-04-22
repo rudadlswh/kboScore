@@ -26,8 +26,10 @@ struct HomeView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
+                    .ignoresSafeArea(edges: .bottom)
                 } else {
                     KBOLivePalette.background
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle("KBO LIVE")

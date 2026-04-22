@@ -26,8 +26,10 @@ struct StandingsView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     )
+                    .ignoresSafeArea(edges: .bottom)
                 } else {
                     KBOLivePalette.background
+                        .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle("순위")
