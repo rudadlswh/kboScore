@@ -14,7 +14,9 @@ struct ContentView: View {
         @Bindable var appModel = appModel
 
         Group {
-            if appModel.isLoading && appModel.games.isEmpty {
+            if appModel.shouldShowFavoriteTeamOnboarding {
+                FavoriteTeamOnboardingView()
+            } else if appModel.isLoading && appModel.games.isEmpty {
                 ProgressView("KBO LIVE 불러오는 중")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(appModel.favoriteStadiumPalette?.background ?? KBOLivePalette.background)

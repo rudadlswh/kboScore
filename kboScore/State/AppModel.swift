@@ -68,6 +68,7 @@ final class AppModel {
     private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
     private static let attendedGamesStorageKey = "kbo_live_attended_game_keys"
     private static let cancellationNotificationStorageKey = "kbo_live_cancellation_notification_keys"
+    private static let onboardingCompletionStorageKey = "kbo_live_onboarding_completed"
     private static let staleThreshold: TimeInterval = 90
     private static let previousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
@@ -149,6 +150,7 @@ final class AppModel {
     private(set) var liveActivitySupported: Bool
     private(set) var activeLiveActivityGameID: UUID?
     var gameAlertOverrides: [UUID: Bool] = [:]
+    var hasCompletedOnboarding: Bool
     private var lastSuccessfulRefresh: [RefreshDataSet: Date] = [:]
     private var refreshFailures: Set<RefreshDataSet> = []
     private(set) var monthlyScheduleGames: [KBOMonthScheduleKey: [GameDetail]] = [:]
@@ -184,10 +186,21 @@ final class AppModel {
         #endif
         self.usesPersistedSettings = usePersistedSettings
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
+        let persistedOnboardingCompletion = usePersistedSettings ? Self.loadPersistedOnboardingCompletion() : nil
         let persistedDeviceToken = Self.loadPersistedDeviceToken()
         let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
         let persistedCancellationNotificationKeys = usePersistedSettings ? Self.loadPersistedCancellationNotificationKeys() : []
+        let hasPersistedFavoriteTeam = Self.canonicalTeamIdentifier(persistedSettings?.favoriteTeamID) != nil
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
+        if let persistedOnboardingCompletion {
+            self.hasCompletedOnboarding = persistedOnboardingCompletion
+        } else if usePersistedSettings == false {
+            self.hasCompletedOnboarding = true
+        } else {
+            // Upgrade compatibility: if an existing user already had a persisted favorite team,
+            // treat onboarding as completed even when the explicit flag is absent.
+            self.hasCompletedOnboarding = hasPersistedFavoriteTeam
+        }
         var initialSettings = persistedSettings ?? .default
         initialSettings.favoriteTeamID = Self.canonicalTeamIdentifier(initialSettings.favoriteTeamID)
         self.settings = initialSettings
@@ -363,6 +376,17 @@ final class AppModel {
 
     var favoriteTeam: Team? {
         teams.first { $0.id == settings.favoriteTeamID }
+    }
+
+    var shouldShowFavoriteTeamOnboarding: Bool {
+        hasCompletedOnboarding == false
+    }
+
+    func completeFavoriteTeamOnboarding(with teamID: String) {
+        settings.favoriteTeamID = teamID
+        guard hasCompletedOnboarding == false else { return }
+        hasCompletedOnboarding = true
+        persistOnboardingCompletion()
     }
 
     var unreadNotificationsCount: Int {
@@ -1604,6 +1628,18 @@ final class AppModel {
             return []
         }
         return Set(decoded)
+    }
+
+    private func persistOnboardingCompletion() {
+        guard usesPersistedSettings else { return }
+        UserDefaults.standard.set(hasCompletedOnboarding, forKey: Self.onboardingCompletionStorageKey)
+    }
+
+    private static func loadPersistedOnboardingCompletion() -> Bool? {
+        guard UserDefaults.standard.object(forKey: Self.onboardingCompletionStorageKey) != nil else {
+            return nil
+        }
+        return UserDefaults.standard.bool(forKey: Self.onboardingCompletionStorageKey)
     }
 
     private func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {

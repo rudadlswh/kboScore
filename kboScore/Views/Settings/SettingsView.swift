@@ -81,11 +81,11 @@ struct SettingsView: View {
             InfoRow(title: "앱 버전", value: appVersion)
         }
 
-        #if DEBUG
-        Section("디버그") {
-            DebugRowsView()
-        }
-        #endif
+//        #if DEBUG
+//        Section("디버그") {
+//            DebugRowsView()
+//        }
+//        #endif
     }
 
     @ViewBuilder
@@ -146,7 +146,7 @@ struct SettingsView: View {
         }
 
         Section {
-            InfoRow(title: "데이터 출처", value: "목 데이터 (실 API 연동 예정)")
+            InfoRow(title: "데이터 출처", value: "https://www.koreabaseball.com/")
                 .settingsRowStyle(palette)
             InfoRow(title: "개인정보 처리방침", value: "준비 중")
                 .settingsRowStyle(palette)
@@ -159,16 +159,16 @@ struct SettingsView: View {
             )
         }
 
-        #if DEBUG
-        Section {
-            DebugRowsView()
-        } header: {
-            SettingsSectionHeader(
-                title: "디버그",
-                subtitle: "개발 환경 진단용 상태 정보입니다."
-            )
-        }
-        #endif
+//        #if DEBUG
+//        Section {
+//            DebugRowsView()
+//        } header: {
+//            SettingsSectionHeader(
+//                title: "디버그",
+//                subtitle: "개발 환경 진단용 상태 정보입니다."
+//            )
+//        }
+//        #endif
     }
 
     private var appVersion: String {
