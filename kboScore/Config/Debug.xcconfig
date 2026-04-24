@@ -1,0 +1,10 @@
+//
+//  Debug.xcconfig
+//  kboScore
+//
+//  Created by 조경민 on 4/24/26.
+//
+#include? "Secrets.local.xcconfig"
+
+SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
+SUPABASE_PUBLISHABLE_KEY = $(SUPABASE_PUBLISHABLE_KEY)

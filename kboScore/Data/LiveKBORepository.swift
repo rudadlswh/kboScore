@@ -8,12 +8,14 @@
 import Foundation
 
 enum RepositoryDataSourceKind: String, Sendable {
+    case supabase = "Supabase"
     case mock = "목 데이터"
     case live = "실데이터"
     case mockFallback = "목 데이터 폴백"
 }
 
 enum RepositoryDeliverySourceKind: String, Sendable {
+    case supabase = "Supabase 응답"
     case mock = "목 데이터"
     case live = "실시간 응답"
     case cache = "로컬 캐시"
@@ -41,15 +43,8 @@ struct BootstrapRefreshDebugSnapshot: Sendable {
     let lastResult: BootstrapRefreshResultKind
 }
 
-private struct PersistedBootstrapRefreshState: Codable, Sendable {
-    let etag: String?
-    let lastFetchAt: Date?
-    let lastWriteAt: Date?
-    let lastResult: BootstrapRefreshResultKind
-}
-
 struct BootstrapRefreshStateStore: Sendable {
-    private let defaults: UserDefaults
+    nonisolated(unsafe) private let defaults: UserDefaults
     private let storageKey: String
 
     init(
@@ -60,9 +55,9 @@ struct BootstrapRefreshStateStore: Sendable {
         self.storageKey = "kbo_live_bootstrap_refresh_state::\(baseURL.absoluteString)"
     }
 
-    func load(isEnabled: Bool) -> BootstrapRefreshDebugSnapshot {
+    nonisolated func load(isEnabled: Bool) -> BootstrapRefreshDebugSnapshot {
         guard let data = defaults.data(forKey: storageKey),
-              let persisted = try? JSONDecoder().decode(PersistedBootstrapRefreshState.self, from: data) else {
+              let persisted = persistedState(from: data) else {
             return BootstrapRefreshDebugSnapshot(
                 isEnabled: isEnabled,
                 etag: nil,
@@ -81,15 +76,65 @@ struct BootstrapRefreshStateStore: Sendable {
         )
     }
 
-    func save(_ snapshot: BootstrapRefreshDebugSnapshot) {
-        let persisted = PersistedBootstrapRefreshState(
-            etag: snapshot.etag,
-            lastFetchAt: snapshot.lastFetchAt,
-            lastWriteAt: snapshot.lastWriteAt,
-            lastResult: snapshot.lastResult
-        )
-        guard let data = try? JSONEncoder().encode(persisted) else { return }
+    nonisolated func save(_ snapshot: BootstrapRefreshDebugSnapshot) {
+        guard let data = encodedState(from: snapshot) else { return }
         defaults.set(data, forKey: storageKey)
+    }
+
+    nonisolated private func persistedState(from data: Data) -> (
+        etag: String?,
+        lastFetchAt: Date?,
+        lastWriteAt: Date?,
+        lastResult: BootstrapRefreshResultKind
+    )? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let lastResultText = root["lastResult"] as? String
+        let lastResult = lastResultText.flatMap(BootstrapRefreshResultKind.init(rawValue:)) ?? .idle
+
+        return (
+            etag: root["etag"] as? String,
+            lastFetchAt: Self.parseDate(root["lastFetchAt"] as? String),
+            lastWriteAt: Self.parseDate(root["lastWriteAt"] as? String),
+            lastResult: lastResult
+        )
+    }
+
+    nonisolated private func encodedState(from snapshot: BootstrapRefreshDebugSnapshot) -> Data? {
+        var root: [String: Any] = [
+            "lastResult": snapshot.lastResult.rawValue
+        ]
+        if let etag = snapshot.etag {
+            root["etag"] = etag
+        }
+        if let lastFetchAt = snapshot.lastFetchAt {
+            root["lastFetchAt"] = Self.formatDate(lastFetchAt)
+        }
+        if let lastWriteAt = snapshot.lastWriteAt {
+            root["lastWriteAt"] = Self.formatDate(lastWriteAt)
+        }
+        return try? JSONSerialization.data(withJSONObject: root, options: [])
+    }
+
+    nonisolated private static func formatDate(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+
+    nonisolated private static func parseDate(_ value: String?) -> Date? {
+        guard let value, value.isEmpty == false else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let parsed = formatter.date(from: value) {
+            return parsed
+        }
+
+        let fallbackFormatter = ISO8601DateFormatter()
+        fallbackFormatter.formatOptions = [.withInternetDateTime]
+        return fallbackFormatter.date(from: value)
     }
 }
 
@@ -136,6 +181,8 @@ actor RepositoryRuntimeState {
         self.baseURL = baseURL
         self.deliverySource = deliverySource ?? {
             switch activeSource {
+            case .supabase:
+                .supabase
             case .mock:
                 .mock
             case .live:
@@ -228,33 +275,58 @@ struct AppRepositoryBundle {
 }
 
 struct AppRepositoryConfiguration: Sendable {
-    let backendBaseURL: URL?
+    let supabaseConfiguration: SupabaseConfiguration?
+
+    nonisolated init(
+        backendBaseURL: URL? = nil,
+        supabaseConfiguration: SupabaseConfiguration?
+    ) {
+        _ = backendBaseURL
+        self.supabaseConfiguration = supabaseConfiguration
+    }
 
     nonisolated static func fromEnvironment(
         processInfo: ProcessInfo = .processInfo,
         bundle: Bundle = .main
     ) -> AppRepositoryConfiguration {
-        let environmentValue = processInfo.environment["KBO_BACKEND_BASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let infoDictionaryValue = (bundle.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
+        let supabaseEnvironmentValue = processInfo.environment["SUPABASE_URL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabaseURL") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawValue: String? = {
-            if let environmentValue, environmentValue.isEmpty == false {
-                return environmentValue
+        let supabaseKeyEnvironmentValue = processInfo.environment["SUPABASE_PUBLISHABLE_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseKeyInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabasePublishableKey") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseURLRawValue: String? = {
+            if let supabaseEnvironmentValue, supabaseEnvironmentValue.isEmpty == false {
+                return supabaseEnvironmentValue
             }
-            if let infoDictionaryValue, infoDictionaryValue.isEmpty == false {
-                return infoDictionaryValue
+            if let supabaseInfoDictionaryValue, supabaseInfoDictionaryValue.isEmpty == false {
+                return supabaseInfoDictionaryValue
             }
             return nil
         }()
-        let backendBaseURL = backendURL(from: rawValue)
+        let supabaseKeyRawValue: String? = {
+            if let supabaseKeyEnvironmentValue, supabaseKeyEnvironmentValue.isEmpty == false {
+                return supabaseKeyEnvironmentValue
+            }
+            if let supabaseKeyInfoDictionaryValue, supabaseKeyInfoDictionaryValue.isEmpty == false {
+                return supabaseKeyInfoDictionaryValue
+            }
+            return nil
+        }()
+        let supabaseConfiguration = supabaseConfiguration(
+            urlRawValue: supabaseURLRawValue,
+            publishableKeyRawValue: supabaseKeyRawValue
+        )
 #if DEBUG
-        print("[BackendConfig] environment KBO_BACKEND_BASE_URL=\(debugValue(environmentValue))")
-        print("[BackendConfig] plist KBOBackendBaseURL=\(debugValue(infoDictionaryValue))")
-        print("[BackendConfig] persisted backend base URL=<none: no persisted backend URL store>")
-        print("[BackendConfig] final runtime base URL=\(debugValue(backendBaseURL?.absoluteString))")
+        print("[SupabaseConfig] environment SUPABASE_URL=\(debugValue(supabaseEnvironmentValue))")
+        print("[SupabaseConfig] plist SupabaseURL=\(debugValue(supabaseInfoDictionaryValue))")
+        print("[SupabaseConfig] environment SUPABASE_PUBLISHABLE_KEY=\(redactedKeyDebugValue(supabaseKeyEnvironmentValue))")
+        print("[SupabaseConfig] plist SupabasePublishableKey=\(redactedKeyDebugValue(supabaseKeyInfoDictionaryValue))")
+        print("[SupabaseConfig] final runtime URL=\(debugValue(supabaseConfiguration?.url.absoluteString))")
+        print("[SupabaseConfig] final runtime key=\(redactedKeyDebugValue(supabaseConfiguration?.publishableKey))")
 #endif
         return AppRepositoryConfiguration(
-            backendBaseURL: backendBaseURL
+            supabaseConfiguration: supabaseConfiguration
         )
     }
 
@@ -269,12 +341,31 @@ struct AppRepositoryConfiguration: Sendable {
         return url
     }
 
+    private nonisolated static func supabaseConfiguration(
+        urlRawValue: String?,
+        publishableKeyRawValue: String?
+    ) -> SupabaseConfiguration? {
+        guard let url = backendURL(from: urlRawValue),
+              let publishableKey = publishableKeyRawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              publishableKey.isEmpty == false else {
+            return nil
+        }
+        return SupabaseConfiguration(url: url, publishableKey: publishableKey)
+    }
+
 #if DEBUG
     private nonisolated static func debugValue(_ value: String?) -> String {
         guard let value, value.isEmpty == false else {
             return "<none>"
         }
         return value
+    }
+
+    private nonisolated static func redactedKeyDebugValue(_ value: String?) -> String {
+        guard let value, value.isEmpty == false else {
+            return "<none>"
+        }
+        return "<present: \(value.count) chars>"
     }
 #endif
 }
@@ -287,56 +378,10 @@ enum KBORepositoryFactory {
     static func makeAppRepositoryBundle(
         configuration: AppRepositoryConfiguration = .fromEnvironment()
     ) -> AppRepositoryBundle {
-        if let backendBaseURL = configuration.backendBaseURL {
-#if DEBUG
-            print("[BackendConfig] repository runtime base URL=\(backendBaseURL.absoluteString)")
-#endif
-            let bootstrapStateStore = BootstrapRefreshStateStore(baseURL: backendBaseURL)
-            let runtimeState = RepositoryRuntimeState(
-                activeSource: .live,
-                baseURL: backendBaseURL.absoluteString,
-                deliverySource: .live,
-                bootstrapRefreshSnapshot: bootstrapStateStore.load(isEnabled: true)
-            )
-            let localBootstrapRepository = BundledJSONKBORepository(
-                runtimeState: runtimeState,
-                runtimeSource: .live,
-                runtimeDelivery: .cache
-            )
-            let liveRepository = LiveKBORepository(
-                baseURL: backendBaseURL,
-                runtimeState: runtimeState
-            )
-            let cachedRepository = CachedKBORepository(
-                base: liveRepository,
-                configuration: .default,
-                runtimeState: runtimeState
-            )
-            let bootstrapRepository = BootstrapRefreshingKBORepository(
-                base: cachedRepository,
-                localBootstrapRepository: localBootstrapRepository,
-                bootstrapBaseURL: backendBaseURL,
-                runtimeState: runtimeState,
-                stateStore: bootstrapStateStore
-            )
-            let repository = FallbackKBORepository(
-                primary: bootstrapRepository,
-                fallback: localBootstrapRepository,
-                runtimeState: runtimeState
-            )
-            return AppRepositoryBundle(
-                repository: repository,
-                runtimeState: runtimeState
-            )
-        }
-
-#if DEBUG
-        print("[BackendConfig] repository runtime base URL=<none>")
-#endif
         let runtimeState = RepositoryRuntimeState(
-            activeSource: .mock,
-            baseURL: nil,
-            deliverySource: .mock,
+            activeSource: configuration.supabaseConfiguration == nil ? .mock : .supabase,
+            baseURL: configuration.supabaseConfiguration?.url.absoluteString,
+            deliverySource: configuration.supabaseConfiguration == nil ? .mock : .supabase,
             bootstrapRefreshSnapshot: BootstrapRefreshDebugSnapshot(
                 isEnabled: false,
                 etag: nil,
@@ -346,13 +391,48 @@ enum KBORepositoryFactory {
             )
         )
         let repository = BundledJSONKBORepository(
+            runtimeState: runtimeState,
+            runtimeSource: configuration.supabaseConfiguration == nil ? .mock : .mockFallback,
+            runtimeDelivery: configuration.supabaseConfiguration == nil ? .mock : .mockFallback
+        )
+        let wrappedRepository = makeSupabaseWrappedRepository(
+            baseRepository: repository,
+            configuration: configuration,
             runtimeState: runtimeState
         )
 
         return AppRepositoryBundle(
-            repository: repository,
+            repository: wrappedRepository,
             runtimeState: runtimeState
         )
+    }
+
+    private static func makeSupabaseWrappedRepository<Base: KBORepository>(
+        baseRepository: Base,
+        configuration: AppRepositoryConfiguration,
+        runtimeState: RepositoryRuntimeState?
+    ) -> any KBORepository {
+        guard let supabaseConfiguration = configuration.supabaseConfiguration else {
+            return baseRepository
+        }
+
+        #if canImport(Supabase)
+        #if DEBUG
+        print("[SupabaseConfig] supabase-swift linked=true")
+        print("[SupabaseKBO] enabled=true url=\(supabaseConfiguration.url.absoluteString)")
+        #endif
+        let repository = SupabaseBackedKBORepository(
+            base: baseRepository,
+            source: SupabaseKBORepository(configuration: supabaseConfiguration),
+            runtimeState: runtimeState
+        )
+        return AnyKBORepository(repository)
+        #else
+        #if DEBUG
+        print("[SupabaseConfig] configuration present but supabase-swift is not linked. Falling back to local bundled repository.")
+        #endif
+        return baseRepository
+        #endif
     }
 }
 

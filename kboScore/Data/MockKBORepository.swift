@@ -69,7 +69,14 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
-        try await loadBootstrap()
+        let bootstrap = try await loadBootstrap()
+#if DEBUG
+        print(
+            "[RepositorySource] bootstrap source=LocalBootstrapData.json " +
+            "teams=\(bootstrap.teams.count) games=\(bootstrap.games.count)"
+        )
+#endif
+        return bootstrap
     }
 
     nonisolated func fetchGames() async throws -> [GameDetail] {

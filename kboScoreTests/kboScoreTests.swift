@@ -1994,13 +1994,54 @@ struct kboScoreTests {
 
     @Test func repositoryFactoryUsesBundledModeWhenBackendURLIsMissing() async throws {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
-            configuration: AppRepositoryConfiguration(backendBaseURL: nil)
+            configuration: AppRepositoryConfiguration(
+                supabaseConfiguration: nil
+            )
         )
 
         let snapshot = await bundle.runtimeState?.snapshot()
 
         #expect(snapshot?.activeSource == .mock)
         #expect(snapshot?.baseURL == nil)
+    }
+
+    @Test func supabaseFailureFallsBackToLocalRepository() async throws {
+        let bundledDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: bundledDirectory) }
+
+        let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
+        try makeBootstrapJSON(teamName: "번들 LG").write(to: bundledURL, options: .atomic)
+
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .supabase,
+            baseURL: "https://example.supabase.co",
+            deliverySource: .supabase
+        )
+        let tracker = RepositoryCallTracker()
+        let localRepository = TrackingKBORepository(
+            base: BundledJSONKBORepository(
+                bundledFileURLOverride: bundledURL,
+                runtimeState: runtimeState,
+                runtimeSource: .mockFallback,
+                runtimeDelivery: .mockFallback
+            ),
+            tracker: tracker
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: localRepository,
+            source: FailingSupabaseSource(),
+            runtimeState: runtimeState
+        )
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.teams.first(where: { $0.id == "lg" })?.name == "번들 LG")
+        #expect(await tracker.bootstrapFetchCount == 1)
+        #expect(await tracker.monthlyScheduleFetchCount == 0)
+        #expect(snapshot.deliverySource == .mockFallback)
+        #expect(snapshot.localBootstrapSource == .bundled)
+        #expect(snapshot.baseURL == "https://example.supabase.co")
     }
 
     @Test func bundledJSONRepositoryUsesDocumentsJSONWhenPresent() async throws {
@@ -2236,16 +2277,20 @@ struct kboScoreTests {
         #expect(snapshot.localBootstrapResolvedPath == documentsURL.path)
     }
 
-    @Test func repositoryFactoryUsesLiveModeWhenBackendURLIsProvided() async throws {
+    @Test func repositoryFactoryIgnoresLegacyBackendURLWhenBuildingRuntimeRepository() async throws {
         let backendURL = try #require(URL(string: "http://127.0.0.1:8080"))
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
-            configuration: AppRepositoryConfiguration(backendBaseURL: backendURL)
+            configuration: AppRepositoryConfiguration(
+                backendBaseURL: backendURL,
+                supabaseConfiguration: nil
+            )
         )
 
         let snapshot = await bundle.runtimeState?.snapshot()
 
-        #expect(snapshot?.activeSource == .live)
-        #expect(snapshot?.baseURL == backendURL.absoluteString)
+        #expect(snapshot?.activeSource == .mock)
+        #expect(snapshot?.deliverySource == .mock)
+        #expect(snapshot?.baseURL == nil)
     }
 
     @Test func liveRepositoryBuildsLocalhostBackendRequestURLs() async throws {
@@ -3611,6 +3656,167 @@ struct kboScoreTests {
         #expect(markerDays.isEmpty == false)
     }
 
+    @Test func repositoryFactoryWithoutSupabaseConfigKeepsExistingRuntimeDefaults() async throws {
+        let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
+            configuration: AppRepositoryConfiguration(
+                supabaseConfiguration: nil
+            )
+        )
+        let snapshot = await bundle.runtimeState?.snapshot()
+
+        #expect(snapshot?.activeSource == .mock)
+        #expect(snapshot?.deliverySource == .mock)
+        #expect(snapshot?.baseURL == nil)
+    }
+
+    @Test func supabaseMapperDecodesRowsIntoExistingGameModels() throws {
+        let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lg", name: "LG 트윈스", shortName: "LG"),
+            SupabaseTeamRow(id: homeTeamID, code: "doosan", name: "두산 베어스", shortName: "두산")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "provider": "kbo",
+                    "provider_game_id": "20260424LGDO0",
+                    "game_date": "2026-04-24",
+                    "scheduled_at": "2026-04-24T18:30:00+09:00",
+                    "stadium": "잠실",
+                    "status": "final",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": 2,
+                    "away_score": 4,
+                    "inning_state": "경기종료",
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "source_updated_at": "2026-04-24T21:45:00+09:00",
+                    "updated_at": "2026-04-24T21:45:00+09:00",
+                    "stadium_code": "JMS",
+                    "official_provider_game_id": "20260424LGDO0"
+                  }
+                ]
+                """.utf8
+            )
+        )
+
+        let games = SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows)
+        let game = try #require(games.first)
+        var scheduleCalendar = Calendar(identifier: .gregorian)
+        scheduleCalendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+        let components = scheduleCalendar.dateComponents([.year, .month, .day, .hour, .minute], from: game.scheduledStart)
+
+        #expect(games.count == 1)
+        #expect(game.id == gameID)
+        #expect(game.awayTeam.id == "lg")
+        #expect(game.homeTeam.id == "doosan")
+        #expect(game.providerGameID == "20260424LGDO0")
+        #expect(game.status == .final)
+        #expect(game.note?.contains("provider_game_id=20260424LGDO0") == true)
+        #expect(components.year == 2026)
+        #expect(components.month == 4)
+        #expect(components.day == 24)
+        #expect(components.hour == 18)
+        #expect(components.minute == 30)
+    }
+
+    @Test func supabaseTeamRowDecodesLegacyTeamCodeColumn() throws {
+        let teamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let row = try JSONDecoder().decode(
+            SupabaseTeamRow.self,
+            from: Data(
+                """
+                {
+                  "id": "\(teamID.uuidString)",
+                  "team_code": "lg",
+                  "name": "LG 트윈스",
+                  "short_name": "LG"
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.id == teamID)
+        #expect(row.code == "lg")
+        #expect(row.name == "LG 트윈스")
+        #expect(row.shortName == "LG")
+    }
+
+}
+
+private actor RepositoryCallTracker {
+    private(set) var bootstrapFetchCount = 0
+    private(set) var monthlyScheduleFetchCount = 0
+
+    func recordBootstrapFetch() {
+        bootstrapFetchCount += 1
+    }
+
+    func recordMonthlyScheduleFetch() {
+        monthlyScheduleFetchCount += 1
+    }
+}
+
+private struct TrackingKBORepository<Base: KBORepository>: KBORepository, Sendable {
+    let base: Base
+    let tracker: RepositoryCallTracker
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        await tracker.recordBootstrapFetch()
+        return try await base.fetchBootstrapData()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await base.fetchGames()
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await base.fetchNotifications()
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        await tracker.recordMonthlyScheduleFetch()
+        return try await base.fetchMonthlySchedule(for: month)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
+    }
+}
+
+private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
+    private let error = TestRepositoryError.supabaseUnavailable
+
+    nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
+        throw error
+    }
+
+    nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+}
+
+private enum TestRepositoryError: Error, Sendable {
+    case supabaseUnavailable
 }
 
 private struct StubResponse {
