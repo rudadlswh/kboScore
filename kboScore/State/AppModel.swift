@@ -187,7 +187,7 @@ final class AppModel {
         self.usesPersistedSettings = usePersistedSettings
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
         let persistedOnboardingCompletion = usePersistedSettings ? Self.loadPersistedOnboardingCompletion() : nil
-        let persistedDeviceToken = Self.loadPersistedDeviceToken()
+        let persistedDeviceToken = usePersistedSettings ? Self.loadPersistedDeviceToken() : nil
         let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
         let persistedCancellationNotificationKeys = usePersistedSettings ? Self.loadPersistedCancellationNotificationKeys() : []
         let hasPersistedFavoriteTeam = Self.canonicalTeamIdentifier(persistedSettings?.favoriteTeamID) != nil
@@ -1593,13 +1593,14 @@ final class AppModel {
 
         apnsDeviceToken = token
         if usesPersistedSettings {
-            UserDefaults.standard.set(token, forKey: Self.deviceTokenStorageKey)
+            _ = APNsDeviceTokenStore.save(token)
+            UserDefaults.standard.removeObject(forKey: Self.deviceTokenStorageKey)
         }
         scheduleNotificationRegistrationSync(force: true)
     }
 
     private static func loadPersistedDeviceToken() -> String? {
-        UserDefaults.standard.string(forKey: Self.deviceTokenStorageKey)
+        APNsDeviceTokenStore.loadOrMigrateLegacyValue(legacyKey: Self.deviceTokenStorageKey)
     }
 
     private func persistAttendedGameKeys() {
