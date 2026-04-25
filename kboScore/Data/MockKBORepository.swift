@@ -152,7 +152,11 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
     }
 
     nonisolated private var documentsFileURL: URL? {
+#if DEBUG
         localBootstrapFileURL
+#else
+        nil
+#endif
     }
 
     nonisolated private func bundledFileURL() throws -> URL {
