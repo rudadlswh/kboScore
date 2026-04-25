@@ -7,6 +7,37 @@
 
 import Foundation
 
+private enum RepositoryFileSecurity {
+    nonisolated static let protectionType = FileProtectionType.completeUntilFirstUserAuthentication
+
+    nonisolated static func applyProtection(
+        to fileURL: URL,
+        fileManager: FileManager
+    ) throws {
+        try fileManager.setAttributes(
+            [.protectionKey: protectionType],
+            ofItemAtPath: fileURL.path
+        )
+    }
+
+    nonisolated static func applyProtection(
+        toDirectory directoryURL: URL,
+        fileManager: FileManager
+    ) throws {
+        try fileManager.setAttributes(
+            [.protectionKey: protectionType],
+            ofItemAtPath: directoryURL.path
+        )
+    }
+
+    nonisolated static func excludeFromBackup(_ fileURL: URL) throws {
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableFileURL = fileURL
+        try mutableFileURL.setResourceValues(resourceValues)
+    }
+}
+
 enum RepositoryDataSourceKind: String, Sendable {
     case supabase = "Supabase"
     case mock = "목 데이터"
@@ -295,35 +326,18 @@ struct AppRepositoryConfiguration: Sendable {
         let supabaseKeyEnvironmentValue = processInfo.environment["SUPABASE_PUBLISHABLE_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         let supabaseKeyInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabasePublishableKey") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let supabaseURLRawValue: String? = {
-            if let supabaseEnvironmentValue, supabaseEnvironmentValue.isEmpty == false {
-                return supabaseEnvironmentValue
-            }
-            if let supabaseInfoDictionaryValue, supabaseInfoDictionaryValue.isEmpty == false {
-                return supabaseInfoDictionaryValue
-            }
-            return nil
-        }()
-        let supabaseKeyRawValue: String? = {
-            if let supabaseKeyEnvironmentValue, supabaseKeyEnvironmentValue.isEmpty == false {
-                return supabaseKeyEnvironmentValue
-            }
-            if let supabaseKeyInfoDictionaryValue, supabaseKeyInfoDictionaryValue.isEmpty == false {
-                return supabaseKeyInfoDictionaryValue
-            }
-            return nil
-        }()
-        let supabaseConfiguration = supabaseConfiguration(
-            urlRawValue: supabaseURLRawValue,
-            publishableKeyRawValue: supabaseKeyRawValue
+        let supabaseConfiguration = firstValidSupabaseConfiguration(
+            candidates: [
+                (url: supabaseEnvironmentValue, publishableKey: supabaseKeyEnvironmentValue),
+                (url: supabaseInfoDictionaryValue, publishableKey: supabaseKeyInfoDictionaryValue)
+            ]
         )
 #if DEBUG
-        print("[SupabaseConfig] environment SUPABASE_URL=\(debugValue(supabaseEnvironmentValue))")
-        print("[SupabaseConfig] plist SupabaseURL=\(debugValue(supabaseInfoDictionaryValue))")
-        print("[SupabaseConfig] environment SUPABASE_PUBLISHABLE_KEY=\(redactedKeyDebugValue(supabaseKeyEnvironmentValue))")
-        print("[SupabaseConfig] plist SupabasePublishableKey=\(redactedKeyDebugValue(supabaseKeyInfoDictionaryValue))")
-        print("[SupabaseConfig] final runtime URL=\(debugValue(supabaseConfiguration?.url.absoluteString))")
-        print("[SupabaseConfig] final runtime key=\(redactedKeyDebugValue(supabaseConfiguration?.publishableKey))")
+        print("[SupabaseConfig] environmentURLPresent=\(hasValue(supabaseEnvironmentValue))")
+        print("[SupabaseConfig] plistURLPresent=\(hasValue(supabaseInfoDictionaryValue))")
+        print("[SupabaseConfig] environmentKeyPresent=\(hasValue(supabaseKeyEnvironmentValue))")
+        print("[SupabaseConfig] plistKeyPresent=\(hasValue(supabaseKeyInfoDictionaryValue))")
+        print("[SupabaseConfig] finalRuntimeHost=\(debugHostValue(supabaseConfiguration))")
 #endif
         return AppRepositoryConfiguration(
             supabaseConfiguration: supabaseConfiguration
@@ -334,12 +348,42 @@ struct AppRepositoryConfiguration: Sendable {
         guard let rawValue,
               let url = URL(string: rawValue),
               let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host?.isEmpty == false else {
+              let host = url.host?.lowercased(),
+              host.isEmpty == false else {
             return nil
         }
+#if DEBUG
+        guard ["http", "https"].contains(scheme) else {
+            return nil
+        }
+#else
+        guard scheme == "https",
+              releaseApprovedHosts.contains(host) else {
+            return nil
+        }
+#endif
         return url
     }
+
+    private nonisolated static func firstValidSupabaseConfiguration(
+        candidates: [(url: String?, publishableKey: String?)]
+    ) -> SupabaseConfiguration? {
+        for candidate in candidates {
+            if let configuration = supabaseConfiguration(
+                urlRawValue: candidate.url,
+                publishableKeyRawValue: candidate.publishableKey
+            ) {
+                return configuration
+            }
+        }
+        return nil
+    }
+
+#if !DEBUG
+    private nonisolated static let releaseApprovedHosts: Set<String> = [
+        "pbfancqzynkialupleys.supabase.co"
+    ]
+#endif
 
     private nonisolated static func supabaseConfiguration(
         urlRawValue: String?,
@@ -354,18 +398,15 @@ struct AppRepositoryConfiguration: Sendable {
     }
 
 #if DEBUG
-    private nonisolated static func debugValue(_ value: String?) -> String {
-        guard let value, value.isEmpty == false else {
-            return "<none>"
+    private nonisolated static func hasValue(_ value: String?) -> Bool {
+        guard let value else {
+            return false
         }
-        return value
+        return value.isEmpty == false
     }
 
-    private nonisolated static func redactedKeyDebugValue(_ value: String?) -> String {
-        guard let value, value.isEmpty == false else {
-            return "<none>"
-        }
-        return "<present: \(value.count) chars>"
+    private nonisolated static func debugHostValue(_ configuration: SupabaseConfiguration?) -> String {
+        configuration?.url.host ?? "<none>"
     }
 #endif
 }
@@ -419,7 +460,7 @@ enum KBORepositoryFactory {
         #if canImport(Supabase)
         #if DEBUG
         print("[SupabaseConfig] supabase-swift linked=true")
-        print("[SupabaseKBO] enabled=true url=\(supabaseConfiguration.url.absoluteString)")
+        print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>")")
         #endif
         let repository = SupabaseBackedKBORepository(
             base: baseRepository,
@@ -813,8 +854,10 @@ private actor RepositoryDiskCache {
         let fileURL = directoryURL.appendingPathComponent(fileName)
         do {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
+            try RepositoryFileSecurity.applyProtection(toDirectory: directoryURL, fileManager: fileManager)
             let data = try encoder.encode(value)
             try data.write(to: fileURL, options: .atomic)
+            try RepositoryFileSecurity.applyProtection(to: fileURL, fileManager: fileManager)
         } catch {
             #if DEBUG
             print("[RepositoryDiskCache] write failed file=\(fileName) error=\(error)")
@@ -1358,7 +1401,7 @@ struct BootstrapRefreshingKBORepository<Base: KBORepository>: KBORepository, Sen
             stateStore.save(failedSnapshot)
             await runtimeState?.recordBootstrapRefresh(failedSnapshot)
 #if DEBUG
-            print("[BootstrapRefresh] refresh failed error=\(error)")
+            print("[BootstrapRefresh] refresh failed errorType=\(String(describing: type(of: error)))")
 #endif
         }
     }
@@ -1378,7 +1421,13 @@ struct BootstrapRefreshingKBORepository<Base: KBORepository>: KBORepository, Sen
             withIntermediateDirectories: true,
             attributes: nil
         )
+        try RepositoryFileSecurity.applyProtection(
+            toDirectory: fileURL.deletingLastPathComponent(),
+            fileManager: fileManager
+        )
         try data.write(to: fileURL, options: .atomic)
+        try RepositoryFileSecurity.applyProtection(to: fileURL, fileManager: fileManager)
+        try RepositoryFileSecurity.excludeFromBackup(fileURL)
 
         let snapshot = BootstrapRefreshDebugSnapshot(
             isEnabled: true,
@@ -1404,7 +1453,7 @@ struct BootstrapRefreshingKBORepository<Base: KBORepository>: KBORepository, Sen
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
 #if DEBUG
-        print("[LiveAPI] request endpoint=v1/bootstrap method=GET url=\(url.absoluteString)")
+        print("[LiveAPI] request endpoint=v1/bootstrap method=GET")
 #endif
         return request
     }
@@ -1531,16 +1580,13 @@ struct LiveKBORepository: KBORepository, Sendable {
             (data, response) = try await session.data(for: request)
         } catch {
             #if DEBUG
-            print("[LiveAPI] transportError endpoint=\(endpoint.path) error=\(error)")
+            print("[LiveAPI] transportError endpoint=\(endpoint.path) errorType=\(String(describing: type(of: error)))")
             #endif
             throw error
         }
         #if DEBUG
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        let rawBody = String(data: data, encoding: .utf8) ?? "<non-utf8 \(data.count) bytes>"
-        let preview = rawBody.count > 4_000 ? String(rawBody.prefix(4_000)) + "...(truncated)" : rawBody
-        print("[LiveAPI] response endpoint=\(endpoint.path) status=\(statusCode)")
-        print("[LiveAPI] rawResponseBody endpoint=\(endpoint.path) body=\(preview)")
+        print("[LiveAPI] response endpoint=\(endpoint.path) status=\(statusCode) bytes=\(data.count)")
         #endif
         try validate(response: response, endpoint: endpoint)
 
@@ -1554,7 +1600,7 @@ struct LiveKBORepository: KBORepository, Sendable {
             return payload
         } catch {
             #if DEBUG
-            print("[LiveAPI] decodingError endpoint=\(endpoint.path) error=\(error)")
+            print("[LiveAPI] decodingError endpoint=\(endpoint.path) errorType=\(String(describing: type(of: error)))")
             #endif
             throw LiveRepositoryError.decoding(endpoint: endpoint.path, underlying: error)
         }
@@ -1620,8 +1666,8 @@ struct LiveKBORepository: KBORepository, Sendable {
 #if DEBUG
     nonisolated private func logRequest(_ request: URLRequest, endpoint: Endpoint) {
         let method = request.httpMethod ?? "GET"
-        let urlText = request.url?.absoluteString ?? "nil"
-        print("[LiveAPI] request endpoint=\(endpoint.path) method=\(method) url=\(urlText)")
+        let bodyBytes = request.httpBody?.count ?? 0
+        print("[LiveAPI] request endpoint=\(endpoint.path) method=\(method) bodyBytes=\(bodyBytes)")
     }
 #endif
 
