@@ -8,6 +8,20 @@
 import Foundation
 import os
 
+private enum WidgetStoreFileSecurity {
+    nonisolated static let protectionType = FileProtectionType.completeUntilFirstUserAuthentication
+
+    nonisolated static func applyProtection(
+        to fileURL: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        try fileManager.setAttributes(
+            [.protectionKey: protectionType],
+            ofItemAtPath: fileURL.path
+        )
+    }
+}
+
 enum FavoriteTeamScheduleWidgetShared {
     static let appGroupIdentifier = "group.com.chogm.kboScore"
     static let widgetKind = "FavoriteTeamScheduleWidgetV2"
@@ -68,11 +82,12 @@ enum FavoriteTeamScheduleWidgetShared {
 
         do {
             try encoded.write(to: fileURL, options: .atomic)
+            try WidgetStoreFileSecurity.applyProtection(to: fileURL)
             logger.log(
-                "Widget store write success path=\(fileURL.path, privacy: .public) favoriteTeamID=\(store.favoriteTeamID ?? "nil", privacy: .public) snapshot=\(store.snapshot == nil ? "nil" : "present", privacy: .public)"
+                "Widget store write success snapshot=\(store.snapshot == nil ? "nil" : "present", privacy: .public)"
             )
         } catch {
-            logger.error("Widget store write failed path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            logger.error("Widget store write failed error=\(error.localizedDescription, privacy: .private)")
         }
     }
 
@@ -82,34 +97,34 @@ enum FavoriteTeamScheduleWidgetShared {
             return StoreLoadResult(store: nil, issue: .appGroupUnavailable)
         }
 
-        logger.log("Widget store container resolved path=\(fileURL.path, privacy: .public)")
+        logger.log("Widget store container resolved")
 
         do {
             let data = try Data(contentsOf: fileURL)
-            logger.log("Widget store read success path=\(fileURL.path, privacy: .public) bytes=\(data.count)")
+            logger.log("Widget store read success bytes=\(data.count)")
             let store = try JSONDecoder().decode(Store.self, from: data)
             logger.log(
-                "Widget store decode success favoriteTeamID=\(store.favoriteTeamID ?? "nil", privacy: .public) snapshot=\(store.snapshot == nil ? "nil" : "present", privacy: .public)"
+                "Widget store decode success snapshot=\(store.snapshot == nil ? "nil" : "present", privacy: .public)"
             )
             return StoreLoadResult(store: store, issue: nil)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            logger.log("Widget store read result: no shared file path=\(fileURL.path, privacy: .public)")
+            logger.log("Widget store read result: no shared file")
             return StoreLoadResult(store: nil, issue: .noSharedFile)
         } catch let error as DecodingError {
-            logger.error("Widget store decode failed path=\(fileURL.path, privacy: .public) error=\(String(describing: error), privacy: .public)")
+            logger.error("Widget store decode failed error=\(String(describing: error), privacy: .private)")
             return StoreLoadResult(store: nil, issue: .fileDecodeFailed)
         } catch {
-            logger.error("Widget store read failed path=\(fileURL.path, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+            logger.error("Widget store read failed error=\(error.localizedDescription, privacy: .private)")
             return StoreLoadResult(store: nil, issue: .fileReadFailed)
         }
     }
 
     private static var sharedFileURL: URL? {
         guard let containerURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
-            logger.error("App Group container resolution failed identifier=\(appGroupIdentifier, privacy: .public)")
+            logger.error("App Group container resolution failed")
             return nil
         }
-        logger.log("App Group container resolved identifier=\(appGroupIdentifier, privacy: .public) path=\(containerURL.path, privacy: .public)")
+        logger.log("App Group container resolved")
         return containerURL.appendingPathComponent(storeFilename, isDirectory: false)
     }
 
@@ -117,7 +132,7 @@ enum FavoriteTeamScheduleWidgetShared {
         do {
             return try JSONEncoder().encode(store)
         } catch {
-            logger.error("Failed encoding widget store: \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed encoding widget store error=\(error.localizedDescription, privacy: .private)")
             return nil
         }
     }
