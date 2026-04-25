@@ -10,6 +10,7 @@
 		0E9566BEBD854D9D1E4A685A /* FavoriteTeamGameActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */; };
 		227A8A4633A90B208DCEED71 /* KBOScoreLiveActivityWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5507D843B43777EF9137F4D7 /* KBOScoreLiveActivityWidgetBundle.swift */; };
 		66094892F9D497AF3F3E00DA /* kboScoreLiveActivityExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 5A818B794AC5135F972E9147 /* kboScoreLiveActivityExtension.appex */; };
+		9A7B13E42F9B0BC500A2FCEA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 9A7B13E32F9B0BC500A2FCEA /* Supabase */; };
 		A1B2C3D4E5F6000000000001 /* FavoriteTeamScheduleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000003 /* FavoriteTeamScheduleWidget.swift */; };
 		A1B2C3D4E5F6000000000002 /* FavoriteTeamScheduleWidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */; };
 		A1B2C3D4E5F6000000000006 /* kboScore/Models/Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */; };
@@ -119,6 +120,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9A7B13E42F9B0BC500A2FCEA /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -231,6 +233,9 @@
 				9ACDD1AF2F7418770049BF00 /* kboScore */,
 			);
 			name = kboScore;
+			packageProductDependencies = (
+				9A7B13E32F9B0BC500A2FCEA /* Supabase */,
+			);
 			productName = kboScore;
 			productReference = 9ACDD1AD2F7418770049BF00 /* kboScore.app */;
 			productType = "com.apple.product-type.application";
@@ -309,6 +314,9 @@
 			);
 			mainGroup = 9ACDD1A42F7418770049BF00;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				9A7B13E22F9B0BC500A2FCEA /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9ACDD1AE2F7418770049BF00 /* Products */;
 			projectDirPath = "";
@@ -843,6 +851,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		9A7B13E22F9B0BC500A2FCEA /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9A7B13E32F9B0BC500A2FCEA /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 9A7B13E22F9B0BC500A2FCEA /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9ACDD1A52F7418770049BF00 /* Project object */;
 }
