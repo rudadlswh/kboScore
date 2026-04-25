@@ -18,6 +18,9 @@ build/
 DerivedData/
 *.xcuserdatad/
 
+# Local app config
+kboScore/Config/Secrets.local.xcconfig
+
 # IDE
 .idea/
 

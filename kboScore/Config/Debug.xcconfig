@@ -4,7 +4,10 @@
 //
 //  Created by 조경민 on 4/24/26.
 //
-#include? "Secrets.local.xcconfig"
+// Info-Debug.plist resolves SupabaseURL and SupabasePublishableKey from these
+// build settings. Keep Debug defaults here, and let the ignored local file
+// override them when a developer needs a local environment.
+SUPABASE_URL = https://pbfancqzynkialupleys.supabase.co
+SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
 
-SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
-SUPABASE_PUBLISHABLE_KEY = $(SUPABASE_PUBLISHABLE_KEY)
+#include? "Secrets.local.xcconfig"
