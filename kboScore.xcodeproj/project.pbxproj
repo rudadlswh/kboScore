@@ -78,6 +78,7 @@
 			membershipExceptions = (
 				Config/Debug.xcconfig,
 				Config/Release.xcconfig,
+				Config/Secrets.local.xcconfig,
 				Config/Secrets.local.xcconfig.example,
 			);
 			target = 9ACDD1AC2F7418770049BF00 /* kboScore */;

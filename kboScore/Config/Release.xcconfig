@@ -7,5 +7,5 @@
 // Info-Release.plist resolves SupabaseURL and SupabasePublishableKey from these
 // build settings. Release should define production-safe defaults here and
 // should not read developer-local overrides.
-SUPABASE_URL = https://pbfancqzynkialupleys.supabase.co
+SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
