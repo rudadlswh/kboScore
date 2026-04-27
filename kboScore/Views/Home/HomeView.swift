@@ -50,6 +50,11 @@ struct HomeView: View {
             if let statusMessage = appModel.statusMessage(for: .home) {
                 DataStatusBannerView(message: statusMessage)
             }
+#if DEBUG
+            if let debugMessage = appModel.debugHomeFallbackDiagnosticMessage {
+                DataStatusBannerView(message: debugMessage)
+            }
+#endif
 
             SectionTitleView(title: "직관 기록")
             MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
@@ -98,6 +103,11 @@ struct HomeView: View {
             if let statusMessage = appModel.statusMessage(for: .home) {
                 DataStatusBannerView(message: statusMessage)
             }
+#if DEBUG
+            if let debugMessage = appModel.debugHomeFallbackDiagnosticMessage {
+                DataStatusBannerView(message: debugMessage)
+            }
+#endif
 
 
             if appModel.todayGames.isEmpty {

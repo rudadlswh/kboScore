@@ -398,7 +398,8 @@ final class AppModel {
     }
 
     var todayGames: [GameDetail] {
-        games.filter { calendar.isDateInToday($0.scheduledStart) }
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        return games.filter { scheduleDayKey(for: $0.scheduledStart) == todayKey }
             .sorted(by: todayGameComparator)
     }
 
@@ -449,14 +450,14 @@ final class AppModel {
     }
 
     var homeFallbackTitleText: String {
-        guard let weekNumber = homeFallbackWeekNumber else {
+        guard homeFallbackWeekNumber != nil else {
             return "직전 완료 경기 기준 순위"
         }
         return "주간 순위"
     }
 
     var homeFallbackSubtitleText: String {
-        guard let weekNumber = homeFallbackWeekNumber else {
+        guard homeFallbackWeekNumber != nil else {
             return "오늘 경기가 없어 기준일 이전 완료 경기로 표시합니다."
         }
         return "오늘 경기가 없어 직전주차 기준 순위를 표시합니다."
@@ -498,7 +499,7 @@ final class AppModel {
     }
 
     private var homeFallbackCompletedRegularSeasonGamesBeforeToday: [GameDetail] {
-        let cutoffDate = homeFallbackScheduleCalendar.startOfDay(for: Date())
+        let cutoffDate = homeFallbackScheduleCalendar.startOfDay(for: currentDateProvider())
         return regularSeasonGames
             .filter { $0.scheduledStart < cutoffDate }
             .filter(\.hasCompleteFinalScore)
@@ -644,8 +645,13 @@ final class AppModel {
 
     var myTeamRecentResult: GameDetail? {
         guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
+        let todayKey = scheduleDayKey(for: currentDateProvider())
         return games
-            .filter { $0.involves(teamID: favoriteTeamID) && $0.status.isFinishedLike && !calendar.isDateInToday($0.scheduledStart) }
+            .filter {
+                $0.involves(teamID: favoriteTeamID) &&
+                    $0.status.isFinishedLike &&
+                    scheduleDayKey(for: $0.scheduledStart) != todayKey
+            }
             .sorted { $0.scheduledStart > $1.scheduledStart }
             .first
     }
@@ -728,6 +734,42 @@ final class AppModel {
             )
         }
     }
+
+#if DEBUG
+    var debugStandingsDiagnosticMessage: String? {
+        let completedGames = games.filter(\.hasCompleteFinalScore)
+        let completedRegularSeasonGames = regularSeasonGames.filter(\.hasCompleteFinalScore)
+        let unknownCompletedGames = completedGames.filter { $0.seasonClassification == .unknown }
+
+        if completedGames.isEmpty {
+            return "디버그: 완료 경기 0건입니다. games 쿼리 결과 또는 상태 필터를 확인하세요."
+        }
+
+        if completedRegularSeasonGames.isEmpty {
+            return "디버그: 완료 경기 \(completedGames.count)건, 정규시즌 완료 경기 0건, 미분류 완료 경기 \(unknownCompletedGames.count)건"
+        }
+
+        if let commonUnavailableReason = commonStandingsUnavailableReason {
+            return "디버그: 정규시즌 완료 경기 \(completedRegularSeasonGames.count)건, 포스트시즌 확률 산출 불가 사유=\(commonUnavailableReason.rawValue)"
+        }
+
+        return nil
+    }
+
+    var debugHomeFallbackDiagnosticMessage: String? {
+        guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return nil }
+
+        let cutoffDate = homeFallbackScheduleCalendar.startOfDay(for: currentDateProvider())
+        let completedGamesBeforeToday = games.filter { $0.hasCompleteFinalScore && $0.scheduledStart < cutoffDate }
+
+        if completedGamesBeforeToday.isEmpty {
+            return "디버그: 오늘 이전 완료 경기 0건입니다. 요청 범위 또는 상태 필터를 확인하세요."
+        }
+
+        let unknownCompletedGames = completedGamesBeforeToday.filter { $0.seasonClassification == .unknown }
+        return "디버그: 오늘 이전 완료 경기 \(completedGamesBeforeToday.count)건, 홈 폴백용 정규시즌 완료 경기 \(homeFallbackCompletedRegularSeasonGamesBeforeToday.count)건, 미분류 완료 경기 \(unknownCompletedGames.count)건"
+    }
+#endif
 
     func scheduleGames(on date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let selectedDayKey = scheduleDayKey(for: date)
@@ -1294,6 +1336,12 @@ final class AppModel {
         }
 
         isShowingStaleData = snapshot.isUsingStaleCache || isGamesStale || isNotificationsStale
+
+        #if DEBUG
+        if dataSets.contains(.games) {
+            logGameDiagnostics(context: "refreshRepositoryDebugInfo")
+        }
+        #endif
     }
 
     private func applyRepositoryDebugSnapshot(_ snapshot: RepositoryDebugSnapshot) {
@@ -1310,6 +1358,27 @@ final class AppModel {
         debugLocalBootstrapResolvedPath = snapshot.localBootstrapResolvedPath
         debugLocalBootstrapLoadedAt = snapshot.localBootstrapLoadedAt
     }
+
+#if DEBUG
+    private var commonStandingsUnavailableReason: PostseasonProbabilityUnavailableReason? {
+        let reasons = Set(standingsSnapshots.compactMap(\.postseasonProbabilityUnavailableReason))
+        guard reasons.count == 1 else { return nil }
+        return reasons.first
+    }
+
+    private func logGameDiagnostics(context: String) {
+        let completedGames = games.filter(\.hasCompleteFinalScore)
+        let completedRegularSeasonGames = regularSeasonGames.filter(\.hasCompleteFinalScore)
+        let fallbackCompletedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
+        let backend = debugBaseURL ?? "<none>"
+        let standingsReason = commonStandingsUnavailableReason?.rawValue ?? "none"
+        let homeReason = debugHomeFallbackDiagnosticMessage ?? "none"
+
+        print("[StandingsDebug] context=\(context) backend=\(backend) schema=\(SupabaseConfiguration.exposedSchema) source=\(debugActiveDataSource) delivery=\(debugDeliverySource)")
+        print("[StandingsDebug] endpoint=rest/v1/games standingsMode=local-calculation todayKST=\(scheduleDayKey(for: currentDateProvider())) gameCount=\(games.count) completedGames=\(completedGames.count) completedRegularSeasonGames=\(completedRegularSeasonGames.count)")
+        print("[StandingsDebug] homeFallbackCompletedGames=\(fallbackCompletedGames.count) homeFallbackSnapshots=\(homeFallbackStandingsSnapshots.count) standingsReason=\(standingsReason) homeReason=\(homeReason)")
+    }
+#endif
 
     private func shouldReloadBootstrapForLocalData() async -> Bool {
         if repository is BundledJSONKBORepository {

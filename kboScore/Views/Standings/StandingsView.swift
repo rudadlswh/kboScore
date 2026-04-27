@@ -44,6 +44,11 @@ struct StandingsView: View {
 
     private var defaultContent: some View {
         VStack(alignment: .leading, spacing: 12) {
+#if DEBUG
+            if let debugMessage = appModel.debugStandingsDiagnosticMessage {
+                DataStatusBannerView(message: debugMessage)
+            }
+#endif
             if appModel.standingsSnapshots.isEmpty {
                 EmptyStateView(
                     systemImage: "list.number",
@@ -65,6 +70,11 @@ struct StandingsView: View {
     private func stadiumContent(_ palette: StadiumPalette) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             //standingsHeader(palette)
+#if DEBUG
+            if let debugMessage = appModel.debugStandingsDiagnosticMessage {
+                DataStatusBannerView(message: debugMessage)
+            }
+#endif
 
             if appModel.standingsSnapshots.isEmpty {
                 EmptyStateView(

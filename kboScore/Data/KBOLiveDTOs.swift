@@ -556,7 +556,7 @@ enum KBODataMapper {
             return .rainDelay
         }
 
-        if normalized.contains("final") || normalized.contains("finished") || normalized.contains("ended") || normalized.contains("종료") || normalized.contains("경기종료") {
+        if normalized.contains("final") || normalized.contains("finished") || normalized.contains("ended") || normalized.contains("completed") || normalized.contains("종료") || normalized.contains("경기종료") {
             return .final
         }
 

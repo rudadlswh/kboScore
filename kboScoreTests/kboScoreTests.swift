@@ -935,6 +935,81 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText.contains("패") == false)
     }
 
+    @Test func homeFallbackUsesRecentCompletedGamesWhenTodayHasNoGames() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let completedGame = makeGameDetail(
+            id: UUID(uuidString: "92500000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-04-26T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260426OBLG0"
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [completedGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-27T09:00:00+09:00") }
+        )
+
+        #expect(model.todayGames.isEmpty)
+        #expect(model.homeFallbackStandingsSnapshots.isEmpty == false)
+        #expect(model.homeFallbackStandingsSnapshots.first?.wins == 1)
+    }
+
+    @Test func todayGamesUseKSTDateFiltering() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let earlyKSTGame = makeGameDetail(
+            id: UUID(uuidString: "92600000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-04-27T00:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let previousKSTGame = makeGameDetail(
+            id: UUID(uuidString: "92600000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-04-26T23:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 1,
+            homeScore: 3,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [earlyKSTGame, previousKSTGame],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-27T09:00:00+09:00") }
+        )
+
+        #expect(model.todayGames.count == 1)
+        #expect(model.todayGames.first?.id == earlyKSTGame.id)
+    }
+
     @Test func standingsWinningStreakFireOnlyShowsForActiveThreeGameWinStreak() async throws {
         let base = MockKBOData.makeBootstrap(now: Date())
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -1104,6 +1179,7 @@ struct kboScoreTests {
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
         #expect(KBODataMapper.mapGameStatus(code: "finished", text: nil) == .final)
+        #expect(KBODataMapper.mapGameStatus(code: "completed", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
@@ -3684,6 +3760,7 @@ struct kboScoreTests {
                 [
                   {
                     "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260424-DOO-LG",
                     "provider": "kbo",
                     "provider_game_id": "20260424LGDO0",
                     "game_date": "2026-04-24",
@@ -3719,6 +3796,7 @@ struct kboScoreTests {
         #expect(game.homeTeam.id == "doosan")
         #expect(game.providerGameID == "20260424LGDO0")
         #expect(game.status == .final)
+        #expect(game.seasonClassification == .regularSeason)
         #expect(game.note?.contains("provider_game_id=20260424LGDO0") == true)
         #expect(components.year == 2026)
         #expect(components.month == 4)

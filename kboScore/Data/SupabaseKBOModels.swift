@@ -8,6 +8,8 @@
 import Foundation
 
 struct SupabaseConfiguration: Sendable {
+    nonisolated static let exposedSchema = "kbo_crawler_api"
+
     let url: URL
     let publishableKey: String
 }
@@ -51,6 +53,7 @@ struct SupabaseTeamRow: Decodable, Sendable {
 
 struct SupabaseGameRow: Codable, Sendable {
     let id: UUID
+    let publicGameID: String?
     let provider: String?
     let providerGameID: String?
     let gameDate: String
@@ -71,6 +74,7 @@ struct SupabaseGameRow: Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case publicGameID = "public_game_id"
         case provider
         case providerGameID = "provider_game_id"
         case gameDate = "game_date"
@@ -93,6 +97,7 @@ struct SupabaseGameRow: Codable, Sendable {
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
+        publicGameID = try container.decodeIfPresent(String.self, forKey: .publicGameID)
         provider = try container.decodeIfPresent(String.self, forKey: .provider)
         providerGameID = try container.decodeIfPresent(String.self, forKey: .providerGameID)
         gameDate = try container.decode(String.self, forKey: .gameDate)
@@ -175,6 +180,7 @@ enum SupabaseKBOMapper {
         let resolvedStatus = statusText(for: row)
         let scheduledStart = row.scheduledAt ?? SupabaseDateParser.parseGameDate(row.gameDate) ?? .distantPast
         let venue = row.stadium?.nilIfBlank ?? row.stadiumCode?.nilIfBlank ?? "장소 미정"
+        let seasonClassification = inferredSeasonClassification(for: row, providerGameID: resolvedProviderGameID)
 
         return KBOGameDTO(
             id: row.id,
@@ -187,7 +193,7 @@ enum SupabaseKBOMapper {
             homeScore: row.homeScore,
             statusCode: nil,
             statusText: resolvedStatus,
-            seasonClassification: nil,
+            seasonClassification: seasonClassification.rawValue,
             inningText: row.inningState?.nilIfBlank,
             bases: nil,
             balls: nil,
@@ -237,6 +243,40 @@ enum SupabaseKBOMapper {
             return "cancelled"
         }
         return row.status?.nilIfBlank ?? row.inningState?.nilIfBlank
+    }
+
+    nonisolated private static func inferredSeasonClassification(
+        for row: SupabaseGameRow,
+        providerGameID: String?
+    ) -> GameSeasonClassification {
+        let searchableText = [
+            providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            row.publicGameID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            row.provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+
+        if searchableText.contains("kbo_pre") ||
+            searchableText.contains("preseason") ||
+            searchableText.contains("exhibition") {
+            return .exhibitionPreseason
+        }
+
+        if searchableText.contains("wildcard") ||
+            searchableText.contains("playoff") ||
+            searchableText.contains("koreanseries") ||
+            searchableText.contains("postseason") {
+            return .postseason
+        }
+
+        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.count >= 8,
+           providerGameID.prefix(8).allSatisfy(\.isNumber) {
+            return .regularSeason
+        }
+
+        return .unknown
     }
 
     nonisolated private static func normalizeTeamCode(_ rawValue: String) -> String {

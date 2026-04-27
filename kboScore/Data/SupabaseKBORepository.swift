@@ -127,10 +127,14 @@ import Supabase
 
 // Read-only client for public KBO tables exposed through Supabase's HTTP API layer.
 struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
+    private let baseURL: URL
+    private let schemaName: String
     private let client: SupabaseClient
     private let calendar: Calendar
 
     init(configuration: SupabaseConfiguration) {
+        self.baseURL = configuration.url
+        self.schemaName = SupabaseConfiguration.exposedSchema
         self.client = SupabaseClient(
             supabaseURL: configuration.url,
             supabaseKey: configuration.publishableKey
@@ -140,31 +144,31 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         self.calendar = calendar
 
         #if DEBUG
-        print("[SupabaseConfig] client initialized host=\(configuration.url.host ?? "<none>")")
+        print("[SupabaseConfig] client initialized host=\(configuration.url.host ?? "<none>") schema=\(schemaName)")
         #endif
     }
 
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchTeams start")
+        print("[SupabaseKBO] fetchTeams start schema=\(schemaName) table=teams baseURL=\(baseURL.absoluteString)")
         #endif
-        let rows: [SupabaseTeamRow] = try await client
+        let rows: [SupabaseTeamRow] = try await database
             .from("teams")
             .select()
             .order("team_code", ascending: true)
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchTeams success count=\(rows.count)")
+        print("[SupabaseKBO] fetchTeams success schema=\(schemaName) table=teams count=\(rows.count)")
         #endif
         return rows
     }
 
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchGames query start")
+        print("[SupabaseKBO] fetchGames query start schema=\(schemaName) table=games dateRange=all")
         #endif
-        let rows: [SupabaseGameRow] = try await client
+        let rows: [SupabaseGameRow] = try await database
             .from("games")
             .select()
             .order("game_date", ascending: true)
@@ -172,7 +176,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames success count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames success schema=\(schemaName) table=games count=\(rows.count)")
         #endif
         return rows
     }
@@ -180,9 +184,11 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         let interval = monthInterval(for: month)
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(month:) query start month=\(month.yearMonthText)")
+        print(
+            "[SupabaseKBO] fetchGames(month:) query start schema=\(schemaName) table=games month=\(month.yearMonthText) dateRange=\(gameDateString(interval.start))...\(gameDateString(interval.end))"
+        )
         #endif
-        let rows: [SupabaseGameRow] = try await client
+        let rows: [SupabaseGameRow] = try await database
             .from("games")
             .select()
             .gte("game_date", value: gameDateString(interval.start))
@@ -192,19 +198,25 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(month:) success month=\(month.yearMonthText) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(month:) success schema=\(schemaName) table=games month=\(month.yearMonthText) count=\(rows.count)")
         #endif
         return rows
     }
 
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
-        let rows: [SupabaseGameRow] = try await client
+        #if DEBUG
+        print("[SupabaseKBO] fetchGames(date:) query start schema=\(schemaName) table=games date=\(gameDateString(date))")
+        #endif
+        let rows: [SupabaseGameRow] = try await database
             .from("games")
             .select()
             .eq("game_date", value: gameDateString(date))
             .order("scheduled_at", ascending: true)
             .execute()
             .value
+        #if DEBUG
+        print("[SupabaseKBO] fetchGames(date:) success schema=\(schemaName) table=games date=\(gameDateString(date)) count=\(rows.count)")
+        #endif
         return rows
     }
 
@@ -214,7 +226,10 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             return []
         }
 
-        let rows: [SupabaseGameRow] = try await client
+        #if DEBUG
+        print("[SupabaseKBO] fetchGames(teamID:) query start schema=\(schemaName) table=games teamID=\(teamID)")
+        #endif
+        let rows: [SupabaseGameRow] = try await database
             .from("games")
             .select()
             .or("home_team_id.eq.\(teamUUID.uuidString),away_team_id.eq.\(teamUUID.uuidString)")
@@ -222,7 +237,14 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .order("scheduled_at", ascending: true)
             .execute()
             .value
+        #if DEBUG
+        print("[SupabaseKBO] fetchGames(teamID:) success schema=\(schemaName) table=games teamID=\(teamID) count=\(rows.count)")
+        #endif
         return rows
+    }
+
+    private var database: PostgrestClient {
+        client.schema(schemaName)
     }
 
     nonisolated private func monthInterval(for month: KBOMonthScheduleKey) -> DateInterval {
