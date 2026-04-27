@@ -3064,6 +3064,63 @@ struct kboScoreTests {
         #expect(signals["team2"]?.unknownClassificationGames == 1)
     }
 
+    @Test func localProbabilityCalculatorDoesNotTreatMappedSupabaseRegularSeasonRowsAsUnknown() throws {
+        let awayTeamID = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "bbbbbbbb-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "cccccccc-3333-3333-3333-333333333333")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "team1", name: "팀1", shortName: "T1"),
+            SupabaseTeamRow(id: homeTeamID, code: "team2", name: "팀2", shortName: "T2")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260424-TEAM1-TEAM2",
+                    "provider": "kbo",
+                    "provider_game_id": "sched-202604241830-team1-team2",
+                    "game_date": "2026-04-24",
+                    "scheduled_at": "2026-04-24T18:30:00+09:00",
+                    "stadium": "잠실",
+                    "status": "final",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": 2,
+                    "away_score": 4,
+                    "inning_state": "경기종료",
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "source_updated_at": "2026-04-24T21:45:00+09:00",
+                    "updated_at": "2026-04-24T21:45:00+09:00",
+                    "stadium_code": "JMS"
+                  }
+                ]
+                """.utf8
+            )
+        )
+        let teams = SupabaseKBOMapper.mapTeams(teamRows)
+        let games = SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows)
+        let calculator = LocalPostseasonQualificationCalculator(
+            regularSeasonLength: 1,
+            postseasonQualifierCount: 1,
+            simulationCount: 10
+        )
+
+        let signals = calculator.makeSignals(teams: teams, games: games)
+
+        #expect(games.count == 1)
+        #expect(games[0].seasonClassification == .regularSeason)
+        #expect(signals["team1"]?.unknownClassificationGames == 0)
+        #expect(signals["team2"]?.unknownClassificationGames == 0)
+        #expect(signals["team1"]?.postseasonProbabilityUnavailableReason != .unknownClassificationGames)
+        #expect(signals["team2"]?.postseasonProbabilityUnavailableReason != .unknownClassificationGames)
+        #expect(signals["team1"]?.postseasonQualificationProbability != nil)
+        #expect(signals["team2"]?.postseasonQualificationProbability != nil)
+    }
+
     @Test func snapshotShowsUnavailablePostseasonProbabilityStateWhenReasonExists() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -3803,6 +3860,137 @@ struct kboScoreTests {
         #expect(components.day == 24)
         #expect(components.hour == 18)
         #expect(components.minute == 30)
+    }
+
+    @Test func supabaseMapperTreatsValidKBOGameDateAsRegularSeasonWithoutNumericProviderGameID() throws {
+        let awayTeamID = UUID(uuidString: "44444444-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "55555555-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "66666666-3333-3333-3333-333333333333")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lg", name: "LG 트윈스", shortName: "LG"),
+            SupabaseTeamRow(id: homeTeamID, code: "doosan", name: "두산 베어스", shortName: "두산")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260425-DOO-LG",
+                    "provider": "kbo",
+                    "provider_game_id": "sched-202604251830-lg-doosan",
+                    "game_date": "2026-04-25",
+                    "scheduled_at": "2026-04-25T18:30:00+09:00",
+                    "stadium": "잠실",
+                    "status": "scheduled",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": null,
+                    "away_score": null,
+                    "inning_state": null,
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "source_updated_at": "2026-04-24T21:45:00+09:00",
+                    "updated_at": "2026-04-24T21:45:00+09:00",
+                    "stadium_code": "JMS"
+                  }
+                ]
+                """.utf8
+            )
+        )
+
+        let game = try #require(SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows).first)
+
+        #expect(game.providerGameID == "sched-202604251830-lg-doosan")
+        #expect(game.seasonClassification == .regularSeason)
+        #expect(game.status == .upcoming)
+    }
+
+    @Test func supabaseMapperPreservesExplicitPreseasonMarker() throws {
+        let awayTeamID = UUID(uuidString: "77777777-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "88888888-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "99999999-3333-3333-3333-333333333333")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lg", name: "LG 트윈스", shortName: "LG"),
+            SupabaseTeamRow(id: homeTeamID, code: "doosan", name: "두산 베어스", shortName: "두산")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "KBO_PRE_20260314-LG-DOO",
+                    "provider": "kbo",
+                    "provider_game_id": "kbo_pre_20260314LGDO0",
+                    "game_date": "2026-03-14",
+                    "scheduled_at": "2026-03-14T13:00:00+09:00",
+                    "stadium": "잠실",
+                    "status": "scheduled",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": null,
+                    "away_score": null,
+                    "inning_state": null,
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "source_updated_at": "2026-03-13T09:00:00+09:00",
+                    "updated_at": "2026-03-13T09:00:00+09:00",
+                    "stadium_code": "JMS"
+                  }
+                ]
+                """.utf8
+            )
+        )
+
+        let game = try #require(SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows).first)
+
+        #expect(game.seasonClassification == .exhibitionPreseason)
+    }
+
+    @Test func supabaseMapperPreservesExplicitPostseasonMarker() throws {
+        let awayTeamID = UUID(uuidString: "aaaaaaaa-4444-4444-4444-444444444444")!
+        let homeTeamID = UUID(uuidString: "bbbbbbbb-5555-5555-5555-555555555555")!
+        let gameID = UUID(uuidString: "cccccccc-6666-6666-6666-666666666666")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lg", name: "LG 트윈스", shortName: "LG"),
+            SupabaseTeamRow(id: homeTeamID, code: "doosan", name: "두산 베어스", shortName: "두산")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20261012-WILDCARD-LG-DOO",
+                    "provider": "kbo",
+                    "provider_game_id": "wildcard-20261012LGDO0",
+                    "game_date": "2026-10-12",
+                    "scheduled_at": "2026-10-12T18:30:00+09:00",
+                    "stadium": "잠실",
+                    "status": "scheduled",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": null,
+                    "away_score": null,
+                    "inning_state": null,
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "source_updated_at": "2026-10-11T09:00:00+09:00",
+                    "updated_at": "2026-10-11T09:00:00+09:00",
+                    "stadium_code": "JMS"
+                  }
+                ]
+                """.utf8
+            )
+        )
+
+        let game = try #require(SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows).first)
+
+        #expect(game.seasonClassification == .postseason)
     }
 
     @Test func supabaseTeamRowDecodesLegacyTeamCodeColumn() throws {

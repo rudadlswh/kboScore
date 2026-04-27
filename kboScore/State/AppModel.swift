@@ -1370,13 +1370,22 @@ final class AppModel {
         let completedGames = games.filter(\.hasCompleteFinalScore)
         let completedRegularSeasonGames = regularSeasonGames.filter(\.hasCompleteFinalScore)
         let fallbackCompletedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
+        let preseasonGames = games.filter { $0.seasonClassification == .exhibitionPreseason }
+        let postseasonGames = games.filter { $0.seasonClassification == .postseason }
+        let unknownGames = games.filter { $0.seasonClassification == .unknown }
         let backend = debugBaseURL ?? "<none>"
         let standingsReason = commonStandingsUnavailableReason?.rawValue ?? "none"
         let homeReason = debugHomeFallbackDiagnosticMessage ?? "none"
 
         print("[StandingsDebug] context=\(context) backend=\(backend) schema=\(SupabaseConfiguration.exposedSchema) source=\(debugActiveDataSource) delivery=\(debugDeliverySource)")
         print("[StandingsDebug] endpoint=rest/v1/games standingsMode=local-calculation todayKST=\(scheduleDayKey(for: currentDateProvider())) gameCount=\(games.count) completedGames=\(completedGames.count) completedRegularSeasonGames=\(completedRegularSeasonGames.count)")
+        print("[StandingsDebug] classificationCounts total=\(games.count) regularSeason=\(regularSeasonGames.count) preseason=\(preseasonGames.count) postseason=\(postseasonGames.count) unknown=\(unknownGames.count)")
         print("[StandingsDebug] homeFallbackCompletedGames=\(fallbackCompletedGames.count) homeFallbackSnapshots=\(homeFallbackStandingsSnapshots.count) standingsReason=\(standingsReason) homeReason=\(homeReason)")
+        for (index, game) in unknownGames.prefix(5).enumerated() {
+            print(
+                "[StandingsDebug] unknownGameSample index=\(index + 1) providerGameID=\(game.providerGameID ?? "<nil>") scheduledStart=\(game.scheduledStart.ISO8601Format()) status=\(game.status.rawValue) note=\(game.note ?? "<nil>")"
+            )
+        }
     }
 #endif
 
