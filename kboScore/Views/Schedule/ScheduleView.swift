@@ -7,6 +7,27 @@
 
 import SwiftUI
 
+enum ScheduleDayResultAppearance: Equatable, Sendable {
+    case win
+    case loss
+    case draw
+    case neutral
+
+    static func from(dominantStatus: GameStatus?, favoriteTeamResult: TeamGameResult?) -> ScheduleDayResultAppearance {
+        guard dominantStatus == .final, let favoriteTeamResult else {
+            return .neutral
+        }
+        switch favoriteTeamResult {
+        case .win:
+            return .win
+        case .loss:
+            return .loss
+        case .tie:
+            return .draw
+        }
+    }
+}
+
 struct ScheduleView: View {
     @Environment(AppModel.self) private var appModel
     @State private var displayedMonth = Date()
@@ -54,6 +75,9 @@ struct ScheduleView: View {
             .task(id: scheduleTaskID) {
                 await normalizeDisplayedMonth()
             }
+            .task(id: selectedDateTaskID) {
+                await appModel.loadScheduleDayIfNeeded(for: selectedDate)
+            }
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
             }
@@ -65,6 +89,10 @@ struct ScheduleView: View {
         return "\(scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(key.yearMonthText)"
     }
 
+    private var selectedDateTaskID: String {
+        "\(scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(selectedDate.formatted(.dateTime.year().month().day()))"
+    }
+
     private func normalizeDisplayedMonth() async {
         await appModel.loadScheduleIfNeeded(for: displayedMonth)
 
@@ -72,14 +100,17 @@ struct ScheduleView: View {
             return
         }
 
-        if Calendar(identifier: .gregorian).isDate(displayedMonth, equalTo: resolvedMonth, toGranularity: .month) == false {
+        let isSameMonth = Calendar(identifier: .gregorian).isDate(displayedMonth, equalTo: resolvedMonth, toGranularity: .month)
+        if isSameMonth == false {
             displayedMonth = resolvedMonth
         }
         if Calendar(identifier: .gregorian).isDate(selectedDate, equalTo: resolvedMonth, toGranularity: .month) == false {
             selectedDate = appModel.startOfMonth(for: resolvedMonth)
         }
 
-        await appModel.loadScheduleIfNeeded(for: resolvedMonth)
+        if isSameMonth == false {
+            await appModel.loadScheduleIfNeeded(for: resolvedMonth)
+        }
     }
 }
 
@@ -192,7 +223,7 @@ private struct ScheduleCalendarCardView: View {
                                             .padding(.horizontal, 4)
                                             .padding(.vertical, 1)
                                             .background(
-                                                appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent,
+                                                dayGameCountBadgeColor(for: day),
                                                 in: Capsule()
                                             )
                                     }
@@ -376,6 +407,29 @@ private struct ScheduleCalendarCardView: View {
         return day.dominantStatus?.tintColor ?? appModel.currentTheme.accent
     }
 
+    private func dayResultAppearance(for day: MyTeamCalendarDay) -> ScheduleDayResultAppearance {
+        ScheduleDayResultAppearance.from(
+            dominantStatus: day.dominantStatus,
+            favoriteTeamResult: day.favoriteTeamResult
+        )
+    }
+
+    private func dayGameCountBadgeColor(for day: MyTeamCalendarDay) -> Color {
+        switch dayResultAppearance(for: day) {
+        case .win:
+            return KBOLivePalette.upcoming
+        case .loss:
+            return KBOLivePalette.live
+        case .draw:
+            return KBOLivePalette.final
+        case .neutral:
+            if let palette = appModel.favoriteStadiumPalette {
+                return palette.recessedSurface
+            }
+            return appModel.currentTheme.chipBackground
+        }
+    }
+
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             if day.isInDisplayedMonth == false {
@@ -386,15 +440,14 @@ private struct ScheduleCalendarCardView: View {
             case .cancelled:
                 return stadiumNoGameDayBackground(for: day, palette: palette)
             case .final:
-                guard let favoriteTeamResult = day.favoriteTeamResult else {
-                    return palette.elevatedCard
-                }
-                switch favoriteTeamResult {
+                switch dayResultAppearance(for: day) {
                 case .win:
-                    return palette.winDayFill
+                    return KBOLivePalette.upcoming.opacity(0.30)
                 case .loss:
-                    return palette.statusRed.opacity(0.26)
-                case .tie:
+                    return KBOLivePalette.live.opacity(0.26)
+                case .draw:
+                    return KBOLivePalette.final.opacity(0.28)
+                case .neutral:
                     return palette.elevatedCard
                 }
             case .live, .rainDelay, .upcoming, nil:
@@ -406,15 +459,14 @@ private struct ScheduleCalendarCardView: View {
         case .cancelled:
             return defaultNoGameDayBackground
         case .final:
-            guard let favoriteTeamResult = day.favoriteTeamResult else {
-                return defaultNoGameDayBackground
-            }
-            switch favoriteTeamResult {
+            switch dayResultAppearance(for: day) {
             case .win:
                 return KBOLivePalette.upcoming.opacity(0.18)
             case .loss:
                 return KBOLivePalette.live.opacity(0.18)
-            case .tie:
+            case .draw:
+                return KBOLivePalette.final.opacity(0.18)
+            case .neutral:
                 return appModel.currentTheme.chipBackground
             }
         case .live, .rainDelay, .upcoming, nil:

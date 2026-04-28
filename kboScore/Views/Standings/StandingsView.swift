@@ -13,11 +13,7 @@ struct StandingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if let palette = appModel.favoriteStadiumPalette {
-                    stadiumContent(palette)
-                } else {
-                    defaultContent
-                }
+                standingsContent
             }
             .background {
                 if let palette = appModel.favoriteStadiumPalette {
@@ -42,7 +38,7 @@ struct StandingsView: View {
         }
     }
 
-    private var defaultContent: some View {
+    private var standingsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
 #if DEBUG
             if let debugMessage = appModel.debugStandingsDiagnosticMessage {
@@ -56,160 +52,308 @@ struct StandingsView: View {
                     message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
                 )
             } else {
-                LazyVStack(spacing: 8) {
+                standingsTable
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var standingsTable: some View {
+        GeometryReader { proxy in
+            let metrics = StandingsTableMetrics(width: proxy.size.width)
+            let leaderSnapshot = appModel.standingsSnapshots.first
+
+            VStack(spacing: 5) {
+                StandingsTableHeader(metrics: metrics)
+
+                LazyVStack(spacing: 5) {
                     ForEach(appModel.standingsSnapshots) { snapshot in
-                        StandingsRow(snapshot: snapshot)
+                        StandingsRowView(
+                            snapshot: snapshot,
+                            leaderSnapshot: leaderSnapshot,
+                            favoriteTeamID: appModel.settings.favoriteTeamID,
+                            metrics: metrics
+                        )
                     }
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
-    private func stadiumContent(_ palette: StadiumPalette) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            //standingsHeader(palette)
-#if DEBUG
-            if let debugMessage = appModel.debugStandingsDiagnosticMessage {
-                DataStatusBannerView(message: debugMessage)
-            }
-#endif
-
-            if appModel.standingsSnapshots.isEmpty {
-                EmptyStateView(
-                    systemImage: "list.number",
-                    title: "정규시즌 순위 데이터 없음",
-                    message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
-                )
-            } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(appModel.standingsSnapshots) { snapshot in
-                        StandingsRow(snapshot: snapshot)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
-    private func standingsHeader(_ palette: StadiumPalette) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("리그 스코어보드")
-                .font(.headline.weight(.heavy))
-                .foregroundStyle(palette.textPrimary)
-            Text("정규시즌 종료 경기 기준 순위 · 승률 중심 정렬")
-                .font(.caption)
-                .foregroundStyle(palette.textSecondary)
-        }
-        .cardSurface(
-            padding: 12,
-            cornerRadius: 18,
-            fillColor: palette.sectionBackground
-        )
+        .frame(height: CGFloat(appModel.standingsSnapshots.count) * 57 + 18)
     }
 }
 
-private struct StandingsRow: View {
+private struct StandingsTableMetrics {
+    let isCompact: Bool
+
+    init(width: CGFloat) {
+        isCompact = width < 370
+    }
+
+    var rowHeight: CGFloat { isCompact ? 48 : 52 }
+    var horizontalPadding: CGFloat { isCompact ? 6 : 7 }
+    var spacing: CGFloat { 4 }
+    var teamColumnWidth: CGFloat { isCompact ? 76 : 128 }
+    var rankWidth: CGFloat { isCompact ? 22 : 28 }
+    var logoSize: CGFloat { isCompact ? 22 : 30 }
+    var gamesWidth: CGFloat { isCompact ? 24 : 26 }
+    var countWidth: CGFloat { isCompact ? 19 : 20 }
+    var percentageWidth: CGFloat { isCompact ? 38 : 42 }
+    var gamesBehindWidth: CGFloat { isCompact ? 32 : 36 }
+    var streakWidth: CGFloat { isCompact ? 30 : 32 }
+    var accentWidth: CGFloat { isCompact ? 78 : 120 }
+}
+
+private struct StandingsTableHeader: View {
     @Environment(AppModel.self) private var appModel
 
-    let snapshot: TeamStandingsSnapshot
+    let metrics: StandingsTableMetrics
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            rankBadge
+        HStack(spacing: metrics.spacing) {
+            Text("팀")
+                .frame(width: metrics.teamColumnWidth, alignment: .leading)
+            headerLabel("경기", width: metrics.gamesWidth)
+            headerLabel("승", width: metrics.countWidth)
+            headerLabel("패", width: metrics.countWidth)
+            headerLabel("무", width: metrics.countWidth)
+            headerLabel("승률", width: metrics.percentageWidth)
+            headerLabel("게임차", width: metrics.gamesBehindWidth)
+            headerLabel("연속", width: metrics.streakWidth)
+        }
+        .font(.caption2.weight(.bold))
+        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        .padding(.horizontal, metrics.horizontalPadding)
+        .frame(height: 18)
+    }
 
-            TeamMarkView(team: snapshot.team, size: 42)
+    private func headerLabel(_ title: String, width: CGFloat) -> some View {
+        Text(title)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: width, alignment: .trailing)
+    }
+}
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(snapshot.team.displayName)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
-                        .lineLimit(1)
-                    winningStreakIndicator
-                    Text(snapshot.recordText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-                }
+private struct StandingsRowView: View {
+    let snapshot: TeamStandingsSnapshot
+    let leaderSnapshot: TeamStandingsSnapshot?
+    let favoriteTeamID: String?
+    let metrics: StandingsTableMetrics
 
-                HStack(spacing: 10) {
-                    standingsMetric(title: "승률", value: snapshot.winPercentageText)
-                    standingsMetric(title: "최근", value: snapshot.recentResultsText)
-                    if let postseasonValue = snapshot.postseasonQualificationText {
-                        standingsMetric(title: "포스트시즌 확률", value: postseasonValue)
-                    }
-                }
+    var body: some View {
+        ZStack(alignment: .leading) {
+            rowBackground
 
-                if let unavailableReason = snapshot.visiblePostseasonProbabilityUnavailableReason {
-                    Text(unavailableReason.displayText)
-                        .font(.caption2)
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-                        .lineLimit(1)
-                } else if let estimateText = snapshot.postseasonProbabilityEstimateText {
-                    Text(estimateText)
-                        .font(.caption2)
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-                        .lineLimit(1)
-                }
+            TeamLogoAccentView(
+                identity: identity,
+                isFavorite: isFavorite,
+                width: metrics.accentWidth
+            )
+
+            HStack(spacing: metrics.spacing) {
+                teamCell
+                StandingsColumnValue(value: "\(snapshot.gamesPlayed)", width: metrics.gamesWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: "\(snapshot.wins)", width: metrics.countWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: "\(snapshot.losses)", width: metrics.countWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: "\(snapshot.ties)", width: metrics.countWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: snapshot.broadcastWinPercentageText, width: metrics.percentageWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: snapshot.gamesBehindText(leader: leaderSnapshot), width: metrics.gamesBehindWidth, isFavorite: isFavorite)
+                StandingsColumnValue(value: snapshot.currentStreakText, width: metrics.streakWidth, isFavorite: isFavorite)
+            }
+            .padding(.horizontal, metrics.horizontalPadding)
+        }
+        .frame(height: metrics.rowHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(borderColor, lineWidth: isFavorite ? 1 : 0.7)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var teamCell: some View {
+        HStack(spacing: metrics.isCompact ? 4 : 6) {
+            Text("\(snapshot.rank)")
+                .font((isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy)))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
+                .frame(width: metrics.rankWidth, alignment: .trailing)
+
+            if metrics.isCompact == false {
+                TeamMarkView(team: snapshot.team, size: metrics.logoSize)
+                    .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
             }
 
-            Spacer(minLength: 8)
-        }
-        .cardSurface(
-            padding: 12,
-            cornerRadius: 18,
-            fillColor: appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.secondarySystemBackground)
-        )
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill((appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent).opacity(0.9))
-                .frame(width: 4)
-        }
-    }
-
-    private var rankBadge: some View {
-        Group {
-            if let palette = appModel.favoriteStadiumPalette {
-                Text("\(snapshot.rank)")
-                    .font(.title3.weight(.black))
-                    .monospacedDigit()
-                    .foregroundStyle(palette.secondary)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(palette.recessedSurface)
-                    )
-            } else {
-                Text("\(snapshot.rank)")
-                    .font(.headline.weight(.heavy))
-                    .monospacedDigit()
-                    .foregroundStyle(appModel.currentTheme.accent)
-                    .frame(width: 28)
-            }
-        }
-    }
-
-    private var winningStreakIndicator: some View {
-        Text("🔥")
-            .font(.caption)
-            .opacity(snapshot.showsWinningStreakFire ? 1 : 0)
-            .frame(width: 16)
-            .accessibilityLabel("3연승 이상")
-            .accessibilityHidden(snapshot.showsWinningStreakFire == false)
-    }
-
-    private func standingsMetric(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-            Text(value)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+            Text(teamName)
+                .font(.system(size: 15, weight: isFavorite ? .black : .bold, design: .default))
+                .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.96))
                 .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(width: metrics.teamColumnWidth, alignment: .leading)
+    }
+
+    private var rowBackground: some View {
+        Group {
+            if isFavorite {
+                LinearGradient(
+                    colors: [
+                        identity.theme.heroEnd,
+                        identity.theme.accent,
+                        identity.theme.accentSecondary.opacity(0.82)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            } else {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.34, green: 0.34, blue: 0.34),
+                        Color(red: 0.25, green: 0.25, blue: 0.25)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            }
+        }
+    }
+
+    private var identity: TeamIdentity {
+        snapshot.team.identity
+    }
+
+    private var teamName: String {
+        identity.standingsDisplayName
+    }
+
+    private var isFavorite: Bool {
+        snapshot.team.id == favoriteTeamID
+    }
+
+    private var borderColor: Color {
+        isFavorite ? Color.white.opacity(0.28) : Color.white.opacity(0.08)
+    }
+
+    private var accessibilityLabel: String {
+        "\(snapshot.rank)위 \(identity.standingsDisplayName), \(snapshot.wins)승 \(snapshot.losses)패 \(snapshot.ties)무, 승률 \(snapshot.winPercentageText), 게임차 \(snapshot.gamesBehindText(leader: leaderSnapshot)), 연속 \(snapshot.currentStreakText)"
+    }
+}
+
+private struct StandingsColumnValue: View {
+    let value: String
+    let width: CGFloat
+    let isFavorite: Bool
+
+    var body: some View {
+        Text(value)
+            .font(.callout.weight(isFavorite ? .bold : .semibold))
+            .monospacedDigit()
+            .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.92))
+            .lineLimit(1)
+            .minimumScaleFactor(0.74)
+            .frame(width: width, alignment: .trailing)
+    }
+}
+
+private struct TeamLogoAccentView: View {
+    let identity: TeamIdentity
+    let isFavorite: Bool
+    let width: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            LinearGradient(
+                colors: [
+                    identity.theme.accent.opacity(isFavorite ? 0.12 : 0.86),
+                    identity.theme.accent.opacity(isFavorite ? 0.08 : 0.36),
+                    Color.clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            if identity.hasLogoAsset {
+                Image(identity.logoAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .opacity(isFavorite ? 0.18 : 0.14)
+                    .frame(width: width * 0.78, height: 58)
+                    .offset(x: -14)
+            } else {
+                Text(identity.monogram)
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(isFavorite ? 0.14 : 0.10))
+                    .offset(x: 8)
+            }
+        }
+        .frame(width: width)
+        .clipped()
+    }
+}
+
+private extension TeamIdentity {
+    var standingsDisplayName: String {
+        switch id {
+        case "lg":
+            "LG"
+        case "kt":
+            "KT"
+        case "ssg":
+            "SSG"
+        case "samsung":
+            "삼성"
+        case "kia":
+            "KIA"
+        case "hanwha":
+            "한화"
+        case "nc":
+            "NC"
+        case "doosan":
+            "두산"
+        case "lotte":
+            "롯데"
+        case "kiwoom":
+            "키움"
+        default:
+            shortLabel
+        }
+    }
+}
+
+private extension TeamStandingsSnapshot {
+    var broadcastWinPercentageText: String {
+        if winPercentageText.hasPrefix("0.") {
+            return String(winPercentageText.dropFirst())
+        }
+        return winPercentageText
+    }
+
+    var currentStreakText: String {
+        guard let firstResult = recentResults.first else { return "-" }
+
+        var count = 0
+        for result in recentResults {
+            guard result == firstResult else { break }
+            count += 1
+        }
+
+        return "\(count)\(firstResult.shortLabel)"
+    }
+
+    func gamesBehindText(leader: TeamStandingsSnapshot?) -> String {
+        guard let leader else { return "-" }
+        guard rank != leader.rank else { return "-" }
+
+        let gamesBehind = Double((leader.wins - wins) + (losses - leader.losses)) / 2
+        guard gamesBehind > 0 else { return "-" }
+
+        if gamesBehind.rounded(.towardZero) == gamesBehind {
+            return String(format: "%.0f", gamesBehind)
+        }
+        return String(format: "%.1f", gamesBehind)
     }
 }
 

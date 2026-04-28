@@ -162,34 +162,223 @@ private struct HomeHeroGameCard: View {
     let palette: StadiumPalette
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [
-                    palette.sectionBackground,
-                    palette.elevatedCardStrong,
-                    palette.primary.opacity(0.42)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            VStack(alignment: .leading, spacing: 8) {
-                Text("DIGITAL STADIUM")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.8)
-                    .foregroundStyle(palette.textSecondary)
-                GameCardView(
-                    summary: summary,
-                    showsHomeTeamBadge: true
+        ZStack {
+            heroBackground
+
+            VStack(spacing: 14) {
+                HStack(spacing: 8) {
+                    StatusBadge(
+                        status: summary.status,
+                        tintColor: summary.status.stadiumTintColor(palette),
+                        backgroundColor: Color.black.opacity(0.30)
+                    )
+
+                    Spacer(minLength: 8)
+
+                    Text(timeText)
+                        .font(.caption.weight(.heavy))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(0.94))
+                        .lineLimit(1)
+                }
+
+                HStack(alignment: .center, spacing: 0) {
+                    HeroTeamMatchupSide(
+                        team: summary.awayTeam,
+                        role: "원정",
+                        pitcherName: nil,
+                        alignment: .leading
+                    )
+
+                    vsBadge
+
+                    HeroTeamMatchupSide(
+                        team: summary.homeTeam,
+                        role: "홈",
+                        pitcherName: nil,
+                        alignment: .trailing
+                    )
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.and.ellipse")
+                        .font(.caption.weight(.bold))
+                    Text(venueText)
+                        .font(.caption.weight(.bold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .foregroundStyle(Color.white.opacity(0.90))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .frame(maxWidth: .infinity)
+                .background(
+                    Capsule()
+                        .fill(Color.black.opacity(0.26))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.75)
                 )
             }
-            .padding(10)
+            .padding(14)
         }
+        .frame(minHeight: 172)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(palette.ghostBorder, lineWidth: 0.75)
+                .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
         )
-        .shadow(color: palette.ambientShadow.opacity(0.4), radius: 14, y: 8)
+        .shadow(color: palette.ambientShadow.opacity(0.46), radius: 18, y: 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var heroBackground: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                TeamHeroBackground(team: summary.awayTeam, edge: .leading)
+                TeamHeroBackground(team: summary.homeTeam, edge: .trailing)
+            }
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.20),
+                    palette.background.opacity(0.16),
+                    Color.black.opacity(0.22)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    private var vsBadge: some View {
+        ZStack {
+            Circle()
+                .fill(Color.black.opacity(0.34))
+                .frame(width: 58, height: 58)
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                )
+                .shadow(color: Color.white.opacity(0.10), radius: 12)
+
+            Text("VS")
+                .font(.system(size: 23, weight: .black, design: .rounded))
+                .foregroundStyle(Color.white)
+        }
+        .frame(width: 62)
+    }
+
+    private var timeText: String {
+        switch summary.status {
+        case .upcoming:
+            summary.scheduledStart.formatted(date: .omitted, time: .shortened)
+        case .live, .rainDelay:
+            summary.inningText ?? summary.status.title
+        case .final, .cancelled:
+            summary.status.title
+        }
+    }
+
+    private var venueText: String {
+        let venue = summary.venue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard venue.isEmpty == false else { return "장소 미정" }
+        guard let city = stadiumCity(for: venue) else { return venue }
+        return "\(venue) · \(city)"
+    }
+
+    private var accessibilityLabel: String {
+        "\(summary.awayTeam.displayName) 대 \(summary.homeTeam.displayName), 원정 선발 미정, 홈 선발 미정, \(timeText), \(venueText)"
+    }
+
+    private func stadiumCity(for venue: String) -> String? {
+        let normalized = venue.replacingOccurrences(of: " ", with: "")
+        if normalized.contains("잠실") || normalized.contains("고척") { return "서울" }
+        if normalized.contains("사직") { return "부산" }
+        if normalized.contains("랜더스필드") || normalized.contains("문학") { return "인천" }
+        if normalized.contains("위즈파크") || normalized.contains("수원") { return "수원" }
+        if normalized.contains("한화생명") || normalized.contains("대전") { return "대전" }
+        if normalized.contains("라이온즈파크") || normalized.contains("대구") { return "대구" }
+        if normalized.contains("챔피언스필드") || normalized.contains("광주") { return "광주" }
+        if normalized.contains("창원") { return "창원" }
+        return nil
+    }
+}
+
+private struct TeamHeroBackground: View {
+    let team: Team
+    let edge: HorizontalAlignment
+
+    var body: some View {
+        let identity = team.identity
+
+        ZStack(alignment: edge == .leading ? .leading : .trailing) {
+            LinearGradient(
+                colors: [
+                    identity.theme.heroEnd,
+                    identity.theme.accent.opacity(0.82),
+                    identity.theme.heroStart.opacity(0.70)
+                ],
+                startPoint: edge == .leading ? .topLeading : .topTrailing,
+                endPoint: edge == .leading ? .bottomTrailing : .bottomLeading
+            )
+            Color.black.opacity(0.18)
+
+            if identity.hasLogoAsset {
+                Image(identity.logoAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .opacity(0.16)
+                    .frame(width: 132, height: 132)
+                    .offset(x: edge == .leading ? -26 : 26, y: 14)
+            } else {
+                Text(identity.monogram)
+                    .font(.system(size: 58, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.10))
+                    .offset(x: edge == .leading ? -10 : 10, y: 12)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct HeroTeamMatchupSide: View {
+    let team: Team
+    let role: String
+    let pitcherName: String?
+    let alignment: HorizontalAlignment
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 10) {
+            TeamMarkView(team: team, size: 38)
+
+            VStack(alignment: alignment, spacing: 5) {
+                Text(team.identity.displayName)
+                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+
+                VStack(alignment: alignment, spacing: 2) {
+                    Text(role)
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(Color.white.opacity(0.68))
+                    Text(pitcherText)
+                        .font(.subheadline.weight(.heavy))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
+    }
+
+    private var pitcherText: String {
+        let trimmed = pitcherName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "선발 미정" : trimmed
     }
 }
 

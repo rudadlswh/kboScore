@@ -134,6 +134,7 @@ final class AppModel {
     private var notifiedCancellationKeys: Set<String> = []
     var settings: AppSettings {
         didSet {
+            let favoriteTeamChanged = oldValue.favoriteTeamID != settings.favoriteTeamID
             persistSettings()
             scheduleNotificationRegistrationSyncIfNeeded(oldSettings: oldValue)
             if oldValue.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
@@ -142,6 +143,9 @@ final class AppModel {
                     await self?.syncFavoriteTeamLiveActivity()
                     await self?.syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
                 }
+            }
+            if favoriteTeamChanged {
+                invalidateScheduleDerivedCaches()
             }
         }
     }
@@ -157,6 +161,12 @@ final class AppModel {
     private(set) var monthlyScheduleDebugSnapshots: [KBOMonthScheduleKey: RepositoryDebugSnapshot] = [:]
     private(set) var loadingScheduleMonths: Set<KBOMonthScheduleKey> = []
     private(set) var failedScheduleMonths: Set<KBOMonthScheduleKey> = []
+    private var monthlyScheduleRefreshDayKeys: [KBOMonthScheduleKey: String] = [:]
+    private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
+    private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
+    private var scheduleStartupSyncState: ScheduleStartupSyncState = .notStarted
+    private var scheduleCalendarDaysCache: [ScheduleCalendarCacheKey: [MyTeamCalendarDay]] = [:]
+    private var scheduleGamesByDayCache: [ScheduleCalendarCacheKey: [String: [GameDetail]]] = [:]
     private var localStandingsProbabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
     private var localStandingsProbabilityRefreshTask: Task<Void, Never>?
     private var localStandingsProbabilityGeneration = 0
@@ -254,8 +264,9 @@ final class AppModel {
             markRefreshSuccess(for: .games, at: refreshedAt, isStale: false)
             markRefreshSuccess(for: .notifications, at: refreshedAt, isStale: false)
             await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
+            await runStartupScheduleCountCheckIfNeeded()
             await syncFavoriteTeamLiveActivity()
-            await syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
+            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         } catch {
             loadErrorMessage = "데이터를 불러오지 못했습니다."
         }
@@ -270,6 +281,7 @@ final class AppModel {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
         notifications = bootstrap.notifications.sorted { $0.sentAt > $1.sentAt }
+        invalidateScheduleDerivedCaches()
         if refreshProbabilitySignalsSynchronously {
             refreshLocalStandingsProbabilitySignalsSynchronously()
         } else {
@@ -773,8 +785,7 @@ final class AppModel {
 
     func scheduleGames(on date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let selectedDayKey = scheduleDayKey(for: date)
-        let dayGames = filteredScheduleGames(for: date, filter: filter)
-            .filter { scheduleDayKey(for: $0.scheduledStart) == selectedDayKey }
+        let dayGames = groupedScheduleGamesByDay(for: date, filter: filter)[selectedDayKey] ?? []
 
         return dayGames.sorted { lhs, rhs in
             let lhsIsMyTeam = lhs.involves(teamID: settings.favoriteTeamID)
@@ -828,15 +839,12 @@ final class AppModel {
     }
 
     func scheduleCalendarDays(for month: Date, filter: ScheduleFilter) -> [MyTeamCalendarDay] {
-        let monthGames = filteredScheduleGames(for: month, filter: filter)
-        let gamesByDayKey = Dictionary(grouping: monthGames) { scheduleDayKey(for: $0.scheduledStart) }
-        #if DEBUG
-        print("[ScheduleDebug] markerStateNonEmpty=\(gamesByDayKey.isEmpty == false)")
-        if gamesByDayKey.isEmpty == false {
-            let groupedKeys = gamesByDayKey.keys.sorted()
-            print("[ScheduleDebug] groupedCalendarDateKeys=\(groupedKeys)")
+        let cacheKey = makeScheduleCalendarCacheKey(for: month, filter: filter)
+        if let cached = scheduleCalendarDaysCache[cacheKey] {
+            return cached
         }
-        #endif
+
+        let gamesByDayKey = groupedScheduleGamesByDay(for: month, filter: filter)
         let monthStart = startOfMonth(for: month)
         guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
               let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
@@ -851,11 +859,6 @@ final class AppModel {
             let cursorKey = scheduleDayKey(for: cursor)
             let dayGames = gamesByDayKey[cursorKey] ?? []
             let myTeamDayGames = calendarMyTeamGames(for: dayGames)
-            #if DEBUG
-            if calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month) {
-                print("[ScheduleDebug] calendarLookup date=\(cursorKey) gameCount=\(dayGames.count)")
-            }
-            #endif
             days.append(
                 MyTeamCalendarDay(
                     date: cursor,
@@ -872,6 +875,7 @@ final class AppModel {
             guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
             cursor = nextDay
         }
+        scheduleCalendarDaysCache[cacheKey] = days
         return days
     }
 
@@ -904,6 +908,73 @@ final class AppModel {
     func refreshSchedule(for month: Date) async {
         await loadIfNeeded()
         await loadMyTeamSchedule(for: month, forceRefresh: true)
+    }
+
+    func loadScheduleDayIfNeeded(for date: Date) async {
+        await loadIfNeeded()
+        await loadScheduleDay(for: date, forceRefresh: false)
+    }
+
+    func refreshScheduleDay(for date: Date) async {
+        await loadIfNeeded()
+        await loadScheduleDay(for: date, forceRefresh: true)
+    }
+
+    private func loadScheduleDay(for date: Date, forceRefresh: Bool) async {
+        let dayKey = scheduleDayKey(for: date)
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        let monthKey = KBOMonthScheduleKey(date: date, calendar: calendar)
+        if let inFlightMonthTask = inFlightScheduleMonthTasks[monthKey] {
+            #if DEBUG
+            print("[ScheduleCache] month=\(monthKey.yearMonthText) source=inFlight reason=awaitExistingFetch")
+            #endif
+            await inFlightMonthTask.value
+        }
+        let hasLoadedMonth = monthlyScheduleGames[monthKey] != nil
+        let localDayGames = groupedScheduleGamesByDay(for: date, filter: .all)[dayKey] ?? []
+
+        let shouldFetch: Bool
+        let reason: String
+
+        if forceRefresh {
+            shouldFetch = dayKey == todayKey
+            reason = dayKey == todayKey ? "manualTodayRefresh" : "manualLocalOnly"
+        } else if dayKey == todayKey {
+            shouldFetch = true
+            reason = "today"
+        } else if dayKey < todayKey {
+            let isStableCompletedDay = localDayGames.isEmpty == false && localDayGames.allSatisfy { $0.status == .final || $0.status == .cancelled }
+            if isStableCompletedDay {
+                shouldFetch = false
+                reason = "pastCompleted"
+            } else if hasLoadedMonth, localDayGames.isEmpty {
+                shouldFetch = false
+                reason = "noScheduledGames"
+            } else {
+                shouldFetch = false
+                reason = localDayGames.isEmpty ? "pastMissingLocalOnly" : "pastIncompleteLocal"
+            }
+        } else {
+            if localDayGames.isEmpty == false {
+                shouldFetch = false
+                reason = "futureCached"
+            } else if hasLoadedMonth {
+                shouldFetch = false
+                reason = "noScheduledGames"
+            } else {
+                shouldFetch = false
+                reason = "futureMissingLocalOnly"
+            }
+        }
+
+        guard shouldFetch else {
+            #if DEBUG
+            print("[ScheduleCache] selectedDate=\(dayKey) source=local reason=\(reason) gameCount=\(localDayGames.count)")
+            #endif
+            return
+        }
+
+        await refreshTodayGamesFromSupabase(for: date, monthKey: monthKey, reason: reason)
     }
 
     func loadMyTeamScheduleIfNeeded(for month: Date) async {
@@ -1102,6 +1173,7 @@ final class AppModel {
         debugLogAttendanceToggle(game: game, storedKey: key, equivalentKeys: equivalentKeys, isAttended: !isAttended)
         #endif
         persistAttendedGameKeys()
+        invalidateScheduleDerivedCaches()
     }
 
     func markNotificationRead(_ notificationID: UUID) {
@@ -1204,49 +1276,259 @@ final class AppModel {
 
     private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
-        guard forceRefresh || monthlyScheduleGames[key] == nil else { return }
+        if let existingTask = inFlightScheduleMonthTasks[key] {
+            #if DEBUG
+            print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight reason=awaitExistingFetch")
+            #endif
+            await existingTask.value
+            return
+        }
+
+        let loadID = UUID().uuidString
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performLoadMyTeamSchedule(
+                for: month,
+                key: key,
+                forceRefresh: forceRefresh,
+                loadID: loadID
+            )
+        }
+        inFlightScheduleMonthTasks[key] = task
+        await task.value
+        inFlightScheduleMonthTasks[key] = nil
+    }
+
+    private func performLoadMyTeamSchedule(
+        for month: Date,
+        key: KBOMonthScheduleKey,
+        forceRefresh: Bool,
+        loadID: String
+    ) async {
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        let containsToday = scheduleMonthKey(for: currentDateProvider()) == key
+        let shouldRefreshToday = containsToday && monthlyScheduleRefreshDayKeys[key] != todayKey
+        let hasLocalMonth = monthlyScheduleGames[key] != nil
+
+        if forceRefresh == false, hasLocalMonth, shouldRefreshToday == false {
+            #if DEBUG
+            let logKey = "local:monthNavigation:\(todayKey)"
+            if monthlyScheduleDecisionLogKeys[key] != logKey {
+                print("[ScheduleCache] month=\(key.yearMonthText) source=local reason=monthNavigation")
+                monthlyScheduleDecisionLogKeys[key] = logKey
+            }
+            #endif
+            return
+        }
+
         guard !loadingScheduleMonths.contains(key) else { return }
 
         loadingScheduleMonths.insert(key)
         defer { loadingScheduleMonths.remove(key) }
 
+        let localReason = forceRefresh ? "manualRefreshLocal" : "monthNavigation"
+        await hydrateScheduleMonthFromLocalStore(for: key, reason: localReason, loadID: loadID)
+
+        if forceRefresh || shouldRefreshToday {
+            await refreshTodayGamesFromSupabase(for: currentDateProvider(), monthKey: key, reason: forceRefresh ? "manualRefresh" : "today")
+        }
+    }
+
+    private func hydrateScheduleMonthFromLocalStore(
+        for key: KBOMonthScheduleKey,
+        reason: String,
+        loadID: String
+    ) async {
+        let previousKnownGames = allKnownGames()
+        let fallback = fallbackMonthSchedule(for: key)
+        let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
+        let normalizedFallback = await reconcileOfficialScheduleStartTimesIfNeeded(
+            in: fallback,
+            snapshot: snapshot
+        )
+        monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalizedFallback, for: key)
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        failedScheduleMonths.remove(key)
+        invalidateScheduleDerivedCaches(for: key)
+        #if DEBUG
+        print("[ScheduleCache] month=\(key.yearMonthText) source=local reason=\(reason) loadID=\(loadID) gameCount=\(monthlyScheduleGames[key]?.count ?? 0)")
+        monthlyScheduleDecisionLogKeys[key] = "local:\(reason)"
+        #endif
+        await notifyCancellationTransitions(
+            previousGames: previousKnownGames,
+            updatedGames: monthlyScheduleGames[key] ?? []
+        )
+        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+    }
+
+    private func runStartupScheduleCountCheckIfNeeded() async {
+        switch scheduleStartupSyncState {
+        case .completed:
+            #if DEBUG
+            print("[ScheduleSync] startupCountCheck skipped state=completed")
+            #endif
+            return
+        case .failedButDoNotRetryAutomatically:
+            #if DEBUG
+            print("[ScheduleSync] startupCountCheck skipped state=failedButDoNotRetryAutomatically")
+            #endif
+            return
+        case .inFlight(let task):
+            #if DEBUG
+            print("[ScheduleSync] startupCountCheck source=inFlight awaitingExistingSync")
+            #endif
+            await task.value
+            return
+        case .notStarted:
+            break
+        }
+
+        guard let scheduleSyncRepository = repository as? any KBOScheduleRemoteSyncDataSource else {
+            #if DEBUG
+            print("[ScheduleSync] startupCountCheck unsupported=true usingLocalOnly")
+            #endif
+            scheduleStartupSyncState = .completed
+            return
+        }
+
+        #if DEBUG
+        print("[ScheduleSync] startupCountCheck start")
+        #endif
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performStartupScheduleCountCheck(repository: scheduleSyncRepository)
+        }
+        scheduleStartupSyncState = .inFlight(task)
+        await task.value
+    }
+
+    private func performStartupScheduleCountCheck(
+        repository scheduleSyncRepository: any KBOScheduleRemoteSyncDataSource
+    ) async {
         do {
+            let localGames = mergeEquivalentGames(games)
+            let localCount = localGames.count
+            let remoteCount = try await scheduleSyncRepository.fetchRemoteGameCount()
+            #if DEBUG
+            print("[ScheduleSync] localCount=\(localCount) remoteCount=\(remoteCount)")
+            #endif
+
+            guard localCount != remoteCount else {
+                #if DEBUG
+                print("[ScheduleSync] countsEqual=true usingLocalOnly")
+                print("[ScheduleSync] startupCountCheck completed")
+                #endif
+                scheduleStartupSyncState = .completed
+                return
+            }
+
+            #if DEBUG
+            print("[ScheduleSync] countsDiffer=true syncingMissingGames")
+            #endif
             let previousKnownGames = allKnownGames()
-            let schedule = try await repository.fetchMonthlySchedule(for: key, bypassingCache: forceRefresh)
-            let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
-            let normalizedSchedule = await reconcileOfficialScheduleStartTimesIfNeeded(
-                in: schedule,
-                snapshot: snapshot
+            let result = try await scheduleSyncRepository.fetchMissingScheduleGames(excludingKnownGames: localGames)
+            let upsertResult = upsertScheduleGamesIntoLocalStore(result.games)
+            refreshLoadedScheduleMonthsFromLocalStore()
+            scheduleStartupSyncState = .completed
+            #if DEBUG
+            print(
+                "[ScheduleSync] missingGamesFetched=\(result.games.count) inserted=\(upsertResult.inserted) " +
+                "skippedExisting=\(upsertResult.skippedExisting) localCount=\(localCount) remoteCount=\(remoteCount)"
             )
-            monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalizedSchedule, for: key)
-                .sorted { $0.scheduledStart < $1.scheduledStart }
-            failedScheduleMonths.remove(key)
-            await notifyCancellationTransitions(
-                previousGames: previousKnownGames,
-                updatedGames: monthlyScheduleGames[key] ?? []
-            )
+            print("[ScheduleSync] startupCountCheck completed")
+            #endif
+            await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: allKnownGames())
             await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         } catch {
-            failedScheduleMonths.insert(key)
-            let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
-            if monthlyScheduleGames[key] == nil {
-                let previousKnownGames = allKnownGames()
-                let fallback = fallbackMonthSchedule(for: key)
-                if fallback.isEmpty == false {
-                    let normalizedFallback = await reconcileOfficialScheduleStartTimesIfNeeded(
-                        in: fallback,
-                        snapshot: snapshot
-                    )
-                    monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalizedFallback, for: key)
-                        .sorted { $0.scheduledStart < $1.scheduledStart }
-                    await notifyCancellationTransitions(
-                        previousGames: previousKnownGames,
-                        updatedGames: monthlyScheduleGames[key] ?? []
-                    )
-                    await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+            scheduleStartupSyncState = .failedButDoNotRetryAutomatically
+            #if DEBUG
+            print("[ScheduleSync] startupCountCheck failed usingLocalOnly error=\(error)")
+            #endif
+        }
+    }
+
+    private func refreshTodayGamesFromSupabase(
+        for date: Date,
+        monthKey: KBOMonthScheduleKey,
+        reason: String
+    ) async {
+        let dayKey = scheduleDayKey(for: date)
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        guard dayKey == todayKey else {
+            #if DEBUG
+            print("[ScheduleCache] selectedDate=\(dayKey) source=local reason=\(reason) gameCount=\((groupedScheduleGamesByDay(for: date, filter: .all)[dayKey] ?? []).count)")
+            #endif
+            return
+        }
+
+        do {
+            let previousKnownGames = allKnownGames()
+            let fetched = try await repository.fetchSchedule(for: date, bypassingCache: true)
+            let upsertResult = upsertScheduleGamesIntoLocalStore(fetched)
+            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+            monthlyScheduleRefreshDayKeys[monthKey] = todayKey
+            #if DEBUG
+            print("[ScheduleSync] todayRefresh date=\(dayKey) fetched=\(fetched.count)")
+            print("[ScheduleSync] todayRefreshUpsert inserted=\(upsertResult.inserted) updated=\(upsertResult.updated) skippedExisting=\(upsertResult.skippedExisting)")
+            #endif
+            await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: fetched)
+            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        } catch is CancellationError {
+            #if DEBUG
+            print("[ScheduleSync] todayRefresh date=\(dayKey) cancelled=true usingLocalOnly")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[ScheduleSync] todayRefresh date=\(dayKey) failed usingLocalOnly error=\(error)")
+            #endif
+        }
+    }
+
+    private func upsertScheduleGamesIntoLocalStore(_ incomingGames: [GameDetail]) -> (inserted: Int, updated: Int, skippedExisting: Int) {
+        var updatedGames = games
+        var inserted = 0
+        var updated = 0
+        var skippedExisting = 0
+
+        for candidate in incomingGames {
+            let candidateAliases = identityAliases(for: candidate)
+            if let existingIndex = updatedGames.firstIndex(where: { existing in
+                identityAliases(for: existing).isDisjoint(with: candidateAliases) == false
+            }) {
+                let selected = preferredKnownScheduleGame(existing: updatedGames[existingIndex], candidate: candidate)
+                if selected != updatedGames[existingIndex] {
+                    updatedGames[existingIndex] = selected
+                    updated += 1
+                } else {
+                    skippedExisting += 1
                 }
+            } else {
+                updatedGames.append(candidate)
+                inserted += 1
             }
         }
+
+        games = mergeEquivalentGames(updatedGames)
+            .sorted { $0.scheduledStart > $1.scheduledStart }
+        invalidateScheduleDerivedCaches()
+        scheduleLocalStandingsProbabilityRefresh()
+        return (inserted, updated, skippedExisting)
+    }
+
+    private func refreshLoadedScheduleMonthsFromLocalStore(including key: KBOMonthScheduleKey? = nil) {
+        var keys = Set(monthlyScheduleGames.keys)
+        if let key {
+            keys.insert(key)
+        }
+        for monthKey in keys {
+            monthlyScheduleGames[monthKey] = mergeMonthlyScheduleGames(fallbackMonthSchedule(for: monthKey), for: monthKey)
+                .sorted { $0.scheduledStart < $1.scheduledStart }
+        }
+        invalidateScheduleDerivedCaches()
+    }
+
+    private func scheduleMonthKey(for date: Date) -> KBOMonthScheduleKey {
+        KBOMonthScheduleKey(date: date, calendar: calendar)
     }
 
     private func refreshMonthlyScheduleDebugInfo(for key: KBOMonthScheduleKey) async -> RepositoryDebugSnapshot? {
@@ -1422,6 +1704,11 @@ final class AppModel {
         monthlyScheduleGames = [:]
         monthlyScheduleDebugSnapshots = [:]
         failedScheduleMonths = []
+        monthlyScheduleRefreshDayKeys = [:]
+        monthlyScheduleDecisionLogKeys = [:]
+        inFlightScheduleMonthTasks = [:]
+        scheduleStartupSyncState = .notStarted
+        invalidateScheduleDerivedCaches()
     }
 
     private var isGamesStale: Bool {
@@ -2366,6 +2653,37 @@ final class AppModel {
     }
     #endif
 
+    private func makeScheduleCalendarCacheKey(for date: Date, filter: ScheduleFilter) -> ScheduleCalendarCacheKey {
+        ScheduleCalendarCacheKey(
+            month: KBOMonthScheduleKey(date: date, calendar: calendar),
+            filter: filter,
+            favoriteTeamID: settings.favoriteTeamID
+        )
+    }
+
+    private func invalidateScheduleDerivedCaches(for month: KBOMonthScheduleKey? = nil) {
+        guard let month else {
+            scheduleCalendarDaysCache.removeAll()
+            scheduleGamesByDayCache.removeAll()
+            return
+        }
+        scheduleCalendarDaysCache = scheduleCalendarDaysCache.filter { $0.key.month != month }
+        scheduleGamesByDayCache = scheduleGamesByDayCache.filter { $0.key.month != month }
+    }
+
+    private func groupedScheduleGamesByDay(for date: Date, filter: ScheduleFilter) -> [String: [GameDetail]] {
+        let cacheKey = makeScheduleCalendarCacheKey(for: date, filter: filter)
+        if let cached = scheduleGamesByDayCache[cacheKey] {
+            return cached
+        }
+
+        let grouped = Dictionary(grouping: filteredScheduleGames(for: date, filter: filter)) { game in
+            scheduleDayKey(for: game.scheduledStart)
+        }
+        scheduleGamesByDayCache[cacheKey] = grouped
+        return grouped
+    }
+
     private func myTeamMonthScheduleSource(for date: Date) -> [GameDetail] {
         let key = KBOMonthScheduleKey(date: date, calendar: calendar)
         return monthlyScheduleGames[key] ?? fallbackMonthSchedule(for: key)
@@ -2444,6 +2762,19 @@ final class AppModel {
         let day = components.day ?? 1
         return String(format: "%04d-%02d-%02d", year, month, day)
     }
+}
+
+private struct ScheduleCalendarCacheKey: Hashable {
+    let month: KBOMonthScheduleKey
+    let filter: ScheduleFilter
+    let favoriteTeamID: String?
+}
+
+private enum ScheduleStartupSyncState {
+    case notStarted
+    case inFlight(Task<Void, Never>)
+    case completed
+    case failedButDoNotRetryAutomatically
 }
 
 private struct GameCancellationNotificationState: Equatable {

@@ -115,6 +115,119 @@ struct kboScoreTests {
         #expect(previousMonth == marchMonth)
     }
 
+    @Test func scheduleEntryUsesLocalScheduleWhenRemoteCountMatches() async throws {
+        let bootstrap = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let tracker = ScheduleSyncTestTracker()
+        let repository = ScheduleSyncTestRepository(
+            bootstrap: bootstrap,
+            remoteCount: bootstrap.games.count,
+            missingGames: [],
+            todayGames: [],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-01T09:00:00+09:00") }
+        )
+        let sampleMonth = isoDate("2026-03-01T09:00:00+09:00")
+
+        await model.loadScheduleIfNeeded(for: sampleMonth)
+        await model.loadScheduleIfNeeded(for: isoDate("2026-05-01T09:00:00+09:00"))
+
+        #expect(await tracker.remoteCountChecks == 1)
+        #expect(await tracker.missingFetches == 0)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+    }
+
+    @Test func scheduleEntrySyncsMissingGamesOnceWhenCountsDiffer() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let missingGame = makeGameDetail(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            scheduledStart: isoDate("2026-04-12T14:00:00+09:00"),
+            venue: "잠실야구장",
+            awayTeam: ssg,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: "20260412SSGLG0"
+        )
+        let bootstrap = KBOBootstrapData(
+            teams: base.teams,
+            games: [],
+            notifications: [],
+            settings: base.settings
+        )
+        let tracker = ScheduleSyncTestTracker()
+        let repository = ScheduleSyncTestRepository(
+            bootstrap: bootstrap,
+            remoteCount: 1,
+            missingGames: [missingGame],
+            todayGames: [],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-01T09:00:00+09:00") }
+        )
+        let sampleMonth = isoDate("2026-04-01T09:00:00+09:00")
+
+        await model.loadScheduleIfNeeded(for: sampleMonth)
+        await model.loadScheduleIfNeeded(for: sampleMonth)
+
+        let scheduleGames = model.scheduleGames(on: missingGame.scheduledStart, filter: .all)
+        #expect(scheduleGames.contains { $0.providerGameID == "20260412SSGLG0" })
+        #expect(await tracker.remoteCountChecks == 1)
+        #expect(await tracker.missingFetches == 1)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+    }
+
+    @Test func scheduleEntryRefreshesTodayWithDateLimitedFetchOnly() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let todayGame = makeGameDetail(
+            id: UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!,
+            scheduledStart: isoDate("2026-04-01T18:30:00+09:00"),
+            venue: "잠실야구장",
+            awayTeam: ssg,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: "20260401SSGLG0"
+        )
+        let bootstrap = KBOBootstrapData(
+            teams: base.teams,
+            games: [todayGame],
+            notifications: [],
+            settings: base.settings
+        )
+        let tracker = ScheduleSyncTestTracker()
+        let repository = ScheduleSyncTestRepository(
+            bootstrap: bootstrap,
+            remoteCount: 1,
+            missingGames: [],
+            todayGames: [todayGame],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-01T09:00:00+09:00") }
+        )
+
+        await model.loadScheduleIfNeeded(for: todayGame.scheduledStart)
+
+        #expect(await tracker.dailyScheduleFetches == 1)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+        #expect(await tracker.remoteCountChecks == 1)
+    }
+
     @Test func finalGameDerivesWinnerScoreAndTeamResult() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-03-23T15:00:00+09:00")), usePersistedSettings: false)
         let sampleDate = isoDate("2026-03-23T13:00:00+09:00")
@@ -142,6 +255,26 @@ struct kboScoreTests {
         let favoriteDay = try #require(matchingDay)
 
         #expect(favoriteDay.favoriteTeamResult == .win)
+    }
+
+    @Test func lotteWinDayUsesBlueSemanticAppearance() {
+        let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .win)
+        #expect(appearance == .win)
+    }
+
+    @Test func lotteLossDayUsesRedSemanticAppearance() {
+        let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .loss)
+        #expect(appearance == .loss)
+    }
+
+    @Test func drawDayUsesGraySemanticAppearance() {
+        let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .tie)
+        #expect(appearance == .draw)
+    }
+
+    @Test func noFavoriteTeamResultUsesNeutralSemanticAppearance() {
+        let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: nil)
+        #expect(appearance == .neutral)
     }
 
     @Test func attendanceSummaryCountsOnlyCompletedFavoriteTeamResults() async throws {
@@ -2120,6 +2253,67 @@ struct kboScoreTests {
         #expect(snapshot.baseURL == "https://example.supabase.co")
     }
 
+    @Test func supabaseBootstrapUsesLocalBootstrapWhenGamesExist() async throws {
+        let runtimeState = RepositoryRuntimeState(
+            activeSource: .supabase,
+            baseURL: "https://example.supabase.co",
+            deliverySource: .supabase
+        )
+        let tracker = RepositoryCallTracker()
+        let localRepository = TrackingKBORepository(base: StubRepository(), tracker: tracker)
+        let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let source = StaticSupabaseSource(
+            teamRows: [
+                SupabaseTeamRow(id: awayTeamID, code: "lg", name: "LG 트윈스", shortName: "LG"),
+                SupabaseTeamRow(id: homeTeamID, code: "doosan", name: "두산 베어스", shortName: "두산")
+            ],
+            gameRows: try JSONDecoder().decode(
+                [SupabaseGameRow].self,
+                from: Data(
+                    """
+                    [
+                      {
+                        "id": "\(gameID.uuidString)",
+                        "public_game_id": "20260424-DOO-LG",
+                        "provider": "kbo",
+                        "provider_game_id": "20260424LGDO0",
+                        "game_date": "2026-04-24",
+                        "scheduled_at": 796554000,
+                        "stadium": "잠실",
+                        "status": "final",
+                        "home_team_id": "\(homeTeamID.uuidString)",
+                        "away_team_id": "\(awayTeamID.uuidString)",
+                        "home_score": 2,
+                        "away_score": 4,
+                        "inning_state": "경기종료",
+                        "is_cancelled": false,
+                        "is_postponed": false,
+                        "source_updated_at": 796565700,
+                        "updated_at": 796565700,
+                        "stadium_code": "JMS"
+                      }
+                    ]
+                    """.utf8
+                )
+            )
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: localRepository,
+            source: source,
+            runtimeState: runtimeState
+        )
+
+        let bootstrap = try await repository.fetchBootstrapData()
+        let snapshot = await runtimeState.snapshot()
+
+        #expect(bootstrap.games.isEmpty == false)
+        #expect(bootstrap.teams.count != 2)
+        #expect(await tracker.bootstrapFetchCount == 1)
+        #expect(snapshot.deliverySource == .supabase)
+    }
+
     @Test func bundledJSONRepositoryUsesDocumentsJSONWhenPresent() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -3683,6 +3877,84 @@ struct kboScoreTests {
         #expect(model.scheduleGames(on: referenceDate, filter: .myTeam).isEmpty)
     }
 
+    @Test func scheduleDayLoadUsesLocalCacheForPastCompletedDate() async throws {
+        let dayFetchCounter = FetchCounter()
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let completedGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 2,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let repository = StubRepository(
+            fetchMonthlySchedule: { _ in [completedGame] },
+            fetchSchedule: { _ in
+                await dayFetchCounter.increment()
+                return [completedGame]
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: {
+                ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+            }
+        )
+
+        await model.loadScheduleIfNeeded(for: referenceDate)
+        await model.loadScheduleDayIfNeeded(for: referenceDate)
+
+        #expect(await dayFetchCounter.value == 0)
+    }
+
+    @Test func scheduleDayLoadFetchesTodayOnly() async throws {
+        let dayFetchCounter = FetchCounter()
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let todayGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+
+        let repository = StubRepository(
+            fetchMonthlySchedule: { _ in [todayGame] },
+            fetchSchedule: { _ in
+                await dayFetchCounter.increment()
+                return [todayGame]
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadScheduleIfNeeded(for: referenceDate)
+        await model.loadScheduleDayIfNeeded(for: referenceDate)
+
+        #expect(await dayFetchCounter.value == 1)
+    }
+
     @Test func scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
         let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
@@ -4057,6 +4329,120 @@ private struct TrackingKBORepository<Base: KBORepository>: KBORepository, Sendab
     }
 }
 
+private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
+    let teamRows: [SupabaseTeamRow]
+    let gameRows: [SupabaseGameRow]
+
+    nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
+        teamRows
+    }
+
+    nonisolated func fetchGameCount() async throws -> Int {
+        gameRows.count
+    }
+
+    nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
+        gameRows.filter { row in
+            guard let providerGameID = row.providerGameID else { return true }
+            return providerGameIDs.contains(providerGameID) == false
+        }
+    }
+
+    nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+}
+
+private actor ScheduleSyncTestTracker {
+    private(set) var remoteCountChecks = 0
+    private(set) var missingFetches = 0
+    private(set) var monthlyScheduleFetches = 0
+    private(set) var dailyScheduleFetches = 0
+
+    func recordRemoteCountCheck() {
+        remoteCountChecks += 1
+    }
+
+    func recordMissingFetch() {
+        missingFetches += 1
+    }
+
+    func recordMonthlyScheduleFetch() {
+        monthlyScheduleFetches += 1
+    }
+
+    func recordDailyScheduleFetch() {
+        dailyScheduleFetches += 1
+    }
+}
+
+private struct ScheduleSyncTestRepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
+    let bootstrap: KBOBootstrapData
+    let remoteCount: Int
+    let missingGames: [GameDetail]
+    let todayGames: [GameDetail]
+    let tracker: ScheduleSyncTestTracker
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        bootstrap
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        bootstrap.games
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        bootstrap.notifications
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        await tracker.recordMonthlyScheduleFetch()
+        return bootstrap.games.filter { game in
+            KBOMonthScheduleKey(date: game.scheduledStart) == month
+        }
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        await tracker.recordDailyScheduleFetch()
+        let calendar = Calendar(identifier: .gregorian)
+        return todayGames.filter { calendar.isDate($0.scheduledStart, inSameDayAs: date) }
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        []
+    }
+
+    nonisolated func fetchRemoteGameCount() async throws -> Int {
+        await tracker.recordRemoteCountCheck()
+        return remoteCount
+    }
+
+    nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
+        await tracker.recordMissingFetch()
+        let knownAliases = Set(knownGames.flatMap(\.gameIdentityAliases))
+        let missing = missingGames.filter { game in
+            game.gameIdentityAliases.isDisjoint(with: knownAliases)
+        }
+        return KBOScheduleMissingGamesResult(remoteCount: remoteCount, games: missing)
+    }
+}
+
 private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
     private let error = TestRepositoryError.supabaseUnavailable
 
@@ -4064,7 +4450,15 @@ private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
         throw error
     }
 
+    nonisolated func fetchGameCount() async throws -> Int {
+        throw error
+    }
+
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
         throw error
     }
 
@@ -4317,6 +4711,9 @@ private struct StubRepository: KBORepository {
     var fetchMonthlyScheduleHandler: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in
         stubGames()
     }
+    var fetchScheduleHandler: @Sendable (Date) async throws -> [GameDetail] = { _ in
+        stubGames()
+    }
     var fetchStandingsHandler: @Sendable () async throws -> [TeamStandingsSnapshot] = {
         []
     }
@@ -4326,12 +4723,14 @@ private struct StubRepository: KBORepository {
         fetchGames: @escaping @Sendable () async throws -> [GameDetail] = { stubGames() },
         fetchNotifications: @escaping @Sendable () async throws -> [NotificationItem] = { stubNotifications() },
         fetchMonthlySchedule: @escaping @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in stubGames() },
+        fetchSchedule: @escaping @Sendable (Date) async throws -> [GameDetail] = { _ in stubGames() },
         fetchStandings: @escaping @Sendable () async throws -> [TeamStandingsSnapshot] = { [] }
     ) {
         self.fetchBootstrapDataHandler = fetchBootstrapData
         self.fetchGamesHandler = fetchGames
         self.fetchNotificationsHandler = fetchNotifications
         self.fetchMonthlyScheduleHandler = fetchMonthlySchedule
+        self.fetchScheduleHandler = fetchSchedule
         self.fetchStandingsHandler = fetchStandings
     }
 
@@ -4349,6 +4748,14 @@ private struct StubRepository: KBORepository {
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleHandler(month)
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await fetchScheduleHandler(date)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await fetchScheduleHandler(date)
     }
 
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {

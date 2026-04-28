@@ -46,6 +46,31 @@ extension KBOMonthScheduleDataSource {
     }
 }
 
+protocol KBODailyScheduleDataSource: Sendable {
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail]
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail]
+}
+
+extension KBODailyScheduleDataSource where Self: KBOMonthScheduleDataSource {
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await fetchSchedule(for: date, bypassingCache: false)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        let calendar = Calendar(identifier: .gregorian)
+        let month = KBOMonthScheduleKey(date: date, calendar: calendar)
+        let dayComponents = calendar.dateComponents([.year, .month, .day], from: date)
+        return try await fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+            .filter {
+                let components = calendar.dateComponents([.year, .month, .day], from: $0.scheduledStart)
+                return components.year == dayComponents.year &&
+                    components.month == dayComponents.month &&
+                    components.day == dayComponents.day
+            }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+}
+
 protocol KBOStandingsDataSource: Sendable {
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot]
 }
@@ -56,8 +81,22 @@ extension KBOStandingsDataSource {
     }
 }
 
-protocol KBORepository: KBOGameDataSource, KBONotificationDataSource, KBOMonthScheduleDataSource, KBOStandingsDataSource, Sendable {
+protocol KBORepository: KBOGameDataSource, KBONotificationDataSource, KBOMonthScheduleDataSource, KBODailyScheduleDataSource, KBOStandingsDataSource, Sendable {
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData
+}
+
+struct KBOScheduleMissingGamesResult: Sendable {
+    let remoteCount: Int
+    let games: [GameDetail]
+}
+
+enum KBOScheduleSyncError: Error, Sendable {
+    case unsupported
+}
+
+protocol KBOScheduleRemoteSyncDataSource: Sendable {
+    nonisolated func fetchRemoteGameCount() async throws -> Int
+    nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult
 }
 
 struct KBOBootstrapData: Sendable {

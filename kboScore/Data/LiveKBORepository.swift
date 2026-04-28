@@ -441,9 +441,20 @@ enum KBORepositoryFactory {
             configuration: configuration,
             runtimeState: runtimeState
         )
+        let startupOptimizedRepository: any KBORepository
+        if configuration.supabaseConfiguration != nil {
+            let cached = CachedKBORepository(
+                base: AnyKBORepository(wrappedRepository),
+                configuration: .supabaseStartup,
+                runtimeState: runtimeState
+            )
+            startupOptimizedRepository = AnyKBORepository(cached)
+        } else {
+            startupOptimizedRepository = wrappedRepository
+        }
 
         return AppRepositoryBundle(
-            repository: wrappedRepository,
+            repository: startupOptimizedRepository,
             runtimeState: runtimeState
         )
     }
@@ -502,7 +513,15 @@ struct RepositoryCacheConfiguration: Sendable {
         bootstrapTTL: 15,
         gamesTTL: 12,
         notificationsTTL: 20,
-        monthlyScheduleTTL: 300,
+        monthlyScheduleTTL: 60 * 60 * 24,
+        diskCacheDirectory: nil
+    )
+
+    nonisolated static let supabaseStartup = RepositoryCacheConfiguration(
+        bootstrapTTL: 60 * 10,
+        gamesTTL: 20,
+        notificationsTTL: 20,
+        monthlyScheduleTTL: 60 * 60 * 24,
         diskCacheDirectory: nil
     )
 }
@@ -1121,19 +1140,34 @@ private actor RepositoryResponseCache {
     }
 }
 
-struct AnyKBORepository: KBORepository, Sendable {
+struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
     private let fetchMonthlyScheduleBlock: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail]
+    private let fetchScheduleByDateBlock: @Sendable (Date, Bool) async throws -> [GameDetail]
     private let fetchStandingsBlock: @Sendable () async throws -> [TeamStandingsSnapshot]
+    private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
+    private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
 
     init(_ base: any KBORepository) {
         fetchBootstrapDataBlock = { try await base.fetchBootstrapData() }
         fetchGamesBlock = { try await base.fetchGames() }
         fetchNotificationsBlock = { try await base.fetchNotifications() }
         fetchMonthlyScheduleBlock = { month in try await base.fetchMonthlySchedule(for: month) }
+        fetchScheduleByDateBlock = { date, bypassingCache in
+            try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+        }
         fetchStandingsBlock = { try await base.fetchStandings() }
+        if let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource {
+            fetchRemoteGameCountBlock = { try await scheduleSyncSource.fetchRemoteGameCount() }
+            fetchMissingScheduleGamesBlock = { knownGames in
+                try await scheduleSyncSource.fetchMissingScheduleGames(excludingKnownGames: knownGames)
+            }
+        } else {
+            fetchRemoteGameCountBlock = nil
+            fetchMissingScheduleGamesBlock = nil
+        }
     }
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
@@ -1152,8 +1186,30 @@ struct AnyKBORepository: KBORepository, Sendable {
         try await fetchMonthlyScheduleBlock(month)
     }
 
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await fetchScheduleByDateBlock(date, false)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await fetchScheduleByDateBlock(date, bypassingCache)
+    }
+
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await fetchStandingsBlock()
+    }
+
+    nonisolated func fetchRemoteGameCount() async throws -> Int {
+        guard let fetchRemoteGameCountBlock else {
+            throw KBOScheduleSyncError.unsupported
+        }
+        return try await fetchRemoteGameCountBlock()
+    }
+
+    nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
+        guard let fetchMissingScheduleGamesBlock else {
+            throw KBOScheduleSyncError.unsupported
+        }
+        return try await fetchMissingScheduleGamesBlock(knownGames)
     }
 }
 
@@ -1187,6 +1243,18 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, Send
         return value
     }
 
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        let value = try await base.fetchSchedule(for: date)
+        await runtimeState?.record(source: source, delivery: delivery)
+        return value
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        let value = try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+        await runtimeState?.record(source: source, delivery: delivery)
+        return value
+    }
+
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         let value = try await base.fetchStandings()
         await runtimeState?.record(source: source, delivery: delivery)
@@ -1194,7 +1262,7 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, Send
     }
 }
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -1276,8 +1344,30 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, Sendable {
         return result.value
     }
 
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+    }
+
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
+    }
+
+    nonisolated func fetchRemoteGameCount() async throws -> Int {
+        guard let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource else {
+            throw KBOScheduleSyncError.unsupported
+        }
+        return try await scheduleSyncSource.fetchRemoteGameCount()
+    }
+
+    nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
+        guard let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource else {
+            throw KBOScheduleSyncError.unsupported
+        }
+        return try await scheduleSyncSource.fetchMissingScheduleGames(excludingKnownGames: knownGames)
     }
 }
 
@@ -1338,6 +1428,14 @@ struct BootstrapRefreshingKBORepository<Base: KBORepository>: KBORepository, Sen
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
         try await base.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
     }
 
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
@@ -1546,6 +1644,18 @@ struct LiveKBORepository: KBORepository, Sendable {
         await runtimeState?.record(source: .live, delivery: .live)
         return KBODataMapper.mapGames(payload.games, teams: teams)
             .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        let month = KBOMonthScheduleKey(date: date)
+        let calendar = Calendar(identifier: .gregorian)
+        let dayComponents = calendar.dateComponents([.year, .month, .day], from: date)
+        return try await fetchMonthlySchedule(for: month).filter { game in
+            let components = calendar.dateComponents([.year, .month, .day], from: game.scheduledStart)
+            return components.year == dayComponents.year &&
+                components.month == dayComponents.month &&
+                components.day == dayComponents.day
+        }
     }
 
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
@@ -1843,6 +1953,30 @@ struct FallbackKBORepository<Primary: KBORepository, Fallback: KBORepository>: K
             return try await primary.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
         } catch {
             let result = try await fallback.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+            await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
+            return result
+        }
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        do {
+            return try await primary.fetchSchedule(for: date)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let result = try await fallback.fetchSchedule(for: date)
+            await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
+            return result
+        }
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        do {
+            return try await primary.fetchSchedule(for: date, bypassingCache: bypassingCache)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            let result = try await fallback.fetchSchedule(for: date, bypassingCache: bypassingCache)
             await runtimeState?.record(source: .mockFallback, delivery: .mockFallback)
             return result
         }
