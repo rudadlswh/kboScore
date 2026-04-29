@@ -69,8 +69,13 @@ struct SupabaseGameRow: Codable, Sendable {
     let isPostponed: Bool?
     let sourceUpdatedAt: Date?
     let updatedAt: Date?
+    let statusReason: String?
+    let finalConfirmedAt: Date?
+    let liveLastCheckedAt: Date?
     let stadiumCode: String?
     let officialProviderGameID: String?
+    let homeStartingPitcherName: String?
+    let awayStartingPitcherName: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -90,8 +95,13 @@ struct SupabaseGameRow: Codable, Sendable {
         case isPostponed = "is_postponed"
         case sourceUpdatedAt = "source_updated_at"
         case updatedAt = "updated_at"
+        case statusReason = "status_reason"
+        case finalConfirmedAt = "final_confirmed_at"
+        case liveLastCheckedAt = "live_last_checked_at"
         case stadiumCode = "stadium_code"
         case officialProviderGameID = "official_provider_game_id"
+        case homeStartingPitcherName = "home_starting_pitcher_name"
+        case awayStartingPitcherName = "away_starting_pitcher_name"
     }
 
     init(from decoder: any Decoder) throws {
@@ -101,8 +111,8 @@ struct SupabaseGameRow: Codable, Sendable {
         provider = try container.decodeIfPresent(String.self, forKey: .provider)
         providerGameID = try container.decodeIfPresent(String.self, forKey: .providerGameID)
         gameDate = try container.decode(String.self, forKey: .gameDate)
-        scheduledAt = try container.decodeIfPresent(Date.self, forKey: .scheduledAt) ??
-            SupabaseDateParser.parseTimestamp(try container.decodeIfPresent(String.self, forKey: .scheduledAt))
+        scheduledAt = (try? container.decodeIfPresent(Date.self, forKey: .scheduledAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .scheduledAt))
         stadium = try container.decodeIfPresent(String.self, forKey: .stadium)
         status = try container.decodeIfPresent(String.self, forKey: .status)
         homeTeamID = try container.decode(UUID.self, forKey: .homeTeamID)
@@ -112,12 +122,93 @@ struct SupabaseGameRow: Codable, Sendable {
         inningState = try container.decodeIfPresent(String.self, forKey: .inningState)
         isCancelled = try container.decodeIfPresent(Bool.self, forKey: .isCancelled)
         isPostponed = try container.decodeIfPresent(Bool.self, forKey: .isPostponed)
-        sourceUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .sourceUpdatedAt) ??
-            SupabaseDateParser.parseTimestamp(try container.decodeIfPresent(String.self, forKey: .sourceUpdatedAt))
-        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ??
-            SupabaseDateParser.parseTimestamp(try container.decodeIfPresent(String.self, forKey: .updatedAt))
+        sourceUpdatedAt = (try? container.decodeIfPresent(Date.self, forKey: .sourceUpdatedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .sourceUpdatedAt))
+        updatedAt = (try? container.decodeIfPresent(Date.self, forKey: .updatedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
+        statusReason = try container.decodeIfPresent(String.self, forKey: .statusReason)
+        finalConfirmedAt = (try? container.decodeIfPresent(Date.self, forKey: .finalConfirmedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .finalConfirmedAt))
+        liveLastCheckedAt = (try? container.decodeIfPresent(Date.self, forKey: .liveLastCheckedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .liveLastCheckedAt))
         stadiumCode = try container.decodeIfPresent(String.self, forKey: .stadiumCode)
         officialProviderGameID = try container.decodeIfPresent(String.self, forKey: .officialProviderGameID)
+        homeStartingPitcherName = try container.decodeIfPresent(String.self, forKey: .homeStartingPitcherName)
+        awayStartingPitcherName = try container.decodeIfPresent(String.self, forKey: .awayStartingPitcherName)
+    }
+}
+
+struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
+    nonisolated static let selectColumns = "*"
+
+    let gameID: UUID
+    let inningLabel: String?
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let runnerOnFirst: Bool?
+    let runnerOnSecond: Bool?
+    let runnerOnThird: Bool?
+    let currentPitcherName: String?
+    let currentBatterName: String?
+#if DEBUG
+    let debugAvailableFieldNames: Set<String>
+#endif
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        gameID = try container.decode(UUID.self, forKey: DynamicCodingKey("game_id"))
+        inningLabel = try container.decodeIfPresent(String.self, forKey: DynamicCodingKey("inning_label"))
+        balls = try container.decodeIfPresent(Int.self, forKey: DynamicCodingKey("balls"))
+        strikes = try container.decodeIfPresent(Int.self, forKey: DynamicCodingKey("strikes"))
+        outs = try container.decodeIfPresent(Int.self, forKey: DynamicCodingKey("outs"))
+        runnerOnFirst = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_first"))
+        runnerOnSecond = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_second"))
+        runnerOnThird = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_third"))
+        currentPitcherName = try Self.firstNonBlankString(
+            in: container,
+            keys: ["current_pitcher_name", "pitcher_name", "pitcher", "currentPitcherName", "pitcherName"]
+        )
+        currentBatterName = try Self.firstNonBlankString(
+            in: container,
+            keys: ["current_batter_name", "batter_name", "current_hitter_name", "hitter_name", "batter", "hitter", "currentBatterName", "batterName"]
+        )
+#if DEBUG
+        debugAvailableFieldNames = Set(container.allKeys.map(\.stringValue))
+#endif
+    }
+
+    private static func firstNonBlankString(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) throws -> String? {
+        for key in keys {
+            let value = try container.decodeIfPresent(String.self, forKey: DynamicCodingKey(key))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, value.isEmpty == false {
+                return value
+            }
+        }
+        return nil
+    }
+}
+
+private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
+    let stringValue: String
+    let intValue: Int?
+
+    init(_ stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(stringValue: String) {
+        self.init(stringValue)
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = String(intValue)
+        self.intValue = intValue
     }
 }
 
@@ -146,15 +237,45 @@ enum SupabaseKBOMapper {
 
     nonisolated static func mapGames(
         gameRows: [SupabaseGameRow],
-        teamRows: [SupabaseTeamRow]
+        teamRows: [SupabaseTeamRow],
+        snapshotRows: [SupabaseLatestGameSnapshotRow] = []
     ) -> [GameDetail] {
         let teamsByUUID = Dictionary(uniqueKeysWithValues: teamRows.map { ($0.id, mapTeam($0)) })
+        let snapshotsByGameID = Dictionary(uniqueKeysWithValues: snapshotRows.map { ($0.gameID, $0) })
         let classifiedRows = gameRows.map(classifiedRow(from:))
 #if DEBUG
         debugLogSeasonClassificationSummary(classifiedRows)
 #endif
-        let payload = classifiedRows.map { mapGameDTO($0, teamsByUUID: teamsByUUID) }
+        let payload = classifiedRows.map { classifiedRow in
+            mapGameDTO(
+                classifiedRow,
+                teamsByUUID: teamsByUUID,
+                snapshot: snapshotsByGameID[classifiedRow.row.id]
+            )
+        }
         return KBODataMapper.mapGames(payload, teams: Array(teamsByUUID.values))
+    }
+
+    nonisolated static func mapGame(
+        row: SupabaseGameRow,
+        teamRows: [SupabaseTeamRow],
+        snapshot: SupabaseLatestGameSnapshotRow?,
+        fallbackGame: GameDetail
+    ) -> GameDetail {
+        var teamsByUUID: [UUID: Team] = [
+            row.awayTeamID: fallbackGame.awayTeam,
+            row.homeTeamID: fallbackGame.homeTeam
+        ]
+        for teamRow in teamRows {
+            teamsByUUID[teamRow.id] = mapTeam(teamRow)
+        }
+
+        let classifiedRow = classifiedRow(from: row)
+#if DEBUG
+        debugLogSeasonClassificationSummary([classifiedRow])
+#endif
+        let payload = [mapGameDTO(classifiedRow, teamsByUUID: teamsByUUID, snapshot: snapshot)]
+        return KBODataMapper.mapGames(payload, teams: Array(teamsByUUID.values)).first ?? fallbackGame
     }
 
     nonisolated static func mapBootstrap(
@@ -174,7 +295,8 @@ enum SupabaseKBOMapper {
 
     nonisolated private static func mapGameDTO(
         _ classifiedRow: ClassifiedSupabaseGameRow,
-        teamsByUUID: [UUID: Team]
+        teamsByUUID: [UUID: Team],
+        snapshot: SupabaseLatestGameSnapshotRow?
     ) -> KBOGameDTO {
         let row = classifiedRow.row
         let awayTeam = teamsByUUID[row.awayTeamID] ?? makeUnknownTeam(id: row.awayTeamID)
@@ -182,7 +304,17 @@ enum SupabaseKBOMapper {
 
         let resolvedStatus = statusText(for: row)
         let scheduledStart = row.scheduledAt ?? SupabaseDateParser.parseGameDate(row.gameDate) ?? .distantPast
-        let venue = row.stadium?.nilIfBlank ?? row.stadiumCode?.nilIfBlank ?? "장소 미정"
+        let venue = row.stadium?.nilIfBlank ?? "장소 미정"
+        let inningText = snapshot?.inningLabel?.nilIfBlank ?? row.inningState?.nilIfBlank
+        let bases = snapshot.map {
+            KBORunnerStateDTO(
+                first: $0.runnerOnFirst ?? false,
+                second: $0.runnerOnSecond ?? false,
+                third: $0.runnerOnThird ?? false
+            )
+        }
+        let currentPitcherName = snapshot?.currentPitcherName?.nilIfBlank
+        let currentBatterName = snapshot?.currentBatterName?.nilIfBlank
 
         return KBOGameDTO(
             id: row.id,
@@ -196,18 +328,27 @@ enum SupabaseKBOMapper {
             statusCode: nil,
             statusText: resolvedStatus,
             seasonClassification: classifiedRow.seasonClassification.rawValue,
-            inningText: row.inningState?.nilIfBlank,
-            bases: nil,
-            balls: nil,
-            strikes: nil,
-            outs: nil,
+            inningText: inningText,
+            bases: bases,
+            balls: snapshot?.balls,
+            strikes: snapshot?.strikes,
+            outs: snapshot?.outs,
             highlightText: nil,
             events: [],
             note: makeNote(
                 provider: row.provider,
+                publicGameID: row.publicGameID,
                 providerGameID: classifiedRow.providerGameID,
-                updatedAt: row.sourceUpdatedAt ?? row.updatedAt
-            )
+                sourceUpdatedAt: row.sourceUpdatedAt,
+                updatedAt: row.updatedAt,
+                liveLastCheckedAt: row.liveLastCheckedAt,
+                finalConfirmedAt: row.finalConfirmedAt,
+                statusReason: row.statusReason
+            ),
+            awayStartingPitcherName: row.awayStartingPitcherName?.nilIfBlank,
+            homeStartingPitcherName: row.homeStartingPitcherName?.nilIfBlank,
+            currentPitcherName: currentPitcherName,
+            currentBatterName: currentBatterName
         )
     }
 
@@ -224,18 +365,38 @@ enum SupabaseKBOMapper {
 
     nonisolated private static func makeNote(
         provider: String?,
+        publicGameID: String?,
         providerGameID: String?,
-        updatedAt: Date?
+        sourceUpdatedAt: Date?,
+        updatedAt: Date?,
+        liveLastCheckedAt: Date?,
+        finalConfirmedAt: Date?,
+        statusReason: String?
     ) -> String? {
         var components: [String] = []
         if let provider = provider?.nilIfBlank {
             components.append("provider=\(provider)")
         }
+        if let publicGameID = publicGameID?.nilIfBlank {
+            components.append("public_game_id=\(publicGameID)")
+        }
         if let providerGameID = providerGameID?.nilIfBlank {
             components.append("provider_game_id=\(providerGameID)")
         }
+        if let sourceUpdatedAt {
+            components.append("source_updated_at=\(SupabaseDateParser.debugTimestamp(sourceUpdatedAt))")
+        }
         if let updatedAt {
-            components.append("source_updated_at=\(SupabaseDateParser.debugTimestamp(updatedAt))")
+            components.append("updated_at=\(SupabaseDateParser.debugTimestamp(updatedAt))")
+        }
+        if let liveLastCheckedAt {
+            components.append("live_last_checked_at=\(SupabaseDateParser.debugTimestamp(liveLastCheckedAt))")
+        }
+        if let finalConfirmedAt {
+            components.append("final_confirmed_at=\(SupabaseDateParser.debugTimestamp(finalConfirmedAt))")
+        }
+        if let statusReason = statusReason?.nilIfBlank {
+            components.append("status_reason=\(statusReason)")
         }
         return components.isEmpty ? nil : components.joined(separator: " ")
     }
@@ -257,7 +418,7 @@ enum SupabaseKBOMapper {
     }
 
     nonisolated private static func resolvedProviderGameID(for row: SupabaseGameRow) -> String? {
-        row.officialProviderGameID?.nilIfBlank ?? row.providerGameID?.nilIfBlank
+        row.providerGameID?.nilIfBlank ?? row.officialProviderGameID?.nilIfBlank
     }
 
     nonisolated private static func inferredSeasonClassification(
@@ -338,7 +499,7 @@ enum SupabaseKBOMapper {
         let seasonClassification: GameSeasonClassification
     }
 
-    nonisolated private static func normalizeTeamCode(_ rawValue: String) -> String {
+    nonisolated static func normalizeTeamCode(_ rawValue: String) -> String {
         rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()

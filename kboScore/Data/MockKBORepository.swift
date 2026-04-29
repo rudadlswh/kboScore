@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct MockKBORepository: KBORepository, Sendable {
+struct MockKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Sendable {
     nonisolated init() {}
 
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
@@ -39,9 +39,26 @@ struct MockKBORepository: KBORepository, Sendable {
             }
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
+
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail] {
+        let calendar = Calendar(identifier: .gregorian)
+        let dayComponents = calendar.dateComponents([.year, .month, .day], from: date)
+        return try await fetchMonthlySchedule(for: KBOMonthScheduleKey(date: date, calendar: calendar))
+            .filter { game in
+                let components = calendar.dateComponents([.year, .month, .day], from: game.scheduledStart)
+                return components.year == dayComponents.year &&
+                    components.month == dayComponents.month &&
+                    components.day == dayComponents.day &&
+                    game.involves(teamID: favoriteTeamId)
+            }
+    }
 }
 
-struct BundledJSONKBORepository: KBORepository, Sendable {
+struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Sendable {
     private let bundle: Bundle
     private let resourceName: String
     private let documentsDirectoryURL: URL?
@@ -95,6 +112,23 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
                 return components.year == month.year && components.month == month.month
             }
             .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail] {
+        let calendar = Calendar(identifier: .gregorian)
+        let dayComponents = calendar.dateComponents([.year, .month, .day], from: date)
+        return try await fetchMonthlySchedule(for: KBOMonthScheduleKey(date: date, calendar: calendar))
+            .filter { game in
+                let components = calendar.dateComponents([.year, .month, .day], from: game.scheduledStart)
+                return components.year == dayComponents.year &&
+                    components.month == dayComponents.month &&
+                    components.day == dayComponents.day &&
+                    game.involves(teamID: favoriteTeamId)
+            }
     }
 
     nonisolated private func loadBootstrap() async throws -> KBOBootstrapData {
@@ -296,7 +330,11 @@ struct BundledJSONKBORepository: KBORepository, Sendable {
             highlightText: game.highlightText,
             events: game.events,
             note: game.note,
-            providerGameID: game.providerGameID
+            providerGameID: game.providerGameID,
+            awayStartingPitcherName: game.awayStartingPitcherName,
+            homeStartingPitcherName: game.homeStartingPitcherName,
+            currentPitcherName: game.currentPitcherName,
+            currentBatterName: game.currentBatterName
         )
     }
 

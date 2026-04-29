@@ -24,6 +24,1021 @@ struct kboScoreTests {
         #expect(games.first?.homeTeam.id == "lg")
     }
 
+    @Test func countDisplayNormalizesTransitionalValues() throws {
+        #expect(KBOCountDisplay.balls(4) == 3)
+        #expect(KBOCountDisplay.strikes(3) == 2)
+        #expect(KBOCountDisplay.outs(3) == 2)
+        #expect(KBOCountDisplay.balls(-1) == 0)
+        #expect(KBOCountDisplay.strikes(nil) == nil)
+    }
+
+    @Test func homeSummaryUsesStartingPitchersFromSupabaseRows() throws {
+        let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260428-LOT-KIW",
+                    "provider": "kbo",
+                    "provider_game_id": "20260428WOLT0",
+                    "game_date": "2026-04-28",
+                    "scheduled_at": "2026-04-28T18:30:00+09:00",
+                    "stadium": "사직",
+                    "status": "scheduled",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": null,
+                    "away_score": null,
+                    "inning_state": null,
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "away_starting_pitcher_name": "알칸타라",
+                    "home_starting_pitcher_name": "김진욱"
+                  }
+                ]
+                """.utf8
+            )
+        )
+        let games = SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: SupabaseKBOMapper.mapTeams(teamRows),
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-28T12:00:00+09:00") }
+        )
+
+        let summary = try #require(model.filteredHomeGames.first)
+
+        #expect(summary.awayTeam.id == "kiwoom")
+        #expect(summary.homeTeam.id == "lotte")
+        #expect(summary.awayStartingPitcherName == "알칸타라")
+        #expect(summary.homeStartingPitcherName == "김진욱")
+    }
+
+    @Test func refreshHomeUpsertsTodaySchedulePitchersIntoLocalGames() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let localGame = makeGameDetail(
+            id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0"
+        )
+        let supabaseTodayGame = makeGameDetail(
+            id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260428-LOT-KIW provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00",
+            awayStartingPitcherName: "알칸타라",
+            homeStartingPitcherName: "김진욱"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [localGame], notifications: [], settings: .default)
+            },
+            fetchGames: { [localGame] },
+            fetchSchedule: { _ in [supabaseTodayGame] }
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadIfNeeded()
+
+        let summary = try #require(model.filteredHomeGames.first)
+        #expect(summary.awayStartingPitcherName == "알칸타라")
+        #expect(summary.homeStartingPitcherName == "김진욱")
+        #expect(model.games.count == 1)
+    }
+
+    @Test func refreshHomeDoesNotEraseExistingPitchersWhenTodayScheduleHasNilPitchers() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let localGame = makeGameDetail(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T08:00:00+09:00",
+            awayStartingPitcherName: "알칸타라",
+            homeStartingPitcherName: "김진욱"
+        )
+        let nilPitcherTodayGame = makeGameDetail(
+            id: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 1,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [localGame], notifications: [], settings: .default)
+            },
+            fetchGames: { [localGame] },
+            fetchSchedule: { _ in [nilPitcherTodayGame] }
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadIfNeeded()
+
+        let summary = try #require(model.filteredHomeGames.first)
+        #expect(summary.status == .live)
+        #expect(summary.awayScore == 1)
+        #expect(summary.homeScore == 0)
+        #expect(summary.awayStartingPitcherName == "알칸타라")
+        #expect(summary.homeStartingPitcherName == "김진욱")
+    }
+
+    @Test func todayRefreshUpdatesExistingScheduledGameToLiveScoreAndInning() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let scheduled = makeGameDetail(
+            id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:30:00+09:00"
+        )
+        let live = makeGameDetail(
+            id: UUID(uuidString: "88888888-8888-8888-8888-888888888888")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Top 6",
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [scheduled], notifications: [], settings: .default)
+            },
+            fetchGames: { [scheduled] },
+            fetchSchedule: { _ in [live] }
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadIfNeeded()
+        let summary = try #require(model.filteredHomeGames.first)
+
+        #expect(model.games.count == 1)
+        #expect(summary.status == .live)
+        #expect(summary.awayScore == 3)
+        #expect(summary.homeScore == 2)
+        #expect(summary.inningText == "Top 6")
+    }
+
+    @Test func localMonthCacheDoesNotOverwriteTodayLiveStatus() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let scheduled = makeGameDetail(
+            id: UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0"
+        )
+        let live = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 1,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 5",
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [scheduled], notifications: [], settings: .default)
+            },
+            fetchGames: { [scheduled] },
+            fetchSchedule: { _ in [live] }
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadIfNeeded()
+        await model.loadScheduleIfNeeded(for: referenceDate)
+        let game = try #require(model.scheduleGames(on: referenceDate, filter: .all).first)
+
+        #expect(game.status == .live)
+        #expect(game.awayScore == 4)
+        #expect(game.homeScore == 1)
+        #expect(game.inningText == "Bottom 5")
+    }
+
+    @Test func todayOnlyScheduleRefreshPreservesOtherMonthGames() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let otherDate = isoDate("2026-04-29T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let todayScheduled = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-000000000001")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0"
+        )
+        let tomorrowScheduled = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-000000000002")!,
+            scheduledStart: otherDate,
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260429WOLT0"
+        )
+        let todayLive = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-bbbb-cccc-dddd-000000000003")!,
+            scheduledStart: todayScheduled.scheduledStart,
+            venue: todayScheduled.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "7회말",
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T19:30:00+09:00"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [todayScheduled], notifications: [], settings: .default)
+            },
+            fetchMonthlySchedule: { _ in [todayScheduled, tomorrowScheduled] },
+            fetchSchedule: { _ in [todayLive] }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [todayScheduled], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadScheduleIfNeeded(for: referenceDate)
+        await model.refreshScheduleDay(for: referenceDate)
+
+        let todayGame = try #require(model.scheduleGames(on: referenceDate, filter: .all).first)
+        let tomorrowGame = try #require(model.scheduleGames(on: otherDate, filter: .all).first)
+
+        #expect(todayGame.status == .live)
+        #expect(todayGame.awayScore == 4)
+        #expect(tomorrowGame.id == tomorrowScheduled.id)
+        #expect(tomorrowGame.status == .upcoming)
+    }
+
+    @Test func detailLookupResolvesLatestMatchingGameInsteadOfStaleSelectedID() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let stale = makeGameDetail(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let latest = makeGameDetail(
+            id: UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 2,
+            homeScore: 5,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Top 5",
+            note: "public_game_id=20260428-LOT-KIW"
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [stale, latest], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        let resolved = try #require(model.game(withID: stale.id))
+
+        #expect(resolved.status == .live)
+        #expect(resolved.awayScore == 2)
+        #expect(resolved.homeScore == 5)
+        #expect(resolved.inningText == "Top 5")
+    }
+
+    @Test func gameDetailViewModelRefreshesSelectedGameWithoutFetchingAllGames() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "abababab-abab-abab-abab-abababababab")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0"
+        )
+        let live = makeGameDetail(
+            id: UUID(uuidString: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")!,
+            scheduledStart: selected.scheduledStart,
+            venue: selected.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 2,
+            homeScore: 1,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "6회초",
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T19:30:00+09:00",
+            currentPitcherName: "김투수",
+            currentBatterName: "홍길동"
+        )
+        let allGamesFetchCounter = FetchCounter()
+        let detailFetchCounter = FetchCounter()
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(
+                fetchBootstrapData: {
+                    KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default)
+                },
+                fetchGames: {
+                    await allGamesFetchCounter.increment()
+                    return [selected]
+                }
+            ),
+            fetchGameDetailSnapshot: { _, _, _ in
+                await detailFetchCounter.increment()
+                return live
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = GameDetailViewModel(gameIdentity: selected.canonicalGameIdentityValue, initialGame: selected)
+
+        let refreshed = await viewModel.refreshIfNeeded(appModel: model, bypassAutomaticThrottle: true)
+
+        #expect(await detailFetchCounter.value == 1)
+        #expect(await allGamesFetchCounter.value == 0)
+        #expect(refreshed?.status == .live)
+        #expect(refreshed?.currentBatterName == "홍길동")
+        #expect(refreshed?.currentPitcherName == "김투수")
+    }
+
+    @Test func supabaseGameRowDecodesWithoutOfficialProviderGameID() throws {
+        let awayTeamID = UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!
+        let homeTeamID = UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!
+        let gameID = UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff")!
+        let row = try #require(JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260428-LOT-KIW",
+                    "provider": "kbo",
+                    "provider_game_id": "20260428WOLT0",
+                    "game_date": "2026-04-28",
+                    "scheduled_at": "2026-04-28T18:30:00+09:00",
+                    "stadium": "사직",
+                    "status": "live",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": 5,
+                    "away_score": 4,
+                    "inning_state": "Bottom 6",
+                    "is_cancelled": false,
+                    "is_postponed": false
+                  }
+                ]
+                """.utf8
+            )
+        ).first)
+
+        #expect(row.providerGameID == "20260428WOLT0")
+        #expect(row.officialProviderGameID == nil)
+        #expect(row.status == "live")
+        #expect(row.homeScore == 5)
+    }
+
+    @Test func supabaseLatestSnapshotMapsCurrentBatterAndPitcherFields() throws {
+        let gameID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let row = try JSONDecoder().decode(
+            SupabaseLatestGameSnapshotRow.self,
+            from: Data(
+                """
+                {
+                  "game_id": "\(gameID.uuidString)",
+                  "inning_label": "7회말",
+                  "balls": 2,
+                  "strikes": 1,
+                  "outs": 0,
+                  "runner_on_first": true,
+                  "runner_on_second": false,
+                  "runner_on_third": true,
+                  "current_pitcher_name": "김투수",
+                  "current_batter_name": "홍길동"
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.gameID == gameID)
+        #expect(row.currentPitcherName == "김투수")
+        #expect(row.currentBatterName == "홍길동")
+    }
+
+    @Test func supabaseLatestSnapshotMapsKnownPlayerAliases() throws {
+        let gameID = UUID(uuidString: "22222222-3333-4444-5555-666666666666")!
+        let row = try JSONDecoder().decode(
+            SupabaseLatestGameSnapshotRow.self,
+            from: Data(
+                """
+                {
+                  "game_id": "\(gameID.uuidString)",
+                  "inning_label": "8회초",
+                  "pitcher_name": "박투수",
+                  "hitter_name": "이타자"
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.currentPitcherName == "박투수")
+        #expect(row.currentBatterName == "이타자")
+    }
+
+    @Test func supabaseGamesSelectUsesOnlyCurrentGamesSchemaColumns() throws {
+        let columns = SupabaseKBORepository.gameSelectColumns
+            .split(separator: ",")
+            .map(String.init)
+        let currentSchemaColumns: Set<String> = [
+            "id",
+            "public_game_id",
+            "provider",
+            "provider_game_id",
+            "game_date",
+            "scheduled_at",
+            "stadium",
+            "status",
+            "home_team_id",
+            "away_team_id",
+            "home_score",
+            "away_score",
+            "inning_state",
+            "is_cancelled",
+            "is_postponed",
+            "source_updated_at",
+            "created_at",
+            "updated_at",
+            "cancel_reason",
+            "raw_cancel_text",
+            "home_starting_pitcher_name",
+            "away_starting_pitcher_name",
+            "lineup_data",
+            "status_reason",
+            "final_confirmed_at",
+            "live_last_checked_at",
+            "official_provider_game_id"
+        ]
+
+        #expect(columns.contains("stadium_code") == false)
+        #expect(columns.contains("stadium") == true)
+        #expect(columns.contains("official_provider_game_id") == true)
+        #expect(Set(columns).isSubset(of: currentSchemaColumns))
+    }
+
+    @Test func supabaseGameRowMapsStadiumIntoVenueWithoutStadiumCode() throws {
+        let awayTeamID = UUID(uuidString: "10101010-1010-1010-1010-101010101010")!
+        let homeTeamID = UUID(uuidString: "20202020-2020-2020-2020-202020202020")!
+        let gameID = UUID(uuidString: "30303030-3030-3030-3030-303030303030")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: Data(
+                """
+                [
+                  {
+                    "id": "\(gameID.uuidString)",
+                    "public_game_id": "20260428-LOT-KIW",
+                    "provider": "kbo",
+                    "provider_game_id": "20260428WOLT0",
+                    "official_provider_game_id": "20260428WOLT0",
+                    "game_date": "2026-04-28",
+                    "scheduled_at": "2026-04-28T18:30:00+09:00",
+                    "stadium": "고척",
+                    "status": "live",
+                    "home_team_id": "\(homeTeamID.uuidString)",
+                    "away_team_id": "\(awayTeamID.uuidString)",
+                    "home_score": 6,
+                    "away_score": 2,
+                    "inning_state": "Top 7",
+                    "is_cancelled": false,
+                    "is_postponed": false,
+                    "away_starting_pitcher_name": "후라도",
+                    "home_starting_pitcher_name": "박세웅"
+                  }
+                ]
+                """.utf8
+            )
+        )
+
+        let game = try #require(SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows).first)
+
+        #expect(game.venue == "고척")
+        #expect(game.status == .live)
+        #expect(game.awayScore == 2)
+        #expect(game.homeScore == 6)
+        #expect(game.inningText == "Top 7")
+        #expect(game.awayStartingPitcherName == "후라도")
+        #expect(game.homeStartingPitcherName == "박세웅")
+    }
+
+    @Test func supabaseTodayRefreshSuppressesLocalFallbackWhenBypassingCache() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let tracker = ScheduleSyncTestTracker()
+        let bootstrap = MockKBOData.makeBootstrap()
+        let repository = SupabaseBackedKBORepository(
+            base: ScheduleSyncTestRepository(
+                bootstrap: bootstrap,
+                remoteCount: bootstrap.games.count,
+                missingGames: [],
+                todayGames: bootstrap.games,
+                tracker: tracker
+            ),
+            source: FailingSupabaseSource(),
+            runtimeState: nil
+        )
+
+        var didThrow = false
+        do {
+            _ = try await repository.fetchSchedule(for: referenceDate, bypassingCache: true)
+        } catch {
+            didThrow = true
+        }
+
+        #expect(didThrow)
+        #expect(await tracker.dailyScheduleFetches == 0)
+    }
+
+    @Test func todayFallbackUpcomingRowsDoNotOverwriteLiveTodayRows() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let live = makeGameDetail(
+            id: UUID(uuidString: "40404040-4040-4040-4040-404040404040")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 8,
+            homeScore: 7,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 8",
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00",
+            awayStartingPitcherName: "후라도",
+            homeStartingPitcherName: "박세웅"
+        )
+        let fallbackUpcoming = makeGameDetail(
+            id: UUID(uuidString: "50505050-5050-5050-5050-505050505050")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [live], notifications: [], settings: .default)
+            },
+            fetchGames: { [live] },
+            fetchSchedule: { _ in [fallbackUpcoming] }
+        )
+        let model = AppModel(
+            repository: repository,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        await model.loadIfNeeded()
+        let game = try #require(model.filteredHomeGames.first)
+
+        #expect(game.status == .live)
+        #expect(game.awayScore == 8)
+        #expect(game.homeScore == 7)
+        #expect(game.inningText == "Bottom 8")
+        #expect(game.awayStartingPitcherName == "후라도")
+        #expect(game.homeStartingPitcherName == "박세웅")
+    }
+
+    @Test func gameDetailSingleFetchByPublicGameIDReturnsOneRowWithoutDateFetch() async throws {
+        let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
+        let awayTeamID = UUID(uuidString: "61616161-6161-6161-6161-616161616161")!
+        let homeTeamID = UUID(uuidString: "62626262-6262-6262-6262-626262626262")!
+        let teams = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "63636363-6363-6363-6363-636363636363")!,
+            scheduledStart: referenceDate,
+            venue: "사직",
+            awayTeam: SupabaseKBOMapper.mapTeam(teams[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teams[1]),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260428-LOT-KIW"
+        )
+        let row = try makeSupabaseGameRow(
+            id: UUID(uuidString: "64646464-6464-6464-6464-646464646464")!,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 2,
+            homeScore: 5,
+            inningState: "Top 8"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(teamRows: teams, gameRows: [row], tracker: tracker),
+            runtimeState: nil
+        )
+
+        let snapshot = try await repository.fetchGameDetailSnapshot(
+            for: selected,
+            identity: selected.canonicalGameIdentityValue,
+            cachedTeams: [selected.awayTeam, selected.homeTeam]
+        )
+
+        #expect(snapshot?.status == .live)
+        #expect(snapshot?.awayScore == 2)
+        #expect(snapshot?.homeScore == 5)
+        #expect(snapshot?.inningText == "Top 8")
+        #expect(await tracker.singleLookups == [.publicGameID("20260428-LOT-KIW")])
+        #expect(await tracker.dateFetches == 0)
+        #expect(await tracker.teamFetches == 0)
+    }
+
+    @Test func gameDetailSingleFetchByProviderGameIDReturnsOneRow() async throws {
+        let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
+        let awayTeamID = UUID(uuidString: "71717171-7171-7171-7171-717171717171")!
+        let homeTeamID = UUID(uuidString: "72727272-7272-7272-7272-727272727272")!
+        let teams = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "73737373-7373-7373-7373-737373737373")!,
+            scheduledStart: referenceDate,
+            venue: "사직",
+            awayTeam: SupabaseKBOMapper.mapTeam(teams[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teams[1]),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260428-LOT-KIW provider_game_id=20260428WOLT0"
+        )
+        let row = try makeSupabaseGameRow(
+            id: UUID(uuidString: "74747474-7474-7474-7474-747474747474")!,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 3,
+            homeScore: 4,
+            inningState: "Bottom 7"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(teamRows: teams, gameRows: [row], tracker: tracker),
+            runtimeState: nil
+        )
+
+        let snapshot = try await repository.fetchGameDetailSnapshot(
+            for: selected,
+            identity: selected.canonicalGameIdentityValue,
+            cachedTeams: [selected.awayTeam, selected.homeTeam]
+        )
+
+        #expect(snapshot?.status == .live)
+        #expect(snapshot?.awayScore == 3)
+        #expect(snapshot?.homeScore == 4)
+        #expect(await tracker.singleLookups == [.providerGameID("20260428WOLT0")])
+        #expect(await tracker.dateFetches == 0)
+        #expect(await tracker.teamFetches == 0)
+    }
+
+    @Test func gameDetailSingleFetchFallsBackByDateAndTeams() async throws {
+        let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
+        let awayTeamID = UUID(uuidString: "81818181-8181-8181-8181-818181818181")!
+        let homeTeamID = UUID(uuidString: "82828282-8282-8282-8282-828282828282")!
+        let teams = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "83838383-8383-8383-8383-838383838383")!,
+            scheduledStart: referenceDate,
+            venue: "사직",
+            awayTeam: SupabaseKBOMapper.mapTeam(teams[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teams[1]),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let row = try makeSupabaseGameRow(
+            id: UUID(uuidString: "84848484-8484-8484-8484-848484848484")!,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 1,
+            homeScore: 6,
+            inningState: "Top 5"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(teamRows: teams, gameRows: [row], tracker: tracker),
+            runtimeState: nil
+        )
+
+        let snapshot = try await repository.fetchGameDetailSnapshot(
+            for: selected,
+            identity: selected.id.uuidString,
+            cachedTeams: [selected.awayTeam, selected.homeTeam]
+        )
+
+        #expect(snapshot?.status == .live)
+        #expect(snapshot?.awayScore == 1)
+        #expect(snapshot?.homeScore == 6)
+        #expect(snapshot?.inningText == "Top 5")
+        #expect(await tracker.singleLookups == [
+            .databaseID(selected.id),
+            .dateTeamIDs(gameDate: "2026-04-28", awayTeamID: awayTeamID, homeTeamID: homeTeamID)
+        ])
+        #expect(await tracker.dateFetches == 0)
+        #expect(await tracker.teamFetches == 1)
+    }
+
+    @Test func gameDetailRefreshUpdatesOnlySelectedEquivalentGame() async throws {
+        let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
+        let awayTeamID = UUID(uuidString: "91919191-9191-9191-9191-919191919191")!
+        let homeTeamID = UUID(uuidString: "92929292-9292-9292-9292-929292929292")!
+        let teams = [
+            SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let awayTeam = SupabaseKBOMapper.mapTeam(teams[0])
+        let homeTeam = SupabaseKBOMapper.mapTeam(teams[1])
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "93939393-9393-9393-9393-939393939393")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260428-LOT-KIW provider_game_id=20260428WOLT0"
+        )
+        let other = makeGameDetail(
+            id: UUID(uuidString: "94949494-9494-9494-9494-949494949494")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: homeTeam,
+            homeTeam: awayTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260428-KIW-LOT provider_game_id=20260428LTWO0"
+        )
+        let selectedRow = try makeSupabaseGameRow(
+            id: UUID(uuidString: "95959595-9595-9595-9595-959595959595")!,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 2,
+            homeScore: 5,
+            inningState: "Top 8"
+        )
+        let otherRow = try makeSupabaseGameRow(
+            id: UUID(uuidString: "96969696-9696-9696-9696-969696969696")!,
+            publicGameID: "20260428-KIW-LOT",
+            providerGameID: "20260428LTWO0",
+            stadium: "잠실",
+            awayTeamID: homeTeamID,
+            homeTeamID: awayTeamID,
+            awayScore: 7,
+            homeScore: 7,
+            inningState: "Bottom 9"
+        )
+        let tracker = DetailFetchTracker()
+        let supabaseRepository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchGames: { [selected, other] }),
+            source: TrackingSupabaseSource(teamRows: teams, gameRows: [selectedRow, otherRow], tracker: tracker),
+            runtimeState: nil
+        )
+        let repository = AnyKBORepository(
+            CachedKBORepository(
+                base: AnyKBORepository(supabaseRepository),
+                configuration: .supabaseStartup,
+                runtimeState: nil
+            )
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: [awayTeam, homeTeam], games: [selected, other], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        let refreshed = await model.refreshGameDetail(for: selected.canonicalGameIdentityValue)
+        let selectedAfter = try #require(model.game(withIdentity: selected.canonicalGameIdentityValue))
+        let otherAfter = try #require(model.game(withIdentity: other.canonicalGameIdentityValue))
+
+        #expect(refreshed?.status == .live)
+        #expect(selectedAfter.status == .live)
+        #expect(selectedAfter.awayScore == 2)
+        #expect(selectedAfter.homeScore == 5)
+        #expect(selectedAfter.inningText == "Top 8")
+        #expect(otherAfter.status == .upcoming)
+        #expect(otherAfter.awayScore == nil)
+        #expect(otherAfter.homeScore == nil)
+        #expect(await tracker.dateFetches == 0)
+        #expect(await tracker.singleLookups == [.providerGameID("20260428WOLT0")])
+        #expect(await tracker.teamFetches == 0)
+    }
+
+    @Test func repositoryCacheUpsertPreservesExistingPitchersWhenIncomingPitchersAreNil() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T08:00:00+09:00",
+            awayStartingPitcherName: "알칸타라",
+            homeStartingPitcherName: "김진욱"
+        )
+        let incoming = makeGameDetail(
+            id: UUID(uuidString: "66666666-6666-6666-6666-666666666666")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 1,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLT0 updated_at=2026-04-28T09:00:00+09:00"
+        )
+        let cacheDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let repository = CachedKBORepository(
+            base: StubRepository(fetchGames: { [existing] }),
+            configuration: RepositoryCacheConfiguration(
+                bootstrapTTL: 60,
+                gamesTTL: 60,
+                notificationsTTL: 60,
+                monthlyScheduleTTL: 60,
+                diskCacheDirectory: cacheDirectory
+            ),
+            runtimeState: nil
+        )
+
+        _ = try await repository.fetchGames()
+        let result = await repository.upsertLocalGames([incoming])
+        let cached = try await repository.fetchGames()
+        let game = try #require(cached.first)
+
+        #expect(result.updated == 1)
+        #expect(cached.count == 1)
+        #expect(game.status == .live)
+        #expect(game.awayStartingPitcherName == "알칸타라")
+        #expect(game.homeStartingPitcherName == "김진욱")
+    }
+
     @Test func myTeamNotificationFilterOnlyReturnsFavoriteTeamAlerts() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap())
         model.notificationFilter = .myTeam
@@ -631,6 +1646,171 @@ struct kboScoreTests {
 
         #expect(collector.requests.count == 1)
         #expect(collector.requests.first?.content.body == "[LG] 금일 경기는 우천으로 인해 취소되었습니다.")
+    }
+
+    @Test func scoringTransitionSchedulesFormattedLiveNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let lotte = try #require(base.teams.first(where: { $0.id == "lotte" }))
+        let providerID = "20260417LTLG0"
+        let previous = makeGameDetail(
+            id: UUID(uuidString: "95100000-0000-0000-0000-000000000001")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "3회말",
+            providerGameID: providerID
+        )
+        let scoring = makeGameDetail(
+            id: UUID(uuidString: "95100000-0000-0000-0000-000000000002")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "3회말",
+            providerGameID: providerID,
+            highlightText: "적시타",
+            currentPitcherName: "김투수",
+            currentBatterName: "홍길동"
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [scoring] }),
+            bootstrap: KBOBootstrapData(teams: [lg, lotte], games: [previous], notifications: [], settings: base.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshSchedule(for: scheduledStart)
+
+        #expect(collector.requests.count == 1)
+        #expect(collector.requests.first?.content.body == "홍길동 이 김투수 을 상대로 적시타.\n2득점")
+    }
+
+    @Test func inningOnlyLiveTransitionDoesNotScheduleNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let lotte = try #require(base.teams.first(where: { $0.id == "lotte" }))
+        let providerID = "20260417LTLG0"
+        let previous = makeGameDetail(
+            id: UUID(uuidString: "95200000-0000-0000-0000-000000000001")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "3회말",
+            providerGameID: providerID
+        )
+        let inningChanged = makeGameDetail(
+            id: UUID(uuidString: "95200000-0000-0000-0000-000000000002")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "4회초",
+            providerGameID: providerID
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [inningChanged] }),
+            bootstrap: KBOBootstrapData(teams: [lg, lotte], games: [previous], notifications: [], settings: base.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshSchedule(for: scheduledStart)
+
+        #expect(collector.requests.isEmpty)
+    }
+
+    @Test func onBaseTransitionSchedulesFormattedLiveNotification() async throws {
+        let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
+        let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
+        let base = MockKBOData.makeBootstrap(now: referenceNow)
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let lotte = try #require(base.teams.first(where: { $0.id == "lotte" }))
+        let providerID = "20260417LTLG0"
+        let previous = makeGameDetail(
+            id: UUID(uuidString: "95300000-0000-0000-0000-000000000001")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "3회말",
+            providerGameID: providerID,
+            bases: .empty,
+            outs: 1
+        )
+        let onBase = makeGameDetail(
+            id: UUID(uuidString: "95300000-0000-0000-0000-000000000002")!,
+            scheduledStart: scheduledStart,
+            venue: "잠실",
+            awayTeam: lotte,
+            homeTeam: lg,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "3회말",
+            providerGameID: providerID,
+            bases: RunnerState(first: true, second: false, third: false),
+            outs: 1,
+            highlightText: "사구",
+            currentPitcherName: "김투수",
+            currentBatterName: "홍길동"
+        )
+        let collector = NotificationRequestCollector()
+        let model = AppModel(
+            repository: StubRepository(fetchMonthlySchedule: { _ in [onBase] }),
+            bootstrap: KBOBootstrapData(teams: [lg, lotte], games: [previous], notifications: [], settings: base.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceNow },
+            cancellationNotificationScheduler: { request in
+                await collector.append(request)
+            }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.notificationAuthorizationStatus = .authorized
+
+        await model.refreshSchedule(for: scheduledStart)
+
+        #expect(collector.requests.count == 1)
+        #expect(collector.requests.first?.content.body == "홍길동 이 김투수 을 상대로 사구.")
     }
 
     @Test func homeRainoutTransitionSchedulesLocalNotificationOnce() async throws {
@@ -1311,6 +2491,8 @@ struct kboScoreTests {
 
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
+        #expect(KBODataMapper.mapGameStatus(code: "in_progress", text: nil) == .live)
+        #expect(KBODataMapper.mapGameStatus(code: "running", text: nil) == .live)
         #expect(KBODataMapper.mapGameStatus(code: "finished", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: "completed", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
@@ -1605,6 +2787,46 @@ struct kboScoreTests {
         #else
         Issue.record("ActivityKit unavailable in this test environment")
         #endif
+    }
+
+    @Test func liveActivityContentStateIncludesCurrentBatterAndPitcher() async throws {
+        #if canImport(ActivityKit)
+        let bootstrap = MockKBOData.makeBootstrap()
+        let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" && $0.status == .live }))
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: baseGame.status,
+            seasonClassification: baseGame.seasonClassification,
+            inningText: baseGame.inningText,
+            currentPitcherName: "김투수",
+            currentBatterName: "홍길동"
+        )
+
+        let contentState = try #require(FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: "lg")).contentState()
+
+        #expect(contentState.currentBatterName == "홍길동")
+        #expect(contentState.currentPitcherName == "김투수")
+        #else
+        Issue.record("ActivityKit unavailable in this test environment")
+        #endif
+    }
+
+    @Test func liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstFingerprint = "4|3|7회말|B2|S1|O0|홍길동|김투수"
+        let changedFingerprint = "4|3|7회말|B2|S1|O0|박타자|김투수"
+
+        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: firstFingerprint) == false)
+        deduper.record(gameID: gameID, contentFingerprint: firstFingerprint)
+        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: firstFingerprint))
+        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: changedFingerprint) == false)
     }
 
     @Test func liveActivityToggleUsesSupportedControllerForFavoriteLiveGame() async throws {
@@ -4360,8 +5582,143 @@ private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
         gameRows
     }
 
+    nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
         gameRows
+    }
+
+    nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
+        Array(gameRows.filter { row in
+            switch lookup {
+            case .providerGameID(let providerGameID):
+                return row.providerGameID == providerGameID
+            case .publicGameID(let publicGameID):
+                return row.publicGameID == publicGameID
+            case .databaseID(let id):
+                return row.id == id
+            case .dateTeamIDs(let gameDate, let awayTeamID, let homeTeamID):
+                return row.gameDate == gameDate &&
+                    row.awayTeamID == awayTeamID &&
+                    row.homeTeamID == homeTeamID
+            case .dateTeamVenue(let gameDate, let awayTeamID, let homeTeamID, let stadium):
+                return row.gameDate == gameDate &&
+                    row.awayTeamID == awayTeamID &&
+                    row.homeTeamID == homeTeamID &&
+                    row.stadium == stadium
+            }
+        }.prefix(1))
+    }
+
+    nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
+        []
+    }
+
+    nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
+        nil
+    }
+}
+
+private actor DetailFetchTracker {
+    private(set) var singleLookups: [SupabaseGameLookup] = []
+    private(set) var dateFetches = 0
+    private(set) var teamFetches = 0
+
+    func recordSingleLookup(_ lookup: SupabaseGameLookup) {
+        singleLookups.append(lookup)
+    }
+
+    func recordDateFetch() {
+        dateFetches += 1
+    }
+
+    func recordTeamFetch() {
+        teamFetches += 1
+    }
+}
+
+private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
+    let teamRows: [SupabaseTeamRow]
+    let gameRows: [SupabaseGameRow]
+    let tracker: DetailFetchTracker
+
+    nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
+        await tracker.recordTeamFetch()
+        return teamRows
+    }
+
+    nonisolated func fetchGameCount() async throws -> Int {
+        gameRows.count
+    }
+
+    nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
+        gameRows.filter { row in
+            guard let providerGameID = row.providerGameID else { return true }
+            return providerGameIDs.contains(providerGameID) == false
+        }
+    }
+
+    nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
+        await tracker.recordDateFetch()
+        return gameRows
+    }
+
+    nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
+        await tracker.recordDateFetch()
+        return gameRows
+    }
+
+    nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
+        gameRows
+    }
+
+    nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
+        await tracker.recordSingleLookup(lookup)
+        return Array(gameRows.filter { row in
+            switch lookup {
+            case .providerGameID(let providerGameID):
+                return row.providerGameID == providerGameID
+            case .publicGameID(let publicGameID):
+                return row.publicGameID == publicGameID
+            case .databaseID(let id):
+                return row.id == id
+            case .dateTeamIDs(let gameDate, let awayTeamID, let homeTeamID):
+                return row.gameDate == gameDate &&
+                    row.awayTeamID == awayTeamID &&
+                    row.homeTeamID == homeTeamID
+            case .dateTeamVenue(let gameDate, let awayTeamID, let homeTeamID, let stadium):
+                return row.gameDate == gameDate &&
+                    row.awayTeamID == awayTeamID &&
+                    row.homeTeamID == homeTeamID &&
+                    row.stadium == stadium
+            }
+        }.prefix(1))
+    }
+
+    nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
+        []
+    }
+
+    nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
+        nil
     }
 }
 
@@ -4470,7 +5827,27 @@ private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
         throw error
     }
 
+    nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
+        throw error
+    }
+
+    nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
+        throw error
+    }
+
+    nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         throw error
     }
 }
@@ -4763,6 +6140,55 @@ private struct StubRepository: KBORepository {
     }
 }
 
+private struct DetailSnapshotStubRepository: KBORepository, KBOGameDetailSnapshotDataSource {
+    let base: StubRepository
+    let fetchGameDetailSnapshotHandler: @Sendable (GameDetail, String, [Team]) async throws -> GameDetail?
+
+    init(
+        base: StubRepository,
+        fetchGameDetailSnapshot: @escaping @Sendable (GameDetail, String, [Team]) async throws -> GameDetail?
+    ) {
+        self.base = base
+        self.fetchGameDetailSnapshotHandler = fetchGameDetailSnapshot
+    }
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        try await base.fetchBootstrapData()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await base.fetchGames()
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await base.fetchNotifications()
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        try await base.fetchMonthlySchedule(for: month)
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
+    }
+
+    nonisolated func fetchGameDetailSnapshot(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        try await fetchGameDetailSnapshotHandler(game, identity, cachedTeams)
+    }
+}
+
 private func stubBootstrap() -> KBOBootstrapData {
     MockKBOData.makeBootstrap()
 }
@@ -4807,8 +6233,18 @@ private func makeGameDetail(
     homeScore: Int?,
     status: GameStatus,
     seasonClassification: GameSeasonClassification = .unknown,
+    inningText: String? = nil,
     note: String? = nil,
-    providerGameID: String? = nil
+    providerGameID: String? = nil,
+    awayStartingPitcherName: String? = nil,
+    homeStartingPitcherName: String? = nil,
+    bases: RunnerState? = nil,
+    balls: Int? = nil,
+    strikes: Int? = nil,
+    outs: Int? = nil,
+    highlightText: String? = nil,
+    currentPitcherName: String? = nil,
+    currentBatterName: String? = nil
 ) -> GameDetail {
     GameDetail(
         id: id,
@@ -4820,16 +6256,61 @@ private func makeGameDetail(
         homeScore: homeScore,
         status: status,
         seasonClassification: seasonClassification,
-        inningText: status.title,
-        bases: nil,
-        balls: nil,
-        strikes: nil,
-        outs: nil,
-        highlightText: nil,
+        inningText: inningText ?? status.title,
+        bases: bases,
+        balls: balls,
+        strikes: strikes,
+        outs: outs,
+        highlightText: highlightText,
         events: [],
         note: note,
-        providerGameID: providerGameID
+        providerGameID: providerGameID,
+        awayStartingPitcherName: awayStartingPitcherName,
+        homeStartingPitcherName: homeStartingPitcherName,
+        currentPitcherName: currentPitcherName,
+        currentBatterName: currentBatterName
     )
+}
+
+private func makeSupabaseGameRow(
+    id: UUID,
+    publicGameID: String,
+    providerGameID: String,
+    gameDate: String = "2026-04-28",
+    scheduledAt: String = "2026-04-28T18:30:00+09:00",
+    stadium: String = "사직",
+    status: String = "live",
+    awayTeamID: UUID,
+    homeTeamID: UUID,
+    awayScore: Int,
+    homeScore: Int,
+    inningState: String
+) throws -> SupabaseGameRow {
+    let payload = """
+    [
+      {
+        "id": "\(id.uuidString)",
+        "public_game_id": "\(publicGameID)",
+        "provider": "kbo",
+        "provider_game_id": "\(providerGameID)",
+        "official_provider_game_id": "\(providerGameID)",
+        "game_date": "\(gameDate)",
+        "scheduled_at": "\(scheduledAt)",
+        "stadium": "\(stadium)",
+        "status": "\(status)",
+        "home_team_id": "\(homeTeamID.uuidString)",
+        "away_team_id": "\(awayTeamID.uuidString)",
+        "home_score": \(homeScore),
+        "away_score": \(awayScore),
+        "inning_state": "\(inningState)",
+        "is_cancelled": false,
+        "is_postponed": false,
+        "source_updated_at": "2026-04-28T20:00:00+09:00",
+        "updated_at": "2026-04-28T20:00:00+09:00"
+      }
+    ]
+    """
+    return try JSONDecoder().decode([SupabaseGameRow].self, from: Data(payload.utf8))[0]
 }
 
 @MainActor

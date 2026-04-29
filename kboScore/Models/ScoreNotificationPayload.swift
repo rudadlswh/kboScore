@@ -11,6 +11,7 @@ import UserNotifications
 enum ScoreNotificationEventType: String, Codable, Sendable {
     case gameStart
     case scoreChange
+    case onBase
     case leadChange
     case gameEnd
     case rainDelay

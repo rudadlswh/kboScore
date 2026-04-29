@@ -30,7 +30,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "오늘 경기")
 
                             if let todayGame = appModel.myTeamTodayGame {
-                                NavigationLink(value: appModel.gameNavigationIdentity(for: todayGame)) {
+                                NavigationLink(value: todayGame) {
                                     GameCardView(summary: todayGame.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -71,7 +71,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "다음 경기")
 
                             if let nextGame = appModel.myTeamNextGame {
-                                NavigationLink(value: appModel.gameNavigationIdentity(for: nextGame)) {
+                                NavigationLink(value: nextGame) {
                                     GameCardView(summary: nextGame.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -88,7 +88,7 @@ struct MyTeamView: View {
                             SectionTitleView(title: "최근 결과")
 
                             if let recentResult = appModel.myTeamRecentResult {
-                                NavigationLink(value: appModel.gameNavigationIdentity(for: recentResult)) {
+                                NavigationLink(value: recentResult) {
                                     GameCardView(summary: recentResult.summary(isMyTeamGame: true))
                                 }
                                 .buttonStyle(.plain)
@@ -133,6 +133,9 @@ struct MyTeamView: View {
             }
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
+            }
+            .navigationDestination(for: GameDetail.self) { game in
+                GameDetailView(game: game)
             }
         }
     }

@@ -37,7 +37,10 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        #if DEBUG
+        print("[NotificationPipeline] delivered id=\(notification.request.identifier)")
+        #endif
+        return [.banner, .sound]
     }
 
     func userNotificationCenter(

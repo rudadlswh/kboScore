@@ -403,7 +403,11 @@ struct OfficialKBOGameCenterClient: Sendable {
             highlightText: game.highlightText,
             events: game.events,
             note: game.note,
-            providerGameID: game.providerGameID
+            providerGameID: game.providerGameID,
+            awayStartingPitcherName: game.awayStartingPitcherName,
+            homeStartingPitcherName: game.homeStartingPitcherName,
+            currentPitcherName: game.currentPitcherName,
+            currentBatterName: game.currentBatterName
         )
     }
 

@@ -29,8 +29,28 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     let runnerOnFirst: Bool?
     let runnerOnSecond: Bool?
     let runnerOnThird: Bool?
+    let currentBatterName: String?
+    let currentPitcherName: String?
     let venue: String
     let isHomeGame: Bool
+
+    var contentFingerprint: String {
+        var parts: [String] = []
+        parts.append(gameID.uuidString)
+        parts.append(favoriteScoreText)
+        parts.append(opponentScoreText)
+        parts.append(inningText)
+        parts.append(summaryText)
+        parts.append(balls.map(String.init) ?? "-")
+        parts.append(strikes.map(String.init) ?? "-")
+        parts.append(outs.map(String.init) ?? "-")
+        parts.append(runnerOnFirst.map(String.init) ?? "-")
+        parts.append(runnerOnSecond.map(String.init) ?? "-")
+        parts.append(runnerOnThird.map(String.init) ?? "-")
+        parts.append(currentBatterName ?? "-")
+        parts.append(currentPitcherName ?? "-")
+        return parts.joined(separator: "|")
+    }
 
     static func make(from game: GameDetail, favoriteTeamID: String?) -> FavoriteTeamLiveActivitySnapshot? {
         guard let favoriteTeamID else { return nil }
@@ -75,6 +95,8 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
             runnerOnFirst: game.bases?.first,
             runnerOnSecond: game.bases?.second,
             runnerOnThird: game.bases?.third,
+            currentBatterName: game.currentBatterName,
+            currentPitcherName: game.currentPitcherName,
             venue: game.venue,
             isHomeGame: isHomeGame
         )
@@ -106,10 +128,33 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
             outs: outs,
             runnerOnFirst: runnerOnFirst,
             runnerOnSecond: runnerOnSecond,
-            runnerOnThird: runnerOnThird
+            runnerOnThird: runnerOnThird,
+            currentBatterName: currentBatterName,
+            currentPitcherName: currentPitcherName
         )
     }
     #endif
+}
+
+public struct FavoriteTeamLiveActivityUpdateDeduper: Sendable {
+    private var activeGameID: UUID?
+    private var contentFingerprint: String?
+
+    public init() {}
+
+    public func isDuplicate(gameID: UUID, contentFingerprint: String) -> Bool {
+        activeGameID == gameID && self.contentFingerprint == contentFingerprint
+    }
+
+    public mutating func record(gameID: UUID, contentFingerprint: String) {
+        activeGameID = gameID
+        self.contentFingerprint = contentFingerprint
+    }
+
+    public mutating func reset() {
+        activeGameID = nil
+        contentFingerprint = nil
+    }
 }
 
 @MainActor
@@ -169,6 +214,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
 
     private var activity: Activity<FavoriteTeamGameActivityAttributes>?
     private(set) var activeGameID: UUID?
+    private var updateDeduper = FavoriteTeamLiveActivityUpdateDeduper()
 
     init() {
         self.isSupported = FavoriteTeamLiveActivitySupport.isSupported
@@ -179,6 +225,16 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
 
         let attributes = snapshot.activityAttributes()
         let contentState = snapshot.contentState()
+        let contentFingerprint = snapshot.contentFingerprint
+        #if DEBUG
+        print("[LiveActivityPayload] gameID=\(snapshot.gameID.uuidString) score=\(snapshot.favoriteScoreText):\(snapshot.opponentScoreText) inning=\(snapshot.inningText) balls=\(snapshot.balls.map(String.init) ?? "-") strikes=\(snapshot.strikes.map(String.init) ?? "-") outs=\(snapshot.outs.map(String.init) ?? "-") bases=\((snapshot.runnerOnFirst ?? false) ? "1" : "-")\((snapshot.runnerOnSecond ?? false) ? "2" : "-")\((snapshot.runnerOnThird ?? false) ? "3" : "-") batter=\(snapshot.currentBatterName ?? "<nil>") pitcher=\(snapshot.currentPitcherName ?? "<nil>")")
+        #endif
+        if activity != nil, updateDeduper.isDuplicate(gameID: snapshot.gameID, contentFingerprint: contentFingerprint) {
+            #if DEBUG
+            print("[LiveActivityPayload] skipped duplicate gameID=\(snapshot.gameID.uuidString)")
+            #endif
+            return
+        }
         let content = ActivityContent(
             state: contentState,
             staleDate: Date().addingTimeInterval(120)
@@ -194,6 +250,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         }
 
         activeGameID = snapshot.gameID
+        updateDeduper.record(gameID: snapshot.gameID, contentFingerprint: contentFingerprint)
     }
 
     func endCurrent() async {
@@ -201,6 +258,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         await activity.end(nil, dismissalPolicy: .immediate)
         self.activity = nil
         activeGameID = nil
+        updateDeduper.reset()
     }
 }
 #endif

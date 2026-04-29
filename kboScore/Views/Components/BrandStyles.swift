@@ -434,7 +434,7 @@ extension GameStatus {
 extension NotificationType {
     var tintColor: Color {
         switch self {
-        case .scoreChange, .leadChange:
+        case .scoreChange, .leadChange, .onBase:
             KBOLivePalette.primary
         case .gameStart:
             Color.gray
@@ -447,7 +447,7 @@ extension NotificationType {
 
     var doosanTintColor: Color {
         switch self {
-        case .scoreChange, .leadChange:
+        case .scoreChange, .leadChange, .onBase:
             DoosanPalette.primary
         case .gameStart:
             DoosanPalette.secondary
@@ -460,7 +460,7 @@ extension NotificationType {
 
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
-        case .scoreChange, .leadChange:
+        case .scoreChange, .leadChange, .onBase:
             palette.primary
         case .gameStart:
             palette.secondary
@@ -475,6 +475,8 @@ extension NotificationType {
         switch self {
         case .scoreChange:
             "chart.line.uptrend.xyaxis"
+        case .onBase:
+            "figure.baseball"
         case .gameStart:
             "play.circle.fill"
         case .leadChange:

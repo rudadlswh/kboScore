@@ -603,7 +603,11 @@ private struct BootstrapCachePayload: Codable, Sendable {
                     timestamp: $0.timestamp
                 )
             },
-            note: game.note
+            note: game.note,
+            awayStartingPitcherName: game.awayStartingPitcherName,
+            homeStartingPitcherName: game.homeStartingPitcherName,
+            currentPitcherName: game.currentPitcherName,
+            currentBatterName: game.currentBatterName
         )
     }
 
@@ -1079,6 +1083,42 @@ private actor RepositoryResponseCache {
         }
     }
 
+    func upsertGames(_ incomingGames: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
+        guard incomingGames.isEmpty == false else {
+            return (0, 0, 0)
+        }
+
+        let now = Date()
+        let existingGames = (await cachedGamesEntry())?.value ?? []
+        let result = Self.upsert(incomingGames: incomingGames, into: existingGames)
+        await storeGames(result.games.sorted { $0.scheduledStart > $1.scheduledStart }, timestamp: now)
+
+        if let bootstrapEntry = await cachedBootstrapEntry() {
+            let bootstrapResult = Self.upsert(incomingGames: incomingGames, into: bootstrapEntry.value.games)
+            let updatedBootstrap = KBOBootstrapData(
+                teams: bootstrapEntry.value.teams,
+                games: bootstrapResult.games.sorted { $0.scheduledStart > $1.scheduledStart },
+                notifications: bootstrapEntry.value.notifications,
+                settings: bootstrapEntry.value.settings
+            )
+            await storeBootstrap(updatedBootstrap, timestamp: now)
+        }
+
+        let affectedMonths = Set(incomingGames.map { KBOMonthScheduleKey(date: $0.scheduledStart) })
+        for month in affectedMonths {
+            if let monthlyEntry = await cachedMonthlyScheduleEntry(for: month) {
+                let monthlyResult = Self.upsert(incomingGames: incomingGames, into: monthlyEntry.value)
+                await storeMonthlySchedule(
+                    monthlyResult.games.sorted { $0.scheduledStart < $1.scheduledStart },
+                    for: month,
+                    timestamp: now
+                )
+            }
+        }
+
+        return (result.inserted, result.updated, result.skippedExisting)
+    }
+
     private func cachedBootstrapEntry() async -> RepositoryCacheEntry<KBOBootstrapData>? {
         if let bootstrapEntry {
             return bootstrapEntry
@@ -1138,17 +1178,153 @@ private actor RepositoryResponseCache {
         monthlyScheduleEntries[month] = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeMonthlySchedule(value, for: month, timestamp: timestamp)
     }
+
+    private static func upsert(
+        incomingGames: [GameDetail],
+        into existingGames: [GameDetail]
+    ) -> (games: [GameDetail], inserted: Int, updated: Int, skippedExisting: Int) {
+        var updatedGames = existingGames
+        var inserted = 0
+        var updated = 0
+        var skippedExisting = 0
+
+        for candidate in incomingGames {
+            let candidateAliases = candidate.gameIdentityAliases
+            if let existingIndex = updatedGames.firstIndex(where: { existing in
+                existing.gameIdentityAliases.isDisjoint(with: candidateAliases) == false
+            }) {
+                let merged = merge(existing: updatedGames[existingIndex], candidate: candidate)
+                if merged != updatedGames[existingIndex] {
+                    updatedGames[existingIndex] = merged
+                    updated += 1
+                } else {
+                    skippedExisting += 1
+                }
+            } else {
+                updatedGames.append(candidate)
+                inserted += 1
+            }
+        }
+
+        return (updatedGames, inserted, updated, skippedExisting)
+    }
+
+    private static func merge(existing: GameDetail, candidate: GameDetail) -> GameDetail {
+        let stateSource = preferredStateSource(existing: existing, candidate: candidate)
+        let supplementalSource = stateSource == candidate ? existing : candidate
+
+        return GameDetail(
+            id: existing.id,
+            scheduledStart: stateSource.scheduledStart,
+            venue: nonBlank(candidate.venue) ?? existing.venue,
+            awayTeam: preferredTeam(candidate.awayTeam, fallback: existing.awayTeam),
+            homeTeam: preferredTeam(candidate.homeTeam, fallback: existing.homeTeam),
+            awayScore: stateSource.awayScore ?? supplementalSource.awayScore,
+            homeScore: stateSource.homeScore ?? supplementalSource.homeScore,
+            status: stateSource.status,
+            seasonClassification: stateSource.seasonClassification == .unknown ? existing.seasonClassification : stateSource.seasonClassification,
+            inningText: nonBlank(stateSource.inningText) ?? supplementalSource.inningText,
+            bases: stateSource.bases,
+            balls: stateSource.balls,
+            strikes: stateSource.strikes,
+            outs: stateSource.outs,
+            highlightText: nonBlank(candidate.highlightText) ?? existing.highlightText,
+            events: candidate.events.isEmpty ? existing.events : candidate.events,
+            note: mergedNote(existing: existing.note, candidate: candidate.note),
+            providerGameID: nonBlank(candidate.providerGameID) ?? existing.providerGameID,
+            awayStartingPitcherName: nonBlank(candidate.awayStartingPitcherName) ?? existing.awayStartingPitcherName,
+            homeStartingPitcherName: nonBlank(candidate.homeStartingPitcherName) ?? existing.homeStartingPitcherName,
+            currentPitcherName: nonBlank(stateSource.currentPitcherName),
+            currentBatterName: nonBlank(stateSource.currentBatterName)
+        )
+    }
+
+    private static func preferredStateSource(existing: GameDetail, candidate: GameDetail) -> GameDetail {
+        let candidatePriority = statePriority(candidate)
+        let existingPriority = statePriority(existing)
+        if candidatePriority != existingPriority {
+            return candidatePriority > existingPriority ? candidate : existing
+        }
+        let candidateFreshness = freshnessDate(candidate)
+        let existingFreshness = freshnessDate(existing)
+        if let candidateFreshness, let existingFreshness, candidateFreshness != existingFreshness {
+            return candidateFreshness > existingFreshness ? candidate : existing
+        }
+        if candidateFreshness != nil, existingFreshness == nil {
+            return candidate
+        }
+        if candidate.hasCompleteFinalScore != existing.hasCompleteFinalScore {
+            return candidate.hasCompleteFinalScore ? candidate : existing
+        }
+        return candidate
+    }
+
+    private static func statePriority(_ game: GameDetail) -> Int {
+        switch game.status {
+        case .final, .cancelled:
+            return 3
+        case .live, .rainDelay:
+            return 2
+        case .upcoming:
+            return 1
+        }
+    }
+
+    private static func preferredTeam(_ candidate: Team, fallback: Team) -> Team {
+        candidate.id.hasPrefix("unknown-") ? fallback : candidate
+    }
+
+    private static func mergedNote(existing: String?, candidate: String?) -> String? {
+        let components = [candidate, existing]
+            .compactMap(nonBlank)
+        guard components.isEmpty == false else { return nil }
+
+        var seen: Set<String> = []
+        let merged = components
+            .flatMap { $0.split(separator: " ").map(String.init) }
+            .filter { seen.insert($0).inserted }
+            .joined(separator: " ")
+        return nonBlank(merged)
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func freshnessDate(_ game: GameDetail) -> Date? {
+        let values = [
+            noteValue("live_last_checked_at", in: game.note),
+            noteValue("updated_at", in: game.note),
+            noteValue("source_updated_at", in: game.note)
+        ]
+        return values.compactMap(SupabaseDateParser.parseTimestamp).max()
+    }
+
+    private static func noteValue(_ key: String, in note: String?) -> String? {
+        guard let note,
+              let range = note.range(of: "\(key)=") else {
+            return nil
+        }
+        let suffix = note[range.upperBound...]
+        return suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init)
+    }
 }
 
-struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
     private let fetchMonthlyScheduleBlock: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail]
     private let fetchScheduleByDateBlock: @Sendable (Date, Bool) async throws -> [GameDetail]
     private let fetchStandingsBlock: @Sendable () async throws -> [TeamStandingsSnapshot]
+    private let fetchStandingsSourceBlock: (@Sendable (Int) async throws -> [GameDetail])?
+    private let fetchFavoriteTeamScheduleBlock: (@Sendable (Date, Team.ID, Bool) async throws -> [GameDetail])?
+    private let fetchGameDetailSnapshotBlock: (@Sendable (GameDetail, String, [Team]) async throws -> GameDetail?)?
     private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
     private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
+    private let upsertLocalGamesBlock: (@Sendable ([GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int))?
 
     init(_ base: any KBORepository) {
         fetchBootstrapDataBlock = { try await base.fetchBootstrapData() }
@@ -1159,6 +1335,31 @@ struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendabl
             try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
         }
         fetchStandingsBlock = { try await base.fetchStandings() }
+        if let standingsGameSource = base as? any KBOStandingsGameDataSource {
+            fetchStandingsSourceBlock = { season in
+                try await standingsGameSource.fetchStandingsSource(season: season)
+            }
+        } else {
+            fetchStandingsSourceBlock = nil
+        }
+        if let favoriteTeamScheduleSource = base as? any KBOFavoriteTeamScheduleDataSource {
+            fetchFavoriteTeamScheduleBlock = { date, favoriteTeamID, bypassingCache in
+                try await favoriteTeamScheduleSource.fetchFavoriteTeamSchedule(
+                    date: date,
+                    favoriteTeamId: favoriteTeamID,
+                    bypassingCache: bypassingCache
+                )
+            }
+        } else {
+            fetchFavoriteTeamScheduleBlock = nil
+        }
+        if let detailSource = base as? any KBOGameDetailSnapshotDataSource {
+            fetchGameDetailSnapshotBlock = { game, identity, cachedTeams in
+                try await detailSource.fetchGameDetailSnapshot(for: game, identity: identity, cachedTeams: cachedTeams)
+            }
+        } else {
+            fetchGameDetailSnapshotBlock = nil
+        }
         if let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource {
             fetchRemoteGameCountBlock = { try await scheduleSyncSource.fetchRemoteGameCount() }
             fetchMissingScheduleGamesBlock = { knownGames in
@@ -1167,6 +1368,13 @@ struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendabl
         } else {
             fetchRemoteGameCountBlock = nil
             fetchMissingScheduleGamesBlock = nil
+        }
+        if let localStore = base as? any KBOLocalGameCacheUpserting {
+            upsertLocalGamesBlock = { games in
+                await localStore.upsertLocalGames(games)
+            }
+        } else {
+            upsertLocalGamesBlock = nil
         }
     }
 
@@ -1198,6 +1406,35 @@ struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendabl
         try await fetchStandingsBlock()
     }
 
+    nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
+        guard let fetchStandingsSourceBlock else {
+            return try await fetchGames()
+                .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+        }
+        return try await fetchStandingsSourceBlock(season)
+    }
+
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail] {
+        guard let fetchFavoriteTeamScheduleBlock else {
+            return try await fetchSchedule(for: date, bypassingCache: bypassingCache)
+                .filter { $0.involves(teamID: favoriteTeamId) }
+        }
+        return try await fetchFavoriteTeamScheduleBlock(date, favoriteTeamId, bypassingCache)
+    }
+
+    nonisolated func fetchGameDetailSnapshot(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let fetchGameDetailSnapshotBlock else { return nil }
+        return try await fetchGameDetailSnapshotBlock(game, identity, cachedTeams)
+    }
+
     nonisolated func fetchRemoteGameCount() async throws -> Int {
         guard let fetchRemoteGameCountBlock else {
             throw KBOScheduleSyncError.unsupported
@@ -1211,9 +1448,16 @@ struct AnyKBORepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendabl
         }
         return try await fetchMissingScheduleGamesBlock(knownGames)
     }
+
+    nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
+        guard let upsertLocalGamesBlock else {
+            return (0, 0, games.count)
+        }
+        return await upsertLocalGamesBlock(games)
+    }
 }
 
-struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, Sendable {
+struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, KBOStandingsGameDataSource, KBOGameDetailSnapshotDataSource, Sendable {
     let base: Base
     let source: RepositoryDataSourceKind
     let delivery: RepositoryDeliverySourceKind
@@ -1260,9 +1504,34 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, Send
         await runtimeState?.record(source: source, delivery: delivery)
         return value
     }
+
+    nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
+        guard let standingsGameSource = base as? any KBOStandingsGameDataSource else {
+            return try await base.fetchGames()
+                .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+        }
+        let value = try await standingsGameSource.fetchStandingsSource(season: season)
+        await runtimeState?.record(source: source, delivery: delivery)
+        return value
+    }
+
+    nonisolated func fetchGameDetailSnapshot(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let detailSource = base as? any KBOGameDetailSnapshotDataSource else {
+            return nil
+        }
+        let value = try await detailSource.fetchGameDetailSnapshot(for: game, identity: identity, cachedTeams: cachedTeams)
+        if value != nil {
+            await runtimeState?.record(source: source, delivery: delivery)
+        }
+        return value
+    }
 }
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -1352,8 +1621,43 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleRemot
         try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
     }
 
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail] {
+        guard let favoriteTeamScheduleSource = base as? any KBOFavoriteTeamScheduleDataSource else {
+            return try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+                .filter { $0.involves(teamID: favoriteTeamId) }
+        }
+        return try await favoriteTeamScheduleSource.fetchFavoriteTeamSchedule(
+            date: date,
+            favoriteTeamId: favoriteTeamId,
+            bypassingCache: bypassingCache
+        )
+    }
+
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
+    }
+
+    nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
+        guard let standingsGameSource = base as? any KBOStandingsGameDataSource else {
+            return try await base.fetchGames()
+                .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+        }
+        return try await standingsGameSource.fetchStandingsSource(season: season)
+    }
+
+    nonisolated func fetchGameDetailSnapshot(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let detailSource = base as? any KBOGameDetailSnapshotDataSource else {
+            return nil
+        }
+        return try await detailSource.fetchGameDetailSnapshot(for: game, identity: identity, cachedTeams: cachedTeams)
     }
 
     nonisolated func fetchRemoteGameCount() async throws -> Int {
@@ -1368,6 +1672,10 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleRemot
             throw KBOScheduleSyncError.unsupported
         }
         return try await scheduleSyncSource.fetchMissingScheduleGames(excludingKnownGames: knownGames)
+    }
+
+    nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
+        await cache.upsertGames(games)
     }
 }
 

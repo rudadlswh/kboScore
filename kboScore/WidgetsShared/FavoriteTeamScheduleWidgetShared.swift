@@ -30,6 +30,11 @@ enum FavoriteTeamScheduleWidgetShared {
     private static let logger = Logger(subsystem: "com.chogm.kboScore", category: "FavoriteTeamScheduleWidgetShared")
 
     static func saveState(favoriteTeamID: String?, snapshot: FavoriteTeamScheduleWidgetSnapshot?) {
+        if let existingStore = loadStore().store,
+           existingStore.favoriteTeamID == favoriteTeamID,
+           existingStore.snapshot == snapshot {
+            return
+        }
         let store = Store(
             favoriteTeamID: favoriteTeamID,
             snapshot: snapshot,
@@ -40,6 +45,7 @@ enum FavoriteTeamScheduleWidgetShared {
 
     static func saveFavoriteTeamID(_ value: String?) {
         var store = loadStore().store ?? Store()
+        guard store.favoriteTeamID != value else { return }
         store.favoriteTeamID = value
         store.updatedAt = Date()
         persist(store)
@@ -51,6 +57,7 @@ enum FavoriteTeamScheduleWidgetShared {
 
     static func saveSnapshot(_ snapshot: FavoriteTeamScheduleWidgetSnapshot?) {
         var store = loadStore().store ?? Store()
+        guard store.snapshot != snapshot else { return }
         store.snapshot = snapshot
         store.updatedAt = Date()
         persist(store)

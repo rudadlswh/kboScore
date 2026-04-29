@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct kboScoreApp: App {
     @UIApplicationDelegateAdaptor(AppNotificationDelegate.self) private var notificationDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var appModel: AppModel = {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle()
         let notificationRegistrationClient = NotificationRegistrationClientFactory.makeAppClient()
@@ -28,6 +29,12 @@ struct kboScoreApp: App {
                 .task {
                     appModel.connectNotificationDelegate(notificationDelegate)
                     await appModel.syncNotificationRegistrationState()
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    guard newPhase == .active else { return }
+                    Task {
+                        await appModel.refreshTodayOnForeground()
+                    }
                 }
         }
     }

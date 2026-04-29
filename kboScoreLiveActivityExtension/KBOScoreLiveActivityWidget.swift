@@ -115,8 +115,8 @@ private struct BroadcastScoreboardGame {
         home = context.attributes.isHomeGame ? favorite : opponent
         inningText = context.state.inningText
         statusText = context.state.summaryText
-        batterText = LiveActivityDebugMetadataFallback.batterName
-        pitcherText = LiveActivityDebugMetadataFallback.pitcherName
+        batterText = context.state.currentBatterName
+        pitcherText = context.state.currentPitcherName
         battingSide = Self.battingSide(from: context.state.inningText)
         metadataText = Self.metadataText(
             inningText: context.state.inningText,
@@ -124,13 +124,13 @@ private struct BroadcastScoreboardGame {
             venue: context.attributes.venue
         )
         baseState = Self.baseState(
-            first: context.state.runnerOnFirst ?? LiveActivityDebugMetadataFallback.runnerOnFirst,
-            second: context.state.runnerOnSecond ?? LiveActivityDebugMetadataFallback.runnerOnSecond,
-            third: context.state.runnerOnThird ?? LiveActivityDebugMetadataFallback.runnerOnThird
+            first: context.state.runnerOnFirst ?? false,
+            second: context.state.runnerOnSecond ?? false,
+            third: context.state.runnerOnThird ?? false
         )
-        balls = context.state.balls ?? LiveActivityDebugMetadataFallback.balls
-        strikes = context.state.strikes ?? LiveActivityDebugMetadataFallback.strikes
-        outs = context.state.outs ?? LiveActivityDebugMetadataFallback.outs
+        balls = context.state.balls
+        strikes = context.state.strikes
+        outs = context.state.outs
         favoriteAccent = favorite.accent
     }
 
@@ -177,9 +177,9 @@ private struct BroadcastScoreboardGame {
 
     private static func countText(balls: Int?, strikes: Int?, outs: Int?) -> String? {
         let parts = [
-            balls.map { "B \($0)" },
-            strikes.map { "S \($0)" },
-            outs.map { "O \($0)" }
+            KBOCountDisplay.balls(balls).map { "B \($0)" },
+            KBOCountDisplay.strikes(strikes).map { "S \($0)" },
+            KBOCountDisplay.outs(outs).map { "O \($0)" }
         ].compactMap { $0 }
 
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
@@ -590,9 +590,9 @@ private struct BroadcastCountCluster: View {
 
     private var metrics: [BroadcastCountMetric] {
         [
-            balls.map { BroadcastCountMetric(label: "B", value: $0) },
-            strikes.map { BroadcastCountMetric(label: "S", value: $0) },
-            outs.map { BroadcastCountMetric(label: "O", value: $0) }
+            KBOCountDisplay.balls(balls).map { BroadcastCountMetric(label: "B", value: $0) },
+            KBOCountDisplay.strikes(strikes).map { BroadcastCountMetric(label: "S", value: $0) },
+            KBOCountDisplay.outs(outs).map { BroadcastCountMetric(label: "O", value: $0) }
         ].compactMap { $0 }
     }
 }
@@ -602,28 +602,6 @@ private struct BroadcastCountMetric: Identifiable {
     let value: Int
 
     var id: String { label }
-}
-
-private enum LiveActivityDebugMetadataFallback {
-    #if DEBUG
-    static let pitcherName: String? = "테스트 투수"
-    static let batterName: String? = "테스트 타자"
-    static let balls: Int? = 2
-    static let strikes: Int? = 1
-    static let outs: Int? = 1
-    static let runnerOnFirst: Bool? = true
-    static let runnerOnSecond: Bool? = false
-    static let runnerOnThird: Bool? = true
-    #else
-    static let pitcherName: String? = nil
-    static let batterName: String? = nil
-    static let balls: Int? = nil
-    static let strikes: Int? = nil
-    static let outs: Int? = nil
-    static let runnerOnFirst: Bool? = nil
-    static let runnerOnSecond: Bool? = nil
-    static let runnerOnThird: Bool? = nil
-    #endif
 }
 
 private extension String {

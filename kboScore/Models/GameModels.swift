@@ -119,12 +119,16 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let events: [GameEvent]
     let note: String?
     let providerGameID: String?
+    let awayStartingPitcherName: String?
+    let homeStartingPitcherName: String?
+    var currentPitcherName: String? = nil
+    var currentBatterName: String? = nil
 
     nonisolated var isRegularSeason: Bool {
         seasonClassification.isRegularSeason
     }
 
-    func involves(teamID: String?) -> Bool {
+    nonisolated func involves(teamID: String?) -> Bool {
         guard let teamID else { return false }
         return awayTeam.id == teamID || homeTeam.id == teamID
     }
@@ -141,7 +145,15 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
             status: status,
             inningText: inningText,
             recentEvent: highlightText ?? note,
-            isMyTeamGame: isMyTeamGame
+            isMyTeamGame: isMyTeamGame,
+            awayStartingPitcherName: awayStartingPitcherName,
+            homeStartingPitcherName: homeStartingPitcherName,
+            currentPitcherName: currentPitcherName,
+            currentBatterName: currentBatterName,
+            bases: bases,
+            balls: balls,
+            strikes: strikes,
+            outs: outs
         )
     }
 
@@ -165,8 +177,25 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         providerGameID ?? Self.providerGameID(from: note)
     }
 
+    nonisolated var publicGameID: String? {
+        Self.noteValue("public_game_id", from: note)
+    }
+
     nonisolated var canonicalGameIdentityValue: String {
         GameIdentifier.canonicalRawValue(id: id, providerGameID: officialGameCenterID)
+    }
+
+    nonisolated var stableDetailIdentity: String {
+        if let providerGameID = officialGameCenterID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.isEmpty == false {
+            return "provider:\(providerGameID)"
+        }
+        if let publicGameID = publicGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           publicGameID.isEmpty == false {
+            return "public:\(publicGameID.lowercased())"
+        }
+        let day = Self.kstDayKey(for: scheduledStart)
+        return "dateTeams:\(day):\(awayTeam.id):\(homeTeam.id)"
     }
 
     nonisolated var canonicalGameIdentityKey: String {
@@ -174,13 +203,21 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 
     nonisolated var gameIdentityAliases: Set<String> {
-        var aliases: Set<String> = [GameIdentifier.idKey(id), matchupIdentityKey]
+        var aliases: Set<String> = [
+            GameIdentifier.idKey(id),
+            matchupIdentityKey,
+            dateTeamIdentityKey,
+            dateTeamVenueIdentityKey
+        ]
         if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
             aliases.insert(GameIdentifier.providerKey(providerGameID))
         }
         if let officialGameCenterID = Self.providerGameID(from: note) {
             aliases.insert(GameIdentifier.providerKey(officialGameCenterID))
+        }
+        if let publicGameID = Self.noteValue("public_game_id", from: note) {
+            aliases.insert("public:\(publicGameID.lowercased())")
         }
         return aliases
     }
@@ -236,8 +273,12 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 
     nonisolated private static func providerGameID(from note: String?) -> String? {
+        noteValue("provider_game_id", from: note)
+    }
+
+    nonisolated private static func noteValue(_ key: String, from note: String?) -> String? {
         guard let note,
-              let range = note.range(of: "provider_game_id=") else {
+              let range = note.range(of: "\(key)=") else {
             return nil
         }
 
@@ -258,6 +299,34 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
             homeTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         ].joined(separator: ":")
     }
+
+    nonisolated private var dateTeamIdentityKey: String {
+        [
+            "date-team",
+            Self.kstDayKey(for: scheduledStart),
+            awayTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            homeTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        ].joined(separator: ":")
+    }
+
+    nonisolated private var dateTeamVenueIdentityKey: String {
+        [
+            "date-team-venue",
+            Self.kstDayKey(for: scheduledStart),
+            awayTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            homeTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            venue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        ].joined(separator: ":")
+    }
+
+    nonisolated private static func kstDayKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 }
 
 struct GameSummary: Identifiable, Hashable, Sendable {
@@ -272,6 +341,14 @@ struct GameSummary: Identifiable, Hashable, Sendable {
     let inningText: String?
     let recentEvent: String?
     let isMyTeamGame: Bool
+    let awayStartingPitcherName: String?
+    let homeStartingPitcherName: String?
+    let currentPitcherName: String?
+    let currentBatterName: String?
+    let bases: RunnerState?
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
 
     var displayScore: String {
         guard let awayScore, let homeScore, status != .upcoming else {

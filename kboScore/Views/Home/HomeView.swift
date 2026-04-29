@@ -42,6 +42,9 @@ struct HomeView: View {
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
             }
+            .navigationDestination(for: GameDetail.self) { game in
+                GameDetailView(game: game)
+            }
         }
     }
 
@@ -81,10 +84,10 @@ struct HomeView: View {
                 )
             } else {
                 LazyVStack(spacing: 8) {
-                    ForEach(appModel.filteredHomeGames) { game in
-                        NavigationLink(value: appModel.gameNavigationIdentity(for: game)) {
+                    ForEach(appModel.filteredHomeGameDetails) { game in
+                        NavigationLink(value: game) {
                             GameCardView(
-                                summary: game,
+                                summary: game.summary(isMyTeamGame: game.involves(teamID: appModel.settings.favoriteTeamID)),
                                 showsHomeTeamBadge: true,
                                 liveColorStyle: .white
                             )
@@ -137,8 +140,11 @@ struct HomeView: View {
                         .foregroundStyle(palette.secondary)
                         .padding(.leading, 2)
 
-                    NavigationLink(value: appModel.gameNavigationIdentity(for: featuredHomeGame)) {
-                        HomeHeroGameCard(summary: featuredHomeGame, palette: palette)
+                    NavigationLink(value: featuredHomeGame) {
+                        HomeHeroGameCard(
+                            summary: featuredHomeGame.summary(isMyTeamGame: featuredHomeGame.involves(teamID: appModel.settings.favoriteTeamID)),
+                            palette: palette
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -151,8 +157,8 @@ struct HomeView: View {
         .padding(.vertical, 10)
     }
 
-    private var featuredHomeGame: GameSummary? {
-        appModel.filteredHomeGames.first
+    private var featuredHomeGame: GameDetail? {
+        appModel.filteredHomeGameDetails.first
     }
 
 }
@@ -186,7 +192,7 @@ private struct HomeHeroGameCard: View {
                     HeroTeamMatchupSide(
                         team: summary.awayTeam,
                         role: "원정",
-                        pitcherName: nil,
+                        pitcherName: summary.awayStartingPitcherName,
                         alignment: .leading
                     )
 
@@ -195,9 +201,13 @@ private struct HomeHeroGameCard: View {
                     HeroTeamMatchupSide(
                         team: summary.homeTeam,
                         role: "홈",
-                        pitcherName: nil,
+                        pitcherName: summary.homeStartingPitcherName,
                         alignment: .trailing
                     )
+                }
+
+                if summary.status.isLiveLike {
+                    liveScorePanel
                 }
 
                 HStack(spacing: 6) {
@@ -271,6 +281,45 @@ private struct HomeHeroGameCard: View {
         .frame(width: 62)
     }
 
+    private var liveScorePanel: some View {
+        VStack(spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(summary.awayScore.map(String.init) ?? "-")
+                Text(":")
+                    .foregroundStyle(Color.white.opacity(0.62))
+                Text(summary.homeScore.map(String.init) ?? "-")
+            }
+            .font(.system(size: 34, weight: .black, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Color.white)
+
+            HStack(spacing: 8) {
+                Text(summary.inningText ?? summary.status.title)
+                if let countText {
+                    Text(countText)
+                }
+                if let basesText {
+                    Text(basesText)
+                }
+            }
+            .font(.caption.weight(.heavy))
+            .foregroundStyle(Color.white.opacity(0.88))
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(0.28))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 0.75)
+        )
+    }
+
     private var timeText: String {
         switch summary.status {
         case .upcoming:
@@ -290,7 +339,31 @@ private struct HomeHeroGameCard: View {
     }
 
     private var accessibilityLabel: String {
-        "\(summary.awayTeam.displayName) 대 \(summary.homeTeam.displayName), 원정 선발 미정, 홈 선발 미정, \(timeText), \(venueText)"
+        "\(summary.awayTeam.displayName) 대 \(summary.homeTeam.displayName), 원정 선발 \(pitcherText(summary.awayStartingPitcherName)), 홈 선발 \(pitcherText(summary.homeStartingPitcherName)), \(timeText), \(venueText)"
+    }
+
+    private var countText: String? {
+        let parts = [
+            KBOCountDisplay.balls(summary.balls).map { "B \($0)" },
+            KBOCountDisplay.strikes(summary.strikes).map { "S \($0)" },
+            KBOCountDisplay.outs(summary.outs).map { "O \($0)" }
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    private var basesText: String? {
+        guard let bases = summary.bases else { return nil }
+        let occupied = [
+            bases.first ? "1루" : nil,
+            bases.second ? "2루" : nil,
+            bases.third ? "3루" : nil
+        ].compactMap { $0 }
+        return occupied.isEmpty ? "주자 없음" : occupied.joined(separator: " ")
+    }
+
+    private func pitcherText(_ pitcherName: String?) -> String {
+        let trimmed = pitcherName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? "선발 미정" : trimmed
     }
 
     private func stadiumCity(for venue: String) -> String? {

@@ -140,6 +140,10 @@ struct KBOGameDTO: Codable, Sendable {
     let highlightText: String?
     let events: [KBOGameEventDTO]
     let note: String?
+    let awayStartingPitcherName: String?
+    let homeStartingPitcherName: String?
+    let currentPitcherName: String?
+    let currentBatterName: String?
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -170,6 +174,14 @@ struct KBOGameDTO: Codable, Sendable {
         case highlightText
         case events
         case note
+        case awayStartingPitcherName
+        case away_starting_pitcher_name
+        case homeStartingPitcherName
+        case home_starting_pitcher_name
+        case currentPitcherName
+        case current_pitcher_name
+        case currentBatterName
+        case current_batter_name
     }
 
     nonisolated init(
@@ -191,7 +203,11 @@ struct KBOGameDTO: Codable, Sendable {
         outs: Int?,
         highlightText: String?,
         events: [KBOGameEventDTO],
-        note: String?
+        note: String?,
+        awayStartingPitcherName: String? = nil,
+        homeStartingPitcherName: String? = nil,
+        currentPitcherName: String? = nil,
+        currentBatterName: String? = nil
     ) {
         let resolvedProviderGameID = providerGameID ?? Self.providerGameID(from: note)
         self.id = GameIdentifier.canonicalUUID(id: id, providerGameID: resolvedProviderGameID)
@@ -213,6 +229,10 @@ struct KBOGameDTO: Codable, Sendable {
         self.highlightText = highlightText
         self.events = events
         self.note = note
+        self.awayStartingPitcherName = awayStartingPitcherName
+        self.homeStartingPitcherName = homeStartingPitcherName
+        self.currentPitcherName = currentPitcherName
+        self.currentBatterName = currentBatterName
     }
 
     nonisolated init(from decoder: any Decoder) throws {
@@ -258,6 +278,14 @@ struct KBOGameDTO: Codable, Sendable {
             (try container.decodeIfPresent(Int.self, forKey: .outCount))
         highlightText = try container.decodeIfPresent(String.self, forKey: .highlightText)
         events = try container.decodeIfPresent([KBOGameEventDTO].self, forKey: .events) ?? []
+        awayStartingPitcherName = try container.decodeIfPresent(String.self, forKey: .awayStartingPitcherName) ??
+            container.decodeIfPresent(String.self, forKey: .away_starting_pitcher_name)
+        homeStartingPitcherName = try container.decodeIfPresent(String.self, forKey: .homeStartingPitcherName) ??
+            container.decodeIfPresent(String.self, forKey: .home_starting_pitcher_name)
+        currentPitcherName = try container.decodeIfPresent(String.self, forKey: .currentPitcherName) ??
+            container.decodeIfPresent(String.self, forKey: .current_pitcher_name)
+        currentBatterName = try container.decodeIfPresent(String.self, forKey: .currentBatterName) ??
+            container.decodeIfPresent(String.self, forKey: .current_batter_name)
     }
 
     private nonisolated static func providerTeamIDs(from note: String?) -> (away: String, home: String)? {
@@ -315,6 +343,10 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(highlightText, forKey: .highlightText)
         try container.encode(events, forKey: .events)
         try container.encodeIfPresent(note, forKey: .note)
+        try container.encodeIfPresent(awayStartingPitcherName, forKey: .awayStartingPitcherName)
+        try container.encodeIfPresent(homeStartingPitcherName, forKey: .homeStartingPitcherName)
+        try container.encodeIfPresent(currentPitcherName, forKey: .currentPitcherName)
+        try container.encodeIfPresent(currentBatterName, forKey: .currentBatterName)
     }
 
     private nonisolated static func providerGameID(from note: String?) -> String? {
@@ -560,7 +592,19 @@ enum KBODataMapper {
             return .final
         }
 
-        if normalized.contains("live") || normalized.contains("inprogress") || normalized.contains("progress") || normalized.contains("진행") || normalized.contains("회") {
+        if normalized.contains("live") ||
+            normalized.contains("inprogress") ||
+            normalized.contains("in_progress") ||
+            normalized.contains("progress") ||
+            normalized.contains("running") ||
+            normalized.contains("playing") ||
+            normalized.contains("started") ||
+            normalized.contains("game_on") ||
+            normalized.contains("경기중") ||
+            normalized.contains("진행") ||
+            normalized.contains("초") ||
+            normalized.contains("말") ||
+            normalized.contains("회") {
             return .live
         }
 
@@ -609,7 +653,11 @@ enum KBODataMapper {
             highlightText: highlight,
             events: dto.events.map(mapEvent).sorted { $0.timestamp > $1.timestamp },
             note: note,
-            providerGameID: dto.providerGameID
+            providerGameID: dto.providerGameID,
+            awayStartingPitcherName: dto.awayStartingPitcherName?.nilIfBlank,
+            homeStartingPitcherName: dto.homeStartingPitcherName?.nilIfBlank,
+            currentPitcherName: dto.currentPitcherName?.nilIfBlank,
+            currentBatterName: dto.currentBatterName?.nilIfBlank
         )
     }
 
@@ -703,6 +751,8 @@ enum KBODataMapper {
         switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "scorechange", "score", "득점":
             .scoreChange
+        case "onbase", "on_base", "reachedbase", "reached_base", "출루":
+            .onBase
         case "gamestart", "start", "시작":
             .gameStart
         case "leadchange", "lead", "역전":

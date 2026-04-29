@@ -9,21 +9,48 @@ import SwiftUI
 
 struct GameDetailView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var screenModel = GameDetailScreenModel()
+    @StateObject private var viewModel: GameDetailViewModel
 
     let gameIdentity: String
 
     init(gameID: UUID) {
-        self.gameIdentity = gameID.uuidString
+        let identity = gameID.uuidString
+        self.gameIdentity = identity
+        self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: identity))
     }
 
     init(gameIdentity: String) {
         self.gameIdentity = gameIdentity
+        self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: gameIdentity))
+    }
+
+    init(stableIdentity: String, initialGame: GameDetail) {
+        self.gameIdentity = stableIdentity
+        self._viewModel = StateObject(
+            wrappedValue: GameDetailViewModel(
+                stableIdentity: stableIdentity,
+                requestedIdentity: stableIdentity,
+                initialGame: initialGame
+            )
+        )
+    }
+
+    init(game: GameDetail) {
+        self.gameIdentity = game.stableDetailIdentity
+        self._viewModel = StateObject(
+            wrappedValue: GameDetailViewModel(
+                stableIdentity: game.stableDetailIdentity,
+                requestedIdentity: game.stableDetailIdentity,
+                initialGame: game
+            )
+        )
     }
 
     var body: some View {
         ScrollView {
-            if let game = appModel.game(withIdentity: gameIdentity) {
+            if let game = viewModel.game {
                 let presentation = GameDetailPresentation(game: game, payload: screenModel.detail)
                 let availableSections = GameDetailSection.availableSections(for: presentation.status)
 
@@ -35,7 +62,7 @@ struct GameDetailView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .task(id: [game.id.uuidString, game.officialGameCenterID ?? ""].joined(separator: "::")) {
+                .task(id: viewModel.stableIdentity) {
                     await screenModel.load(for: game)
                 }
                 .task(id: presentation.status) {
@@ -67,9 +94,45 @@ struct GameDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
         .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
+        .task(id: viewModel.stableIdentity) {
+            viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
+            let refreshedGame = await viewModel.refreshIfNeeded(
+                appModel: appModel,
+                bypassAutomaticThrottle: true
+            ) ?? viewModel.game
+            if let refreshedGame {
+                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+            }
+        }
+        .task(id: viewModel.liveRefreshTaskID) {
+            guard viewModel.shouldAutoRefreshLiveGame else { return }
+            while Task.isCancelled == false {
+                do {
+                    try await Task.sleep(nanoseconds: GameDetailViewModel.livePollingIntervalNanoseconds)
+                } catch {
+                    break
+                }
+                guard Task.isCancelled == false, viewModel.shouldAutoRefreshLiveGame else { break }
+                guard let refreshedGame = await viewModel.refreshIfNeeded(
+                    appModel: appModel,
+                    bypassAutomaticThrottle: true
+                ) else { continue }
+                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active, viewModel.shouldAutoRefreshLiveGame else { return }
+            Task {
+                guard let refreshedGame = await viewModel.refreshIfNeeded(
+                    appModel: appModel,
+                    bypassAutomaticThrottle: true
+                ) else { return }
+                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+            }
+        }
         .refreshable {
-            await appModel.refreshHome()
-            guard let refreshedGame = appModel.game(withIdentity: gameIdentity) else { return }
+            await viewModel.refreshIfNeeded(appModel: appModel, manual: true)
+            guard let refreshedGame = viewModel.game else { return }
             await screenModel.load(for: refreshedGame, forceRefresh: true)
         }
     }
@@ -111,8 +174,8 @@ struct GameDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let errorMessage = screenModel.errorMessage {
                 DetailMessageCard(
-                    icon: "wifi.exclamationmark",
-                    title: "공식 상세 데이터 연결 실패",
+                    icon: "clock.badge.questionmark",
+                    title: "공식 프리뷰 정보 준비 중",
                     message: errorMessage
                 )
             } else if screenModel.isLoading && screenModel.detail == nil {
@@ -227,7 +290,7 @@ struct GameDetailView: View {
                 } else {
                     EmptyStateView(
                         systemImage: "person.crop.circle.badge.questionmark",
-                        title: "프리뷰 정보가 아직 없습니다",
+                        title: "공식 프리뷰 정보 준비 중",
                         message: "현재 데이터 소스에서 프리뷰 정보를 아직 제공하지 않습니다."
                     )
                 }
@@ -324,6 +387,8 @@ private struct GameDetailPresentation {
     let strikes: Int?
     let outs: Int?
     let bases: RunnerState?
+    let currentBatterName: String?
+    let currentPitcherName: String?
     let winningPitcher: String?
     let losingPitcher: String?
     let savePitcher: String?
@@ -344,10 +409,12 @@ private struct GameDetailPresentation {
         inningText = summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank
         awayScore = summary?.awayScore ?? game.awayScore
         homeScore = summary?.homeScore ?? game.homeScore
-        balls = summary?.balls
-        strikes = summary?.strikes
+        balls = summary?.balls ?? game.balls
+        strikes = summary?.strikes ?? game.strikes
         outs = summary?.outs ?? game.outs
         bases = summary?.bases ?? game.bases
+        currentBatterName = game.currentBatterName?.nilIfBlank
+        currentPitcherName = game.currentPitcherName?.nilIfBlank
         winningPitcher = summary?.winningPitcher?.nilIfBlank
         losingPitcher = summary?.losingPitcher?.nilIfBlank
         savePitcher = summary?.savePitcher?.nilIfBlank
@@ -373,13 +440,28 @@ private struct GameDetailPresentation {
 
     var liveSituationSummary: String {
         let countText = [
-            balls.map { "볼 \($0)" },
-            strikes.map { "스트라이크 \($0)" },
-            outs.map { "아웃 \($0)" }
+            KBOCountDisplay.balls(balls).map { "볼 \($0)" },
+            KBOCountDisplay.strikes(strikes).map { "스트라이크 \($0)" },
+            KBOCountDisplay.outs(outs).map { "아웃 \($0)" }
         ]
         .compactMap { $0 }
         .joined(separator: " · ")
+        let matchupText = [
+            currentBatterName.map { "타자 \($0)" },
+            currentPitcherName.map { "투수 \($0)" }
+        ]
+            .compactMap { $0 }
+            .joined(separator: " · ")
 
+        if countText.isEmpty == false, matchupText.isEmpty == false {
+            return "\(countText) · \(matchupText)"
+        }
+        if countText.isEmpty == false {
+            return countText
+        }
+        if matchupText.isEmpty == false {
+            return matchupText
+        }
         guard countText.isEmpty == false else {
             return inningText ?? "실시간 상황이 들어오는 중입니다."
         }
@@ -431,6 +513,9 @@ private struct GameStatusSummaryCard: View {
                     Text(statusTitle)
                         .font(.headline.weight(.bold))
                         .foregroundStyle(palette.map { presentation.status.stadiumTintColor($0) } ?? presentation.status.tintColor)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                     if presentation.status != .upcoming {
                         Text("\(presentation.displayAwayScore) : \(presentation.displayHomeScore)")
                             .font(.system(size: 36, weight: .heavy, design: .rounded))
@@ -444,6 +529,8 @@ private struct GameStatusSummaryCard: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(palette?.textSecondary ?? .secondary)
                         .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity)
 
@@ -509,7 +596,9 @@ private struct ScoreColumn: View {
             TeamMarkView(team: team, size: 54)
             Text(team.displayName)
                 .font(.subheadline.weight(.bold))
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Text(scoreText)
                 .font(.system(size: 32, weight: .heavy, design: .rounded))
                 .monospacedDigit()
@@ -525,14 +614,30 @@ private struct LiveSituationRow: View {
         HStack(spacing: 8) {
             StatusTile(title: "카운트") {
                 HStack(spacing: 8) {
-                    CountMetric(label: "B", value: presentation.balls)
-                    CountMetric(label: "S", value: presentation.strikes)
-                    CountMetric(label: "O", value: presentation.outs)
+                    CountMetric(label: "B", value: KBOCountDisplay.balls(presentation.balls))
+                    CountMetric(label: "S", value: KBOCountDisplay.strikes(presentation.strikes))
+                    CountMetric(label: "O", value: KBOCountDisplay.outs(presentation.outs))
                 }
             }
 
             StatusTile(title: "주자 상황") {
                 BasesDiamondView(bases: presentation.bases ?? .empty)
+            }
+        }
+        if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
+            HStack(spacing: 8) {
+                StatusTile(title: "타자") {
+                    Text(presentation.currentBatterName ?? "-")
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                StatusTile(title: "투수") {
+                    Text(presentation.currentPitcherName ?? "-")
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
@@ -586,7 +691,8 @@ private struct DecisionTag: View {
                 .foregroundStyle(tint)
             Text(value)
                 .font(.caption.weight(.semibold))
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -689,7 +795,8 @@ private struct MetaValueTile: View {
                 .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
             Text(value)
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(2)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
         .padding(10)
@@ -784,7 +891,7 @@ private struct LineScoreHeaderRow: View {
                     .frame(width: 30)
             }
 
-            ForEach(["R", "H", "E", "B"], id: \.self) { label in
+            ForEach(["R", "H", "BB", "E"], id: \.self) { label in
                 Text(label)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
@@ -822,9 +929,9 @@ private struct LineScoreValueRow: View {
                 .lineScoreTotalStyle(emphasis: true)
             Text(totals.hits?.displayCellText ?? "-")
                 .lineScoreTotalStyle()
-            Text(totals.errors?.displayCellText ?? "-")
-                .lineScoreTotalStyle()
             Text(totals.walks?.displayCellText ?? "-")
+                .lineScoreTotalStyle()
+            Text(totals.errors?.displayCellText ?? "-")
                 .lineScoreTotalStyle()
         }
         .padding(.vertical, 6)
@@ -887,6 +994,8 @@ private struct SummaryItemsCard: View {
                     Text(item.value)
                         .font(.subheadline)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -925,9 +1034,13 @@ private struct BattingSectionCard: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(line.name)
                             .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(statSummary(for: line))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
                 }
@@ -977,6 +1090,8 @@ private struct PitchingSectionCard: View {
                     HStack {
                         Text(line.name)
                             .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let result = line.result, result.isEmpty == false {
                             Text(result)
                                 .font(.caption2.weight(.bold))
@@ -994,6 +1109,8 @@ private struct PitchingSectionCard: View {
                     Text(pitchingSummary(for: line))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 6)
             }
@@ -1058,8 +1175,8 @@ private struct StarterColumn: View {
 
             Text(pitcherName?.nilIfBlank ?? "아직 미정")
                 .font(.title3.weight(.heavy))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -1150,6 +1267,8 @@ private struct DetailMessageCard: View {
                 Text(message)
                     .font(.footnote)
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .cardSurface()

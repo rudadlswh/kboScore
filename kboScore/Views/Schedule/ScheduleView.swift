@@ -5,6 +5,7 @@
 //  Created by Codex on 3/26/26.
 //
 
+import Combine
 import SwiftUI
 
 enum ScheduleDayResultAppearance: Equatable, Sendable {
@@ -28,25 +29,612 @@ enum ScheduleDayResultAppearance: Equatable, Sendable {
     }
 }
 
+@MainActor
+final class ScheduleViewModel: ObservableObject {
+    @Published var displayedMonth = Date()
+    @Published var selectedDate = Date()
+    @Published var scheduleFilter: ScheduleFilter = .all
+    private(set) var calendarDays: [MyTeamCalendarDay] = []
+    private(set) var selectedDateGames: [GameDetail] = []
+    private(set) var isDisplayedMonthAvailable = false
+    private(set) var hasAvailableMonths = false
+    private(set) var previousAvailableMonth: Date?
+    private(set) var nextAvailableMonth: Date?
+    private(set) var isLoadingDisplayedMonth = false
+    private(set) var statusMessage: String?
+    private(set) var monthGameCount = 0
+#if DEBUG
+    private(set) var debugSummary: String?
+#endif
+
+    private var cachedMonths: [KBOMonthScheduleKey: ScheduleMonthCacheEntry] = [:]
+    private var failedMonths: Set<KBOMonthScheduleKey> = []
+    private var inFlightMonthTasks: [KBOMonthScheduleKey: Task<ScheduleMonthCacheEntry, Error>] = [:]
+    private var pendingAutomaticSelectionMonthKey: KBOMonthScheduleKey?
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+        return calendar
+    }
+
+    var displayedMonthKey: KBOMonthScheduleKey {
+        monthKey(for: displayedMonth)
+    }
+
+    func loadDisplayedMonth(appModel: AppModel) async {
+        await loadMonth(
+            displayedMonth,
+            forceRefresh: false,
+            appModel: appModel
+        )
+        await normalizeDisplayedMonth(appModel: appModel)
+    }
+
+    func refreshDisplayedMonth(appModel: AppModel) async {
+        await loadMonth(
+            displayedMonth,
+            forceRefresh: true,
+            appModel: appModel
+        )
+        if SchedulePresentation.dayKey(for: selectedDate) == SchedulePresentation.dayKey(for: Date()) {
+            await appModel.refreshScheduleDay(for: selectedDate)
+            let key = displayedMonthKey
+            let refreshedSnapshot = appModel.currentScheduleMonthSnapshot(for: key)
+            let mergedGames = mergeSelectedDayRefresh(
+                refreshedSnapshot,
+                into: cachedMonths[key]?.games ?? [],
+                selectedDayKey: SchedulePresentation.dayKey(for: selectedDate)
+            )
+            cachedMonths[key] = await ScheduleMonthCacheEntry.build(
+                key: key,
+                games: mergedGames
+            )
+            await rebuildPresentation(
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+        }
+    }
+
+    func changeDisplayedMonth(
+        to month: Date,
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>
+    ) {
+        let previousKey = displayedMonthKey
+        let requestedMonth = startOfMonth(for: month)
+        let requestedKey = monthKey(for: requestedMonth)
+        guard requestedKey != previousKey else { return }
+
+#if DEBUG
+        print("ScheduleMonthChanged from=\(previousKey.yearMonthText) to=\(requestedKey.yearMonthText)")
+#endif
+        displayedMonth = requestedMonth
+        selectedDate = preferredSelectedDate(for: requestedKey)
+        pendingAutomaticSelectionMonthKey = requestedKey
+        Task {
+            await rebuildPresentation(
+                favoriteTeamID: favoriteTeamID,
+                attendedGameKeys: attendedGameKeys
+            )
+        }
+    }
+
+    func selectDate(
+        _ date: Date,
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>
+    ) {
+        selectedDate = date
+        pendingAutomaticSelectionMonthKey = nil
+        Task {
+            await rebuildPresentation(
+                favoriteTeamID: favoriteTeamID,
+                attendedGameKeys: attendedGameKeys
+            )
+        }
+    }
+
+    func rebuildPresentation(
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>
+    ) async {
+        let presentation = await SchedulePresentation.build(
+            displayedMonth: displayedMonth,
+            selectedDate: selectedDate,
+            filter: scheduleFilter,
+            favoriteTeamID: favoriteTeamID,
+            attendedGameKeys: attendedGameKeys,
+            cachedMonthEntries: Dictionary(
+                uniqueKeysWithValues: cachedMonths.map { ($0.key.yearMonthText, $0.value) }
+            ),
+            failedMonthKeys: Set(failedMonths.map(\.yearMonthText)),
+            currentDate: Date()
+        )
+        apply(presentation)
+    }
+
+    private func normalizeDisplayedMonth(appModel: AppModel) async {
+        if calendar.isDate(selectedDate, equalTo: displayedMonth, toGranularity: .month) == false {
+            selectedDate = preferredSelectedDate(for: displayedMonthKey)
+        }
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
+    }
+
+    private func loadMonth(
+        _ month: Date,
+        forceRefresh: Bool,
+        appModel: AppModel
+    ) async {
+        let key = monthKey(for: month)
+
+        if forceRefresh == false, cachedMonths[key] != nil {
+            logLocalMonthIfNeeded(key)
+            applyPendingAutomaticSelectionIfNeeded(for: key)
+            await rebuildPresentation(
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+            return
+        }
+
+        if let task = inFlightMonthTasks[key] {
+#if DEBUG
+            print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight")
+#endif
+            do {
+                cachedMonths[key] = try await task.value
+                failedMonths.remove(key)
+            } catch {
+                failedMonths.insert(key)
+            }
+            applyPendingAutomaticSelectionIfNeeded(for: key)
+            await rebuildPresentation(
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+            return
+        }
+
+        objectWillChange.send()
+        isLoadingDisplayedMonth = true
+        let task = Task<ScheduleMonthCacheEntry, Error> { @MainActor in
+            let fetched = try await appModel.fetchIsolatedScheduleMonth(
+                for: key,
+                bypassingCache: forceRefresh
+            )
+            return await ScheduleMonthCacheEntry.build(key: key, games: fetched)
+        }
+        inFlightMonthTasks[key] = task
+
+        do {
+            let entry = try await task.value
+            cachedMonths[key] = entry
+            failedMonths.remove(key)
+#if DEBUG
+            print("[ScheduleCache] month=\(key.yearMonthText) source=repository gameCount=\(entry.games.count)")
+#endif
+        } catch {
+            failedMonths.insert(key)
+#if DEBUG
+            print("[ScheduleCache] month=\(key.yearMonthText) source=repository failed error=\(error)")
+#endif
+        }
+
+        inFlightMonthTasks[key] = nil
+        isLoadingDisplayedMonth = false
+        applyPendingAutomaticSelectionIfNeeded(for: key)
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
+    }
+
+    private func apply(_ presentation: SchedulePresentation) {
+        objectWillChange.send()
+        calendarDays = presentation.calendarDays
+        selectedDateGames = presentation.selectedDateGames
+        isDisplayedMonthAvailable = presentation.isDisplayedMonthAvailable
+        hasAvailableMonths = presentation.hasAvailableMonths
+        previousAvailableMonth = presentation.previousAvailableMonth
+        nextAvailableMonth = presentation.nextAvailableMonth
+        statusMessage = presentation.statusMessage
+        monthGameCount = presentation.monthGameCount
+#if DEBUG
+        debugSummary = presentation.debugSummary
+#endif
+    }
+
+    private func logLocalMonthIfNeeded(_ key: KBOMonthScheduleKey) {
+#if DEBUG
+        print("[ScheduleCache] month=\(key.yearMonthText) source=local")
+#endif
+    }
+
+    private func applyPendingAutomaticSelectionIfNeeded(for key: KBOMonthScheduleKey) {
+        guard pendingAutomaticSelectionMonthKey == key else { return }
+        selectedDate = preferredSelectedDate(for: key)
+        pendingAutomaticSelectionMonthKey = nil
+    }
+
+    private func startOfMonth(for date: Date) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? date
+    }
+
+    private func shiftedMonth(from date: Date, by offset: Int) -> Date {
+        calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
+    }
+
+    private func preferredSelectedDate(for key: KBOMonthScheduleKey) -> Date {
+        let monthStart = monthStart(for: key)
+        let today = Date()
+        if monthKey(for: today) == key {
+            return today
+        }
+        if let firstGameDate = cachedMonths[key]?.games.first?.scheduledStart {
+            return calendar.startOfDay(for: firstGameDate)
+        }
+        return monthStart
+    }
+
+    private func monthStart(for key: KBOMonthScheduleKey) -> Date {
+        calendar.date(from: DateComponents(year: key.year, month: key.month, day: 1)) ?? Date()
+    }
+
+    private func monthKey(for date: Date) -> KBOMonthScheduleKey {
+        KBOMonthScheduleKey(date: date, calendar: calendar)
+    }
+
+    private func mergeSelectedDayRefresh(
+        _ refreshedSnapshot: [GameDetail],
+        into existingMonthGames: [GameDetail],
+        selectedDayKey: String
+    ) -> [GameDetail] {
+        guard existingMonthGames.isEmpty == false else {
+            return refreshedSnapshot.sorted { $0.scheduledStart < $1.scheduledStart }
+        }
+
+        var mergedGames = existingMonthGames
+        let refreshedDayGames = refreshedSnapshot.filter {
+            SchedulePresentation.dayKey(for: $0.scheduledStart) == selectedDayKey
+        }
+
+        for refreshedGame in refreshedDayGames {
+            let refreshedAliases = refreshedGame.gameIdentityAliases
+            if let index = mergedGames.firstIndex(where: { $0.gameIdentityAliases.isDisjoint(with: refreshedAliases) == false }) {
+                mergedGames[index] = refreshedGame
+            } else {
+                mergedGames.append(refreshedGame)
+            }
+        }
+
+        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    func adjacentMonth(offset: Int) -> Date {
+        shiftedMonth(from: displayedMonth, by: offset)
+    }
+}
+
+private struct ScheduleMonthCacheEntry: Sendable {
+    let key: KBOMonthScheduleKey
+    let games: [GameDetail]
+    let gamesByDate: [String: [GameDetail]]
+
+    nonisolated static func build(key: KBOMonthScheduleKey, games: [GameDetail]) async -> ScheduleMonthCacheEntry {
+        await Task.detached(priority: .userInitiated) {
+            let sortedGames = games.sorted { $0.scheduledStart < $1.scheduledStart }
+            let gamesByDate = Dictionary(grouping: sortedGames) { game in
+                SchedulePresentation.dayKey(for: game.scheduledStart)
+            }
+            return ScheduleMonthCacheEntry(key: key, games: sortedGames, gamesByDate: gamesByDate)
+        }.value
+    }
+}
+
+private struct SchedulePresentation: Sendable {
+    let calendarDays: [MyTeamCalendarDay]
+    let selectedDateGames: [GameDetail]
+    let isDisplayedMonthAvailable: Bool
+    let hasAvailableMonths: Bool
+    let previousAvailableMonth: Date?
+    let nextAvailableMonth: Date?
+    let statusMessage: String?
+    let monthGameCount: Int
+#if DEBUG
+    let debugSummary: String?
+#endif
+
+    nonisolated static func build(
+        displayedMonth: Date,
+        selectedDate: Date,
+        filter: ScheduleFilter,
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>,
+        cachedMonthEntries: [String: ScheduleMonthCacheEntry],
+        failedMonthKeys: Set<String>,
+        currentDate: Date
+    ) async -> SchedulePresentation {
+        await Task.detached(priority: .userInitiated) {
+            buildSynchronously(
+                displayedMonth: displayedMonth,
+                selectedDate: selectedDate,
+                filter: filter,
+                favoriteTeamID: favoriteTeamID,
+                attendedGameKeys: attendedGameKeys,
+                cachedMonthEntries: cachedMonthEntries,
+                failedMonthKeys: failedMonthKeys,
+                currentDate: currentDate
+            )
+        }.value
+    }
+
+    nonisolated static func dayKey(for date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 1970, components.month ?? 1, components.day ?? 1)
+    }
+
+    nonisolated private static func buildSynchronously(
+        displayedMonth: Date,
+        selectedDate: Date,
+        filter: ScheduleFilter,
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>,
+        cachedMonthEntries: [String: ScheduleMonthCacheEntry],
+        failedMonthKeys: Set<String>,
+        currentDate: Date
+    ) -> SchedulePresentation {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+        let displayedKey = KBOMonthScheduleKey(date: displayedMonth, calendar: calendar)
+        let displayedKeyText = displayedKey.yearMonthText
+        let monthEntry = cachedMonthEntries[displayedKeyText]
+        let filteredGamesByDate = filteredGamesByDate(
+            from: monthEntry,
+            filter: filter,
+            favoriteTeamID: favoriteTeamID
+        )
+        let monthStart = startOfMonth(for: displayedMonth, calendar: calendar)
+        let selectedDayKey = dayKey(for: selectedDate)
+        let selectedGames = sortSelectedGames(
+            filteredGamesByDate[selectedDayKey] ?? [],
+            favoriteTeamID: favoriteTeamID
+        )
+        let days = calendarDays(
+            for: monthStart,
+            gamesByDate: filteredGamesByDate,
+            filter: filter,
+            favoriteTeamID: favoriteTeamID,
+            attendedGameKeys: attendedGameKeys,
+            currentDate: currentDate,
+            calendar: calendar
+        )
+        let displayedMonthStart = startOfMonth(for: displayedMonth, calendar: calendar)
+        let previousMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonthStart)
+        let nextMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonthStart)
+        let isDisplayedMonthAvailable = true
+        let statusMessage = failedMonthKeys.contains(displayedKeyText) && monthEntry == nil
+            ? "월간 일정을 불러오지 못했습니다."
+            : nil
+        let monthGameCount = days.reduce(0) { count, day in
+            count + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+#if DEBUG
+        return SchedulePresentation(
+            calendarDays: days,
+            selectedDateGames: selectedGames,
+            isDisplayedMonthAvailable: isDisplayedMonthAvailable,
+            hasAvailableMonths: true,
+            previousAvailableMonth: previousMonth,
+            nextAvailableMonth: nextMonth,
+            statusMessage: statusMessage,
+            monthGameCount: monthGameCount,
+            debugSummary: monthEntry.map { "월간 캐시 \($0.games.count)경기" }
+        )
+#else
+        return SchedulePresentation(
+            calendarDays: days,
+            selectedDateGames: selectedGames,
+            isDisplayedMonthAvailable: isDisplayedMonthAvailable,
+            hasAvailableMonths: true,
+            previousAvailableMonth: previousMonth,
+            nextAvailableMonth: nextMonth,
+            statusMessage: statusMessage,
+            monthGameCount: monthGameCount
+        )
+#endif
+    }
+
+    nonisolated private static func filteredGamesByDate(
+        from entry: ScheduleMonthCacheEntry?,
+        filter: ScheduleFilter,
+        favoriteTeamID: String?
+    ) -> [String: [GameDetail]] {
+        guard let entry else { return [:] }
+        switch filter {
+        case .all:
+            return entry.gamesByDate
+        case .myTeam:
+            guard let favoriteTeamID else { return [:] }
+            return entry.gamesByDate.mapValues { games in
+                games.filter { $0.involves(teamID: favoriteTeamID) }
+            }
+        }
+    }
+
+    nonisolated private static func calendarDays(
+        for monthStart: Date,
+        gamesByDate: [String: [GameDetail]],
+        filter: ScheduleFilter,
+        favoriteTeamID: String?,
+        attendedGameKeys: Set<String>,
+        currentDate: Date,
+        calendar: Calendar
+    ) -> [MyTeamCalendarDay] {
+        guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
+              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
+              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: monthRange.start),
+              let lastWeek = calendar.dateInterval(of: .weekOfMonth, for: monthEnd) else {
+            return []
+        }
+
+        let todayKey = dayKey(for: currentDate)
+        var days: [MyTeamCalendarDay] = []
+        var cursor = firstWeek.start
+        while cursor < lastWeek.end {
+            let cursorKey = dayKey(for: cursor)
+            let dayGames = gamesByDate[cursorKey] ?? []
+            let myTeamDayGames = favoriteTeamID.map { teamID in
+                dayGames.filter { $0.involves(teamID: teamID) }
+            } ?? []
+            days.append(
+                MyTeamCalendarDay(
+                    date: cursor,
+                    isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
+                    isToday: cursorKey == todayKey,
+                    gameCount: dayGames.count,
+                    hasAttendedGame: dayGames.contains { isGameAttended($0, attendedGameKeys: attendedGameKeys) },
+                    dominantStatus: dominantStatus(for: myTeamDayGames),
+                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
+                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
+                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames, favoriteTeamID: favoriteTeamID)
+                )
+            )
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = nextDay
+        }
+        return days
+    }
+
+    nonisolated private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? date
+    }
+
+    nonisolated private static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
+        games.sorted { lhs, rhs in
+            let lhsIsMyTeam = favoriteTeamID.map { lhs.involves(teamID: $0) } ?? false
+            let rhsIsMyTeam = favoriteTeamID.map { rhs.involves(teamID: $0) } ?? false
+            if lhsIsMyTeam != rhsIsMyTeam {
+                return lhsIsMyTeam && !rhsIsMyTeam
+            }
+            if lhs.status == rhs.status {
+                return lhs.scheduledStart < rhs.scheduledStart
+            }
+            return homePriority(for: lhs.status, isMyTeamGame: lhsIsMyTeam) <
+                homePriority(for: rhs.status, isMyTeamGame: rhsIsMyTeam)
+        }
+    }
+
+    nonisolated private static func homePriority(for status: GameStatus, isMyTeamGame: Bool) -> Int {
+        switch status {
+        case .live, .rainDelay:
+            return isMyTeamGame ? 0 : 1
+        case .upcoming:
+            return 2
+        case .final, .cancelled:
+            return 3
+        }
+    }
+
+    nonisolated private static func dominantStatus(for games: [GameDetail]) -> GameStatus? {
+        if games.contains(where: { $0.status == .live }) { return .live }
+        if games.contains(where: { $0.status == .rainDelay }) { return .rainDelay }
+        if games.contains(where: { $0.status == .upcoming }) { return .upcoming }
+        if games.contains(where: { $0.status == .final }) { return .final }
+        if games.contains(where: { $0.status == .cancelled }) { return .cancelled }
+        return nil
+    }
+
+    nonisolated private static func calendarOpponentTeam(
+        for games: [GameDetail],
+        filter: ScheduleFilter,
+        favoriteTeamID: String?
+    ) -> Team? {
+        guard filter == .myTeam, let favoriteTeamID else { return nil }
+        for game in games {
+            if game.awayTeam.id == favoriteTeamID { return game.homeTeam }
+            if game.homeTeam.id == favoriteTeamID { return game.awayTeam }
+        }
+        return nil
+    }
+
+    nonisolated private static func calendarFavoriteTeamResult(
+        for games: [GameDetail],
+        favoriteTeamID: String?
+    ) -> TeamGameResult? {
+        for game in games {
+            guard let favoriteTeamID,
+                  game.involves(teamID: favoriteTeamID),
+                  game.status == .final,
+                  let awayScore = game.awayScore,
+                  let homeScore = game.homeScore else { continue }
+            if awayScore == homeScore { return .tie }
+            let favoriteTeamWon = (game.awayTeam.id == favoriteTeamID && awayScore > homeScore) ||
+                (game.homeTeam.id == favoriteTeamID && homeScore > awayScore)
+            return favoriteTeamWon ? .win : .loss
+        }
+        return nil
+    }
+
+    nonisolated private static func calendarFavoriteTeamIsHome(
+        for games: [GameDetail],
+        filter: ScheduleFilter,
+        favoriteTeamID: String?
+    ) -> Bool? {
+        guard filter == .myTeam, let favoriteTeamID else { return nil }
+        for game in games {
+            if game.homeTeam.id == favoriteTeamID { return true }
+            if game.awayTeam.id == favoriteTeamID { return false }
+        }
+        return nil
+    }
+
+    nonisolated private static func isGameAttended(_ game: GameDetail, attendedGameKeys: Set<String>) -> Bool {
+        attendedGameKeys.isDisjoint(with: game.attendanceStorageAliases) == false
+    }
+}
+
+private struct ScheduleGameDetailRoute: Hashable {
+    let stableIdentity: String
+    let initialGame: GameDetail
+
+    init(game: GameDetail) {
+        stableIdentity = game.stableDetailIdentity
+        initialGame = game
+    }
+
+    static func == (lhs: ScheduleGameDetailRoute, rhs: ScheduleGameDetailRoute) -> Bool {
+        lhs.stableIdentity == rhs.stableIdentity
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(stableIdentity)
+    }
+}
+
 struct ScheduleView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var displayedMonth = Date()
-    @State private var selectedDate = Date()
-    @State private var scheduleFilter: ScheduleFilter = .all
+    @StateObject private var viewModel = ScheduleViewModel()
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if appModel.isScheduleMonthAvailable(displayedMonth, filter: scheduleFilter),
-                       let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
+                    if viewModel.isDisplayedMonthAvailable,
+                       let statusMessage = viewModel.statusMessage {
                         DataStatusBannerView(message: statusMessage)
                     }
 
                     ScheduleCalendarCardView(
-                        displayedMonth: $displayedMonth,
-                        selectedDate: $selectedDate,
-                        scheduleFilter: $scheduleFilter
+                        viewModel: viewModel
                     )
                 }
                 .padding(.horizontal, 12)
@@ -70,63 +658,36 @@ struct ScheduleView: View {
             .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()
             .refreshable {
-                await appModel.refreshSchedule(for: displayedMonth)
+                await viewModel.refreshDisplayedMonth(appModel: appModel)
             }
             .task(id: scheduleTaskID) {
-                await normalizeDisplayedMonth()
-            }
-            .task(id: selectedDateTaskID) {
-                await appModel.loadScheduleDayIfNeeded(for: selectedDate)
+                await viewModel.loadDisplayedMonth(appModel: appModel)
             }
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
+            }
+            .navigationDestination(for: ScheduleGameDetailRoute.self) { route in
+                GameDetailView(stableIdentity: route.stableIdentity, initialGame: route.initialGame)
             }
         }
     }
 
     private var scheduleTaskID: String {
-        let key = KBOMonthScheduleKey(date: displayedMonth)
-        return "\(scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(key.yearMonthText)"
-    }
-
-    private var selectedDateTaskID: String {
-        "\(scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(selectedDate.formatted(.dateTime.year().month().day()))"
-    }
-
-    private func normalizeDisplayedMonth() async {
-        await appModel.loadScheduleIfNeeded(for: displayedMonth)
-
-        guard let resolvedMonth = appModel.nearestScheduleMonth(to: displayedMonth, filter: scheduleFilter) else {
-            return
-        }
-
-        let isSameMonth = Calendar(identifier: .gregorian).isDate(displayedMonth, equalTo: resolvedMonth, toGranularity: .month)
-        if isSameMonth == false {
-            displayedMonth = resolvedMonth
-        }
-        if Calendar(identifier: .gregorian).isDate(selectedDate, equalTo: resolvedMonth, toGranularity: .month) == false {
-            selectedDate = appModel.startOfMonth(for: resolvedMonth)
-        }
-
-        if isSameMonth == false {
-            await appModel.loadScheduleIfNeeded(for: resolvedMonth)
-        }
+        "\(viewModel.scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(viewModel.displayedMonthKey.yearMonthText)"
     }
 }
 
 private struct ScheduleCalendarCardView: View {
     @Environment(AppModel.self) private var appModel
-    @Binding var displayedMonth: Date
-    @Binding var selectedDate: Date
-    @Binding var scheduleFilter: ScheduleFilter
+    @ObservedObject var viewModel: ScheduleViewModel
 
     private let weekdaySymbols = ["일", "월", "화", "수", "목", "금", "토"]
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let palette = appModel.favoriteStadiumPalette {
-                DoosanScheduleFilterControl(selection: $scheduleFilter, palette: palette)
+                DoosanScheduleFilterControl(selection: $viewModel.scheduleFilter, palette: palette)
             } else {
-                Picker("일정 필터", selection: $scheduleFilter) {
+                Picker("일정 필터", selection: $viewModel.scheduleFilter) {
                     ForEach(ScheduleFilter.allCases) { filter in
                         Text(filter.rawValue)
                             .tag(filter)
@@ -140,8 +701,11 @@ private struct ScheduleCalendarCardView: View {
                 HStack {
                     Button {
                         guard let previousMonth = previousAvailableMonth else { return }
-                        displayedMonth = previousMonth
-                        selectedDate = appModel.startOfMonth(for: previousMonth)
+                        viewModel.changeDisplayedMonth(
+                            to: previousMonth,
+                            favoriteTeamID: appModel.settings.favoriteTeamID,
+                            attendedGameKeys: appModel.attendedGameKeys
+                        )
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.subheadline.weight(.bold))
@@ -159,7 +723,7 @@ private struct ScheduleCalendarCardView: View {
                     Spacer()
 
                     VStack(spacing: 2) {
-                        Text(appModel.calendarMonthTitle(for: displayedMonth))
+                        Text(appModel.calendarMonthTitle(for: viewModel.displayedMonth))
                             .font(.headline.weight(.bold))
                             .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                         Text(monthSummaryText)
@@ -171,8 +735,11 @@ private struct ScheduleCalendarCardView: View {
 
                     Button {
                         guard let nextMonth = nextAvailableMonth else { return }
-                        displayedMonth = nextMonth
-                        selectedDate = appModel.startOfMonth(for: nextMonth)
+                        viewModel.changeDisplayedMonth(
+                            to: nextMonth,
+                            favoriteTeamID: appModel.settings.favoriteTeamID,
+                            attendedGameKeys: appModel.attendedGameKeys
+                        )
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.subheadline.weight(.bold))
@@ -198,7 +765,11 @@ private struct ScheduleCalendarCardView: View {
 
                     ForEach(calendarDays) { day in
                         Button {
-                            selectedDate = day.date
+                            viewModel.selectDate(
+                                day.date,
+                                favoriteTeamID: appModel.settings.favoriteTeamID,
+                                attendedGameKeys: appModel.attendedGameKeys
+                            )
                         } label: {
                             VStack(spacing: 4) {
                                 Text(day.date.formatted(.dateTime.day()))
@@ -253,7 +824,7 @@ private struct ScheduleCalendarCardView: View {
                     }
                 }
 
-                if appModel.isLoadingSchedule(for: displayedMonth) {
+                if viewModel.isLoadingDisplayedMonth {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
@@ -261,14 +832,14 @@ private struct ScheduleCalendarCardView: View {
                             .font(.caption)
                             .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                     }
-                } else if let statusMessage = appModel.scheduleStatusMessage(for: displayedMonth) {
+                } else if let statusMessage = viewModel.statusMessage {
                     Text(statusMessage)
                         .font(.caption)
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
                 }
 
                 #if DEBUG
-                if let debugSummary = appModel.scheduleDebugSummary(for: displayedMonth) {
+                if let debugSummary = viewModel.debugSummary {
                     Text(debugSummary)
                         .font(.caption2)
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
@@ -300,18 +871,18 @@ private struct ScheduleCalendarCardView: View {
                         }
 
                         ForEach(selectedGames) { game in
-                            NavigationLink(value: appModel.gameNavigationIdentity(for: game)) {
+                            NavigationLink(value: ScheduleGameDetailRoute(game: game)) {
                                 ScheduleGameRow(
                                     game: game,
                                     favoriteTeamID: appModel.settings.favoriteTeamID,
-                                    filter: scheduleFilter
+                                    filter: viewModel.scheduleFilter
                                 )
                             }
                             .buttonStyle(.plain)
                         }
                     }
                 }
-            } else if appModel.scheduleHasAvailableMonths(filter: scheduleFilter) {
+            } else if viewModel.hasAvailableMonths {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -335,59 +906,56 @@ private struct ScheduleCalendarCardView: View {
     }
 
     private var calendarDays: [MyTeamCalendarDay] {
-        appModel.scheduleCalendarDays(for: displayedMonth, filter: scheduleFilter)
+        viewModel.calendarDays
     }
 
     private var selectedGames: [GameDetail] {
-        appModel.scheduleGames(on: selectedDate, filter: scheduleFilter)
+        viewModel.selectedDateGames
     }
 
     private var selectedDayTitle: String {
-        selectedDate.formatted(.dateTime.year().month().day().weekday(.wide))
+        viewModel.selectedDate.formatted(.dateTime.year().month().day().weekday(.wide))
     }
 
     private var monthSummaryText: String {
-        let count = calendarDays.reduce(0) { partialResult, day in
-            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
-        }
-        return count == 0 ? "등록 경기 없음" : "이달 경기 \(count)"
+        viewModel.monthGameCount == 0 ? "등록 경기 없음" : "이달 경기 \(viewModel.monthGameCount)"
     }
 
     private var isDisplayedMonthAvailable: Bool {
-        appModel.isScheduleMonthAvailable(displayedMonth, filter: scheduleFilter)
+        viewModel.isDisplayedMonthAvailable
     }
 
     private var previousAvailableMonth: Date? {
-        appModel.shiftedScheduleMonth(from: displayedMonth, by: -1, filter: scheduleFilter)
+        viewModel.previousAvailableMonth
     }
 
     private var nextAvailableMonth: Date? {
-        appModel.shiftedScheduleMonth(from: displayedMonth, by: 1, filter: scheduleFilter)
+        viewModel.nextAvailableMonth
     }
 
     private var emptyMonthTitle: String {
-        if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
+        if viewModel.scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
             return "응원 팀을 선택해 주세요"
         }
         return "표시할 일정이 없습니다"
     }
 
     private var emptyMonthMessage: String {
-        if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
+        if viewModel.scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
             return "응원 팀을 선택하면 경기 있는 달만 일정에 표시됩니다."
         }
         return "현재 일정 데이터에 경기 있는 달이 없습니다."
     }
 
     private var emptyMessage: String {
-        if scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
+        if viewModel.scheduleFilter == .myTeam, appModel.settings.favoriteTeamID == nil {
             return "응원 팀을 선택하면 마이팀 일정이 표시됩니다."
         }
         return "선택한 날짜에는 등록된 경기가 없습니다."
     }
 
     private func isSelected(_ day: MyTeamCalendarDay) -> Bool {
-        Calendar(identifier: .gregorian).isDate(day.date, inSameDayAs: selectedDate)
+        Calendar(identifier: .gregorian).isDate(day.date, inSameDayAs: viewModel.selectedDate)
     }
 
     private func dayNumberColor(for day: MyTeamCalendarDay) -> Color {

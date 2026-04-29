@@ -51,6 +51,14 @@ protocol KBODailyScheduleDataSource: Sendable {
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail]
 }
 
+protocol KBOFavoriteTeamScheduleDataSource: Sendable {
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail]
+}
+
 extension KBODailyScheduleDataSource where Self: KBOMonthScheduleDataSource {
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await fetchSchedule(for: date, bypassingCache: false)
@@ -75,6 +83,10 @@ protocol KBOStandingsDataSource: Sendable {
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot]
 }
 
+protocol KBOStandingsGameDataSource: Sendable {
+    nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail]
+}
+
 extension KBOStandingsDataSource {
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         []
@@ -83,6 +95,14 @@ extension KBOStandingsDataSource {
 
 protocol KBORepository: KBOGameDataSource, KBONotificationDataSource, KBOMonthScheduleDataSource, KBODailyScheduleDataSource, KBOStandingsDataSource, Sendable {
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData
+}
+
+protocol KBOGameDetailSnapshotDataSource: Sendable {
+    nonisolated func fetchGameDetailSnapshot(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail?
 }
 
 struct KBOScheduleMissingGamesResult: Sendable {
@@ -97,6 +117,10 @@ enum KBOScheduleSyncError: Error, Sendable {
 protocol KBOScheduleRemoteSyncDataSource: Sendable {
     nonisolated func fetchRemoteGameCount() async throws -> Int
     nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult
+}
+
+protocol KBOLocalGameCacheUpserting: Sendable {
+    nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int)
 }
 
 struct KBOBootstrapData: Sendable {

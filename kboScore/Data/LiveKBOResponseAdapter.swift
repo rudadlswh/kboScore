@@ -232,7 +232,11 @@ enum KBOExternalResponseAdapter {
             outs: intValue(for: ["outs", "outCount"], in: dictionary),
             highlightText: stringValue(for: ["highlightText", "highlight", "summary", "headline"], in: dictionary),
             events: parseEvents(in: dictionary),
-            note: stringValue(for: ["note", "memo", "remark"], in: dictionary)
+            note: stringValue(for: ["note", "memo", "remark"], in: dictionary),
+            awayStartingPitcherName: stringValue(for: ["awayStartingPitcherName", "away_starting_pitcher_name"], in: dictionary),
+            homeStartingPitcherName: stringValue(for: ["homeStartingPitcherName", "home_starting_pitcher_name"], in: dictionary),
+            currentPitcherName: stringValue(for: ["currentPitcherName", "current_pitcher_name", "pitcherName", "pitcher_name"], in: dictionary),
+            currentBatterName: stringValue(for: ["currentBatterName", "current_batter_name", "batterName", "batter_name"], in: dictionary)
         )
     }
 
@@ -455,7 +459,9 @@ enum KBOExternalResponseAdapter {
             outs: intValue(for: ["OUT_CN"], in: dictionary),
             highlightText: nil,
             events: [],
-            note: nil
+            note: nil,
+            awayStartingPitcherName: stringValue(for: ["T_PIT_P_NM"], in: dictionary),
+            homeStartingPitcherName: stringValue(for: ["B_PIT_P_NM"], in: dictionary)
         )
     }
 

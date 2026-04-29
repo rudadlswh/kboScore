@@ -92,6 +92,12 @@ struct GameCardView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    if let currentPitcher = summary.currentPitcherName?.nilIfBlank, summary.status.isLiveLike {
+                        Label(currentPitcher, systemImage: "figure.baseball")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
@@ -180,6 +186,12 @@ struct GameCardView: View {
                         .font(.caption2)
                         .foregroundStyle(palette.textSecondary)
                         .lineLimit(1)
+                    if let currentPitcher = summary.currentPitcherName?.nilIfBlank, summary.status.isLiveLike {
+                        Label(currentPitcher, systemImage: "figure.baseball")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(palette.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
@@ -345,6 +357,13 @@ private struct HomeTeamBadge: View {
                 }
             }
             .accessibilityLabel("홈팀")
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

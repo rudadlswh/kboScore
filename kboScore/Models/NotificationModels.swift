@@ -9,6 +9,7 @@ import Foundation
 
 enum NotificationType: String, Codable, Hashable, Sendable {
     case scoreChange
+    case onBase
     case gameStart
     case leadChange
     case gameEnd
@@ -18,6 +19,8 @@ enum NotificationType: String, Codable, Hashable, Sendable {
         switch self {
         case .scoreChange:
             "점수 변경"
+        case .onBase:
+            "출루"
         case .gameStart:
             "경기 시작"
         case .leadChange:
@@ -31,7 +34,7 @@ enum NotificationType: String, Codable, Hashable, Sendable {
 
     nonisolated var isScoreLike: Bool {
         switch self {
-        case .scoreChange, .leadChange:
+        case .scoreChange, .leadChange, .onBase:
             true
         case .gameStart, .gameEnd, .rainDelay:
             false

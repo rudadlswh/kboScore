@@ -32,8 +32,12 @@ struct StandingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()
+            .task(id: appModel.selectedTab) {
+                guard appModel.selectedTab == .standings else { return }
+                await appModel.loadStandingsIfNeeded()
+            }
             .refreshable {
-                await appModel.refreshHome()
+                await appModel.refreshStandings()
             }
         }
     }
