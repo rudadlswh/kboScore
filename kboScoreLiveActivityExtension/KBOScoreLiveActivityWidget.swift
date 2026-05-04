@@ -21,7 +21,8 @@ struct KBOScoreLiveActivityWidget: Widget {
                     DynamicIslandTeamView(
                         side: game.away,
                         alignment: .leading,
-                        isBatting: game.battingSide == .away
+                        isBatting: game.battingSide == .away,
+                        showsScore: game.isPreGame == false
                     )
                 }
 
@@ -29,7 +30,8 @@ struct KBOScoreLiveActivityWidget: Widget {
                     DynamicIslandTeamView(
                         side: game.home,
                         alignment: .trailing,
-                        isBatting: game.battingSide == .home
+                        isBatting: game.battingSide == .home,
+                        showsScore: game.isPreGame == false
                     )
                 }
 
@@ -45,14 +47,14 @@ struct KBOScoreLiveActivityWidget: Widget {
                     DynamicIslandBroadcastMetadataRow(game: game)
                 }
             } compactLeading: {
-                Text("\(game.away.shortName) \(game.away.scoreText)")
+                Text(game.isPreGame ? game.away.shortName : "\(game.away.shortName) \(game.away.scoreText)")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
                     .foregroundStyle(.white)
             } compactTrailing: {
-                Text("\(game.home.scoreText) \(game.home.shortName)")
+                Text(game.isPreGame ? game.home.shortName : "\(game.home.scoreText) \(game.home.shortName)")
                     .font(.caption2.weight(.bold))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -90,6 +92,9 @@ private struct BroadcastScoreboardGame {
     let metadataText: String?
     let battingSide: BroadcastBattingSide?
     let baseState: BroadcastBaseState?
+    let isPreGame: Bool
+    let awayStartingPitcherName: String?
+    let homeStartingPitcherName: String?
     let balls: Int?
     let strikes: Int?
     let outs: Int?
@@ -113,24 +118,27 @@ private struct BroadcastScoreboardGame {
 
         away = context.attributes.isHomeGame ? opponent : favorite
         home = context.attributes.isHomeGame ? favorite : opponent
+        isPreGame = context.state.isPreGame
         inningText = context.state.inningText
         statusText = context.state.summaryText
-        batterText = context.state.currentBatterName
-        pitcherText = context.state.currentPitcherName
-        battingSide = Self.battingSide(from: context.state.inningText)
+        batterText = context.state.isPreGame ? nil : context.state.currentBatterName
+        pitcherText = context.state.isPreGame ? nil : context.state.currentPitcherName
+        awayStartingPitcherName = context.attributes.isHomeGame ? context.state.opponentStartingPitcherName : context.state.favoriteStartingPitcherName
+        homeStartingPitcherName = context.attributes.isHomeGame ? context.state.favoriteStartingPitcherName : context.state.opponentStartingPitcherName
+        battingSide = context.state.isPreGame ? nil : Self.battingSide(from: context.state.inningText)
         metadataText = Self.metadataText(
             inningText: context.state.inningText,
             statusText: context.state.summaryText,
             venue: context.attributes.venue
         )
-        baseState = Self.baseState(
+        baseState = context.state.isPreGame ? nil : Self.baseState(
             first: context.state.runnerOnFirst ?? false,
             second: context.state.runnerOnSecond ?? false,
             third: context.state.runnerOnThird ?? false
         )
-        balls = context.state.balls
-        strikes = context.state.strikes
-        outs = context.state.outs
+        balls = context.state.isPreGame ? nil : context.state.balls
+        strikes = context.state.isPreGame ? nil : context.state.strikes
+        outs = context.state.isPreGame ? nil : context.state.outs
         favoriteAccent = favorite.accent
     }
 
@@ -190,7 +198,10 @@ private struct BroadcastScoreboardGame {
     }
 
     var hasBroadcastMetadata: Bool {
-        batterText != nil || countText != nil || pitcherText != nil
+        if isPreGame {
+            return true
+        }
+        return batterText != nil || countText != nil || pitcherText != nil
     }
 
     var compactMetadataText: String? {
@@ -303,7 +314,9 @@ private struct BroadcastScoreboardMainRow: View {
                 isBatting: game.battingSide == .away
             )
 
-            BroadcastScoreValue(scoreText: game.away.scoreText)
+            if game.isPreGame == false {
+                BroadcastScoreValue(scoreText: game.away.scoreText)
+            }
 
             BroadcastGameStateHub(
                 inningText: game.inningText,
@@ -311,7 +324,9 @@ private struct BroadcastScoreboardMainRow: View {
                 baseState: game.baseState
             )
 
-            BroadcastScoreValue(scoreText: game.home.scoreText)
+            if game.isPreGame == false {
+                BroadcastScoreValue(scoreText: game.home.scoreText)
+            }
 
             BroadcastTeamIdentityView(
                 side: game.home,
@@ -501,23 +516,43 @@ private struct BroadcastScoreboardMetadataRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            BroadcastPlayerSlot(
-                label: "타자",
-                text: game.batterText,
-                alignment: .leading
-            )
+            if game.isPreGame {
+                BroadcastPlayerSlot(
+                    label: "\(game.away.shortName) 선발",
+                    text: game.awayStartingPitcherName ?? "선발 미정",
+                    alignment: .leading
+                )
 
-            BroadcastCountCluster(
-                balls: game.balls,
-                strikes: game.strikes,
-                outs: game.outs
-            )
+                Text(game.metadataText ?? game.statusText)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
 
-            BroadcastPlayerSlot(
-                label: "투수",
-                text: game.pitcherText,
-                alignment: .trailing
-            )
+                BroadcastPlayerSlot(
+                    label: "\(game.home.shortName) 선발",
+                    text: game.homeStartingPitcherName ?? "선발 미정",
+                    alignment: .trailing
+                )
+            } else {
+                BroadcastPlayerSlot(
+                    label: "타자",
+                    text: game.batterText,
+                    alignment: .leading
+                )
+
+                BroadcastCountCluster(
+                    balls: game.balls,
+                    strikes: game.strikes,
+                    outs: game.outs
+                )
+
+                BroadcastPlayerSlot(
+                    label: "투수",
+                    text: game.pitcherText,
+                    alignment: .trailing
+                )
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(minHeight: 28)
@@ -617,6 +652,7 @@ private struct DynamicIslandTeamView: View {
     let side: BroadcastTeamSide
     let alignment: ScoreboardAlignment
     let isBatting: Bool
+    let showsScore: Bool
 
     var body: some View {
         VStack(alignment: alignment.horizontal, spacing: 3) {
@@ -633,7 +669,7 @@ private struct DynamicIslandTeamView: View {
             }
 
             HStack(spacing: 5) {
-                if alignment == .trailing {
+                if alignment == .trailing && showsScore {
                     Text(side.scoreText)
                         .font(scoreFont)
                         .monospacedDigit()
@@ -645,7 +681,7 @@ private struct DynamicIslandTeamView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
-                if alignment == .leading {
+                if alignment == .leading && showsScore {
                     Text(side.scoreText)
                         .font(scoreFont)
                         .monospacedDigit()
@@ -693,7 +729,18 @@ private struct DynamicIslandBroadcastMetadataRow: View {
     let game: BroadcastScoreboardGame
 
     var body: some View {
-        if game.hasBroadcastMetadata {
+        if game.isPreGame {
+            HStack(spacing: 8) {
+                DynamicIslandMetadataSlot(text: "\(game.away.shortName) \(game.awayStartingPitcherName ?? "선발 미정")", alignment: .leading)
+                Text(game.statusText)
+                    .font(.caption2.weight(.black))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.70)
+                DynamicIslandMetadataSlot(text: "\(game.home.shortName) \(game.homeStartingPitcherName ?? "선발 미정")", alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity)
+        } else if game.hasBroadcastMetadata {
             HStack(spacing: 8) {
                 DynamicIslandMetadataSlot(text: game.batterText.map { "B \($0)" }, alignment: .leading)
 

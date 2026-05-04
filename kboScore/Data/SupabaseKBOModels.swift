@@ -22,8 +22,6 @@ struct SupabaseTeamRow: Decodable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id
-//        case code
-//        case teamCode = "team_code"
         case code = "team_code"
         case name
         case shortName = "short_name"

@@ -1476,6 +1476,10 @@ final class AppModel {
         game.status.isLiveLike && game.involves(teamID: settings.favoriteTeamID)
     }
 
+    func shouldAutoStartLiveActivity(for game: GameDetail) -> Bool {
+        (game.status == .upcoming || game.status.isLiveLike) && game.involves(teamID: settings.favoriteTeamID)
+    }
+
     func isLiveActivityOn(for gameID: UUID) -> Bool {
         activeLiveActivityGameID == gameID
     }
@@ -1526,6 +1530,25 @@ final class AppModel {
             activeLiveActivityGameID = game.id
         } catch {
             activeLiveActivityGameID = nil
+        }
+    }
+
+    func startOrUpdateLiveActivityIfNeeded(for game: GameDetail) async {
+        liveActivitySupported = liveActivityController.isSupported
+        guard settings.liveActivitiesEnabled,
+              liveActivitySupported,
+              shouldAutoStartLiveActivity(for: game),
+              let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: settings.favoriteTeamID) else {
+            return
+        }
+
+        do {
+            try await liveActivityController.startOrUpdate(using: snapshot)
+            activeLiveActivityGameID = game.id
+        } catch {
+            #if DEBUG
+            print("[LiveActivityPayload] auto start/update failed gameID=\(game.id.uuidString) error=\(error)")
+            #endif
         }
     }
 
@@ -1590,6 +1613,9 @@ final class AppModel {
     func syncNotificationRegistrationState() async {
         await refreshNotificationAuthorizationStatus()
         if notificationAuthorizationStatus.allowsNotifications {
+            #if DEBUG
+            print("[NotificationPipeline] registerForRemoteNotifications called")
+            #endif
             UIApplication.shared.registerForRemoteNotifications()
         }
         scheduleNotificationRegistrationSync(force: false)
@@ -1603,6 +1629,9 @@ final class AppModel {
             print("[NotificationPipeline] requestAuthorization granted=\(granted)")
             #endif
             guard granted else { return }
+            #if DEBUG
+            print("[NotificationPipeline] registerForRemoteNotifications called")
+            #endif
             UIApplication.shared.registerForRemoteNotifications()
             scheduleNotificationRegistrationSync(force: true)
         } catch {
@@ -2510,6 +2539,9 @@ final class AppModel {
     }
 
     private func updateAPNsDeviceToken(_ token: String) {
+        #if DEBUG
+        print("[NotificationPipeline] APNs token stored prefix=\(token.prefix(12)) length=\(token.count)")
+        #endif
         guard apnsDeviceToken != token else {
             scheduleNotificationRegistrationSync(force: false)
             return
@@ -2627,13 +2659,28 @@ final class AppModel {
         notificationRegistrationLastAttemptAt = Date()
 
         do {
+            #if DEBUG
+            print("[NotificationPipeline] registration request start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing")")
+            #endif
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             notificationRegistrationSyncStatus = status
+            #if DEBUG
+            print("[NotificationPipeline] registration sync status=\(status.rawValue)")
+            if status == .synced {
+                print("[NotificationPipeline] backend token registration success")
+            } else if status == .skipped {
+                print("[NotificationPipeline] backend token registration skipped")
+            }
+            #endif
             if status == .synced || status == .skipped {
                 lastSyncedNotificationRegistrationPayload = payload
             }
         } catch {
             notificationRegistrationSyncStatus = .failed
+            #if DEBUG
+            print("[NotificationPipeline] backend token registration failure error=\(error)")
+            print("[NotificationPipeline] registration failure error=\(error)")
+            #endif
         }
     }
 
@@ -2648,7 +2695,7 @@ final class AppModel {
 
         guard let activeGameID = activeLiveActivityGameID else { return }
         guard let activeGame = game(withID: activeGameID),
-              shouldShowLiveActivityAction(for: activeGame),
+              shouldAutoStartLiveActivity(for: activeGame),
               let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: activeGame, favoriteTeamID: settings.favoriteTeamID) else {
             await liveActivityController.endCurrent()
             activeLiveActivityGameID = nil
@@ -2990,73 +3037,12 @@ final class AppModel {
 
         for updatedGame in updatedGames where updatedGame.involves(teamID: favoriteTeamID) && isTodayInKorea(updatedGame) {
             let key = updatedGame.canonicalGameIdentityKey
-            let previousGame = equivalentGame(to: updatedGame, in: previousGames)
-            let previousState = previousGame.map(GameContentNotificationState.init(game:)) ?? lastNotifiedGameStates[key]
+            let hadPreviousState = equivalentGame(to: updatedGame, in: previousGames) != nil || lastNotifiedGameStates[key] != nil
             let currentState = GameContentNotificationState(game: updatedGame)
             lastNotifiedGameStates[key] = currentState
-
-            guard let previousState else {
-                #if DEBUG
-                print("[NotificationPipeline] skipped reason=seedState game=\(debugGameIdentifier(for: updatedGame))")
-                #endif
-                continue
-            }
-            guard let event = notificationEvent(previous: previousState, current: currentState) else {
-                #if DEBUG
-                print("[NotificationPipeline] skipped reason=noMeaningfulTransition game=\(debugGameIdentifier(for: updatedGame))")
-                #endif
-                continue
-            }
-
             #if DEBUG
-            print("[NotificationPipeline] candidate event=\(event.rawValue) game=\(debugGameIdentifier(for: updatedGame))")
+            print("[NotificationPipeline] skipped reason=backendDriven game=\(debugGameIdentifier(for: updatedGame)) hadPreviousState=\(hadPreviousState)")
             #endif
-            guard notificationPreferenceAllows(event) else {
-                #if DEBUG
-                print("[NotificationPipeline] skipped reason=preference event=\(event.rawValue)")
-                #endif
-                continue
-            }
-
-            let fingerprintParts: [String] = [
-                key,
-                event.rawValue,
-                currentState.status.rawValue,
-                currentState.awayScore.map(String.init) ?? "-",
-                currentState.homeScore.map(String.init) ?? "-",
-                currentState.inningText ?? "-",
-                baseFingerprint(currentState.bases),
-                currentState.balls.map(String.init) ?? "-",
-                currentState.strikes.map(String.init) ?? "-",
-                currentState.outs.map(String.init) ?? "-",
-                currentState.currentBatterName ?? "-",
-                currentState.currentPitcherName ?? "-"
-            ]
-            let fingerprint = fingerprintParts.joined(separator: "|")
-            guard notifiedGameContentKeys.insert(fingerprint).inserted else {
-                #if DEBUG
-                print("[NotificationPipeline] skipped reason=duplicate event=\(event.rawValue)")
-                #endif
-                continue
-            }
-
-            let request = makeGameContentNotificationRequest(
-                for: updatedGame,
-                event: event,
-                fingerprint: fingerprint,
-                previousState: previousState,
-                currentState: currentState
-            )
-            do {
-                try await cancellationNotificationScheduler(request)
-                #if DEBUG
-                print("[NotificationPipeline] scheduled id=\(request.identifier) event=\(event.rawValue)")
-                #endif
-            } catch {
-                #if DEBUG
-                print("[NotificationPipeline] skipped reason=scheduleFailed event=\(event.rawValue) error=\(error)")
-                #endif
-            }
         }
     }
 

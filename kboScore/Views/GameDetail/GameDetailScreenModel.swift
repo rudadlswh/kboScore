@@ -20,7 +20,9 @@ enum GameDetailSection: String, CaseIterable, Identifiable {
         switch status {
         case .upcoming:
             [.overview, .preview]
-        case .live, .final, .rainDelay, .cancelled:
+        case .live, .rainDelay:
+            [.overview, .preview]
+        case .final, .cancelled:
             [.overview, .review]
         }
     }

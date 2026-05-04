@@ -83,11 +83,13 @@ struct GameCardView: View {
                 Spacer(minLength: 6)
 
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text(summary.displayScore)
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(summary.status.isLiveLike ? statusTintColor : .primary)
-                        .shadow(color: liveTextShadowColor, radius: 1, y: 1)
+                    if summary.showsLiveOrFinalScore {
+                        Text(summary.displayScore)
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(summary.status.isLiveLike ? statusTintColor : .primary)
+                            .shadow(color: liveTextShadowColor, radius: 1, y: 1)
+                    }
                     Label(summary.venue, systemImage: "mappin.and.ellipse")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -178,10 +180,12 @@ struct GameCardView: View {
                 Spacer(minLength: 6)
 
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text(summary.displayScore)
-                        .font(.system(size: 32, weight: .black, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(summary.status.isLiveLike ? statusTintColor : palette.textPrimary)
+                    if summary.showsLiveOrFinalScore {
+                        Text(summary.displayScore)
+                            .font(.system(size: 32, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(summary.status.isLiveLike ? statusTintColor : palette.textPrimary)
+                    }
                     Label(summary.venue, systemImage: "mappin.and.ellipse")
                         .font(.caption2)
                         .foregroundStyle(palette.textSecondary)

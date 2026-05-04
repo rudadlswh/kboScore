@@ -68,6 +68,9 @@ struct GameDetailView: View {
                 .task(id: presentation.status) {
                     screenModel.syncSelection(for: presentation.status)
                 }
+                .task(id: "\(game.id.uuidString)-\(presentation.status.rawValue)-\(appModel.settings.liveActivitiesEnabled)") {
+                    await appModel.startOrUpdateLiveActivityIfNeeded(for: game)
+                }
             } else {
                 EmptyStateView(
                     systemImage: "exclamationmark.triangle",
@@ -102,6 +105,7 @@ struct GameDetailView: View {
             ) ?? viewModel.game
             if let refreshedGame {
                 await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
         .task(id: viewModel.liveRefreshTaskID) {
@@ -118,6 +122,7 @@ struct GameDetailView: View {
                     bypassAutomaticThrottle: true
                 ) else { continue }
                 await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -128,6 +133,7 @@ struct GameDetailView: View {
                     bypassAutomaticThrottle: true
                 ) else { return }
                 await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
         .refreshable {
@@ -181,11 +187,6 @@ struct GameDetailView: View {
             } else if screenModel.isLoading && screenModel.detail == nil {
                 DetailLoadingCard(message: "공식 경기 상세 정보를 불러오는 중")
             }
-
-            OverviewMetadataCard(
-                presentation: presentation,
-                selectedSection: $screenModel.selectedSection
-            )
 
             GameLineScoreCard(presentation: presentation)
 
@@ -252,7 +253,7 @@ struct GameDetailView: View {
         for presentation: GameDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if presentation.status != .upcoming {
+            if presentation.status == .final || presentation.status == .cancelled {
                 EmptyStateView(
                     systemImage: "sportscourt",
                     title: "프리뷰는 경기 전에 제공됩니다",
@@ -302,10 +303,6 @@ struct GameDetailView: View {
     private func actionButtons(for game: GameDetail) -> some View {
         let palette = appModel.favoriteStadiumPalette
         HStack(spacing: 10) {
-            if appModel.shouldShowLiveActivityAction(for: game) {
-                LiveActivityActionButton(game: game)
-            }
-
             Button {
                 appModel.toggleGameAttendance(for: game)
             } label: {
@@ -406,7 +403,11 @@ private struct GameDetailPresentation {
         status = summary?.status ?? game.status
         stadium = summary?.stadium?.nilIfBlank ?? game.venue
         startTimeText = summary?.startTime?.nilIfBlank ?? game.scheduledStart.formatted(date: .omitted, time: .shortened)
-        inningText = summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank
+        if status.isLiveLike || status == .final {
+            inningText = KBOInningFormatter.korean(summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank)
+        } else {
+            inningText = nil
+        }
         awayScore = summary?.awayScore ?? game.awayScore
         homeScore = summary?.homeScore ?? game.homeScore
         balls = summary?.balls ?? game.balls
@@ -486,11 +487,15 @@ private struct GameDetailPresentation {
     }
 
     var displayAwayScore: String {
-        awayScore.map(String.init) ?? "-"
+        showsLiveOrFinalScore ? (awayScore.map(String.init) ?? "-") : ""
     }
 
     var displayHomeScore: String {
-        homeScore.map(String.init) ?? "-"
+        showsLiveOrFinalScore ? (homeScore.map(String.init) ?? "-") : ""
+    }
+
+    var showsLiveOrFinalScore: Bool {
+        status.isLiveLike || status.isFinishedLike
     }
 }
 
@@ -505,7 +510,7 @@ private struct GameStatusSummaryCard: View {
                 ScoreColumn(
                     title: "원정",
                     team: presentation.game.awayTeam,
-                    scoreText: presentation.displayAwayScore,
+
                     tint: presentation.game.awayTeam.identity.theme.accent
                 )
 
@@ -516,7 +521,7 @@ private struct GameStatusSummaryCard: View {
                         .multilineTextAlignment(.center)
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
-                    if presentation.status != .upcoming {
+                    if presentation.showsLiveOrFinalScore {
                         Text("\(presentation.displayAwayScore) : \(presentation.displayHomeScore)")
                             .font(.system(size: 36, weight: .heavy, design: .rounded))
                             .monospacedDigit()
@@ -525,19 +530,14 @@ private struct GameStatusSummaryCard: View {
                             .font(.system(size: 28, weight: .heavy, design: .rounded))
                             .monospacedDigit()
                     }
-                    Text(subtitleText)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(palette?.textSecondary ?? .secondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
+
                 }
                 .frame(maxWidth: .infinity)
 
                 ScoreColumn(
                     title: "홈",
                     team: presentation.game.homeTeam,
-                    scoreText: presentation.displayHomeScore,
+
                     tint: presentation.game.homeTeam.identity.theme.accent
                 )
             }
@@ -585,7 +585,7 @@ private struct GameStatusSummaryCard: View {
 private struct ScoreColumn: View {
     let title: String
     let team: Team
-    let scoreText: String
+
     let tint: Color
 
     var body: some View {
@@ -599,9 +599,7 @@ private struct ScoreColumn: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(scoreText)
-                .font(.system(size: 32, weight: .heavy, design: .rounded))
-                .monospacedDigit()
+
         }
         .frame(maxWidth: .infinity)
     }
@@ -861,6 +859,10 @@ private struct GameLineScoreCard: View {
             Text("경기 시작 후 이닝별 득점과 팀 합계가 표시됩니다.")
                 .font(.subheadline)
                 .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        case .live, .rainDelay:
+            Text("이닝별 점수 데이터 준비 중")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         default:
             VStack(spacing: 8) {
                 FallbackLineScoreRow(team: presentation.game.awayTeam, runs: presentation.awayScore)
@@ -891,7 +893,7 @@ private struct LineScoreHeaderRow: View {
                     .frame(width: 30)
             }
 
-            ForEach(["R", "H", "BB", "E"], id: \.self) { label in
+            ForEach(["R", "H", "E"], id: \.self) { label in
                 Text(label)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
@@ -928,8 +930,6 @@ private struct LineScoreValueRow: View {
             Text(totals.runs?.displayCellText ?? "-")
                 .lineScoreTotalStyle(emphasis: true)
             Text(totals.hits?.displayCellText ?? "-")
-                .lineScoreTotalStyle()
-            Text(totals.walks?.displayCellText ?? "-")
                 .lineScoreTotalStyle()
             Text(totals.errors?.displayCellText ?? "-")
                 .lineScoreTotalStyle()

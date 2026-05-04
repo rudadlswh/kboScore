@@ -112,7 +112,6 @@ struct HomeView: View {
             }
 #endif
 
-
             if appModel.todayGames.isEmpty {
                 if appModel.homeFallbackStandingsSnapshots.isEmpty {
                     EmptyStateView(
@@ -148,10 +147,13 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            }
+            
+            if appModel.attendedGameKeys.isEmpty == false || appModel.myTeamAttendanceSummary.hasCompletedGames {
                 SectionTitleView(title: "직관 기록")
                 MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
-
             }
+            
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -294,7 +296,7 @@ private struct HomeHeroGameCard: View {
             .foregroundStyle(Color.white)
 
             HStack(spacing: 8) {
-                Text(summary.inningText ?? summary.status.title)
+                Text(KBOInningFormatter.korean(summary.inningText) ?? summary.status.title)
                 if let countText {
                     Text(countText)
                 }
@@ -325,7 +327,7 @@ private struct HomeHeroGameCard: View {
         case .upcoming:
             summary.scheduledStart.formatted(date: .omitted, time: .shortened)
         case .live, .rainDelay:
-            summary.inningText ?? summary.status.title
+            KBOInningFormatter.korean(summary.inningText) ?? summary.status.title
         case .final, .cancelled:
             summary.status.title
         }

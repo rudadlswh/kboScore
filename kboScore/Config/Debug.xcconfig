@@ -9,5 +9,7 @@
 // override them when a developer needs a local environment.
 SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
+APS_ENVIRONMENT = development
+KBO_NOTIFICATION_REGISTRATION_URL =
 
 #include? "Secrets.local.xcconfig"

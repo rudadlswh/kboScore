@@ -592,6 +592,14 @@ enum KBODataMapper {
             return .final
         }
 
+        if normalized.contains("scheduled") ||
+            normalized.contains("upcoming") ||
+            normalized.contains("예정") ||
+            normalized.contains("pre_game") ||
+            normalized.contains("pregame") {
+            return .upcoming
+        }
+
         if normalized.contains("live") ||
             normalized.contains("inprogress") ||
             normalized.contains("in_progress") ||

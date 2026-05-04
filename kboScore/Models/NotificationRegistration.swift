@@ -26,14 +26,20 @@ struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
 }
 
 struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
+    let platform: String
+    let environment: String
     let deviceToken: String
+    let installationId: String
     let favoriteTeamID: String?
     let notificationsAuthorized: Bool
     let alertTypes: [NotificationAlertType]
     let quietHours: NotificationRegistrationQuietHours?
 
     private enum CodingKeys: String, CodingKey {
+        case platform
+        case environment
         case deviceToken
+        case installationId
         case favoriteTeamID
         case notificationsAuthorized
         case alertTypes
@@ -41,13 +47,19 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     }
 
     nonisolated init(
+        platform: String = "ios",
+        environment: String = NotificationRegistrationEnvironment.current,
         deviceToken: String,
+        installationId: String = NotificationInstallationID.current,
         favoriteTeamID: String?,
         notificationsAuthorized: Bool,
         alertTypes: [NotificationAlertType],
         quietHours: NotificationRegistrationQuietHours?
     ) {
+        self.platform = platform
+        self.environment = environment
         self.deviceToken = deviceToken
+        self.installationId = installationId
         self.favoriteTeamID = favoriteTeamID
         self.notificationsAuthorized = notificationsAuthorized
         self.alertTypes = alertTypes
@@ -77,7 +89,10 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
 
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        platform = try container.decodeIfPresent(String.self, forKey: .platform) ?? "ios"
+        environment = try container.decodeIfPresent(String.self, forKey: .environment) ?? NotificationRegistrationEnvironment.current
         deviceToken = try container.decode(String.self, forKey: .deviceToken)
+        installationId = try container.decodeIfPresent(String.self, forKey: .installationId) ?? NotificationInstallationID.current
         favoriteTeamID = try container.decodeIfPresent(String.self, forKey: .favoriteTeamID)
         notificationsAuthorized = try container.decode(Bool.self, forKey: .notificationsAuthorized)
         alertTypes = try container.decode([NotificationAlertType].self, forKey: .alertTypes)
@@ -86,11 +101,38 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
 
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(platform, forKey: .platform)
+        try container.encode(environment, forKey: .environment)
         try container.encode(deviceToken, forKey: .deviceToken)
+        try container.encode(installationId, forKey: .installationId)
         try container.encodeIfPresent(favoriteTeamID, forKey: .favoriteTeamID)
         try container.encode(notificationsAuthorized, forKey: .notificationsAuthorized)
         try container.encode(alertTypes, forKey: .alertTypes)
         try container.encodeIfPresent(quietHours, forKey: .quietHours)
+    }
+}
+
+enum NotificationInstallationID {
+    nonisolated static var current: String {
+        let storageKey = "notificationInstallationID"
+        if let persisted = UserDefaults.standard.string(forKey: storageKey),
+           persisted.isEmpty == false {
+            return persisted
+        }
+
+        let generated = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(generated, forKey: storageKey)
+        return generated
+    }
+}
+
+enum NotificationRegistrationEnvironment {
+    nonisolated static var current: String {
+        #if DEBUG
+        "sandbox"
+        #else
+        "production"
+        #endif
     }
 }
 

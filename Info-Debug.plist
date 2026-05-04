@@ -22,6 +22,8 @@
     <string>$(SUPABASE_URL)</string>
     <key>SupabasePublishableKey</key>
     <string>$(SUPABASE_PUBLISHABLE_KEY)</string>
+    <key>NotificationRegistrationURL</key>
+    <string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

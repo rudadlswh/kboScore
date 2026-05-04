@@ -351,7 +351,7 @@ struct GameSummary: Identifiable, Hashable, Sendable {
     let outs: Int?
 
     var displayScore: String {
-        guard let awayScore, let homeScore, status != .upcoming else {
+        guard let awayScore, let homeScore, showsLiveOrFinalScore else {
             return "VS"
         }
         return "\(awayScore) : \(homeScore)"
@@ -362,9 +362,15 @@ struct GameSummary: Identifiable, Hashable, Sendable {
         case .upcoming:
             scheduledStart.formatted(date: .omitted, time: .shortened)
         case .live, .rainDelay:
-            inningText ?? status.title
+            KBOInningFormatter.korean(inningText) ?? status.title
         case .final, .cancelled:
             status.title
         }
+    }
+
+    var showsLiveOrFinalScore: Bool {
+        guard status != .upcoming else { return false }
+        guard status.isFinishedLike || status.isLiveLike else { return false }
+        return true
     }
 }

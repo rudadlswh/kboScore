@@ -32,6 +32,13 @@ struct kboScoreTests {
         #expect(KBOCountDisplay.strikes(nil) == nil)
     }
 
+    @Test func inningFormatterUsesKoreanBaseballNotation() throws {
+        #expect(KBOInningFormatter.korean("Top 1") == "1회 초")
+        #expect(KBOInningFormatter.korean("Bottom 10") == "10회 말")
+        #expect(KBOInningFormatter.korean("7회초") == "7회 초")
+        #expect(KBOInningFormatter.korean(nil) == nil)
+    }
+
     @Test func homeSummaryUsesStartingPitchersFromSupabaseRows() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -1648,7 +1655,7 @@ struct kboScoreTests {
         #expect(collector.requests.first?.content.body == "[LG] 금일 경기는 우천으로 인해 취소되었습니다.")
     }
 
-    @Test func scoringTransitionSchedulesFormattedLiveNotification() async throws {
+    @Test func scoringTransitionDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
         let base = MockKBOData.makeBootstrap(now: referenceNow)
@@ -1699,8 +1706,7 @@ struct kboScoreTests {
 
         await model.refreshSchedule(for: scheduledStart)
 
-        #expect(collector.requests.count == 1)
-        #expect(collector.requests.first?.content.body == "홍길동 이 김투수 을 상대로 적시타.\n2득점")
+        #expect(collector.requests.isEmpty)
     }
 
     @Test func inningOnlyLiveTransitionDoesNotScheduleNotification() async throws {
@@ -1754,7 +1760,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
-    @Test func onBaseTransitionSchedulesFormattedLiveNotification() async throws {
+    @Test func onBaseTransitionDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
         let base = MockKBOData.makeBootstrap(now: referenceNow)
@@ -1809,8 +1815,7 @@ struct kboScoreTests {
 
         await model.refreshSchedule(for: scheduledStart)
 
-        #expect(collector.requests.count == 1)
-        #expect(collector.requests.first?.content.body == "홍길동 이 김투수 을 상대로 사구.")
+        #expect(collector.requests.isEmpty)
     }
 
     @Test func homeRainoutTransitionSchedulesLocalNotificationOnce() async throws {
@@ -2499,6 +2504,7 @@ struct kboScoreTests {
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: nil, inningText: "1회초") == .live)
+        #expect(KBODataMapper.mapGameStatus(code: nil, text: "scheduled", inningText: "Top 1") == .upcoming)
     }
 
     @Test func mapperBuildsStableDomainModelsFromDTOs() async throws {
@@ -2659,6 +2665,9 @@ struct kboScoreTests {
         )
 
         #expect(payload.deviceToken == "abc123")
+        #expect(payload.platform == "ios")
+        #expect(payload.environment == NotificationRegistrationEnvironment.current)
+        #expect(payload.installationId.isEmpty == false)
         #expect(payload.favoriteTeamID == "lg")
         #expect(payload.notificationsAuthorized == true)
         #expect(payload.alertTypes == [.gameStart, .leadChange, .gameEnd])
@@ -2675,17 +2684,23 @@ struct kboScoreTests {
         )
 
         #expect(payload.notificationsAuthorized == false)
+        #expect(payload.platform == "ios")
+        #expect(payload.environment == NotificationRegistrationEnvironment.current)
+        #expect(payload.installationId.isEmpty == false)
         #expect(payload.alertTypes.contains(.scoreChange))
     }
 
     @Test func remoteNotificationRegistrationClientPostsJSONPayload() async throws {
         let session = makeStubSession()
         let client = RemoteNotificationRegistrationClient(
-            endpointURL: URL(string: "https://example.com/api/notification-registrations")!,
+            endpointURL: URL(string: "https://example.com/devices/register")!,
             session: session
         )
         let payload = NotificationRegistrationPayload(
+            platform: "ios",
+            environment: "sandbox",
             deviceToken: "abc123",
+            installationId: "install-1",
             favoriteTeamID: "lg",
             notificationsAuthorized: true,
             alertTypes: [.gameStart, .scoreChange],
@@ -2693,7 +2708,7 @@ struct kboScoreTests {
         )
 
         URLProtocolStub.testResponses = [
-            "https://example.com/api/notification-registrations": StubResponse(statusCode: 200, data: Data())
+            "https://example.com/devices/register": StubResponse(statusCode: 200, data: Data())
         ]
         URLProtocolStub.lastRequest = nil
         defer {
@@ -2703,13 +2718,14 @@ struct kboScoreTests {
 
         let status = try await client.syncRegistration(payload)
         let request = try #require(URLProtocolStub.lastRequest)
-        let body = try #require(request.httpBody)
+        let body = try #require(httpBodyData(from: request))
         let decoded = try JSONDecoder().decode(NotificationRegistrationPayload.self, from: body)
 
         #expect(status == .synced)
         #expect(request.httpMethod == "POST")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(decoded == payload)
+        #expect(decoded.installationId == "install-1")
     }
 
     @Test func teamIdentityCatalogUsesRealLogoAssetNames() async throws {
@@ -2812,6 +2828,43 @@ struct kboScoreTests {
 
         #expect(contentState.currentBatterName == "홍길동")
         #expect(contentState.currentPitcherName == "김투수")
+        #else
+        Issue.record("ActivityKit unavailable in this test environment")
+        #endif
+    }
+
+    @Test func liveActivityPregameStateShowsStartingPitchersOnly() async throws {
+        #if canImport(ActivityKit)
+        let bootstrap = MockKBOData.makeBootstrap()
+        let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: Date().addingTimeInterval(3600),
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: 0,
+            homeScore: 0,
+            status: .upcoming,
+            seasonClassification: baseGame.seasonClassification,
+            inningText: "Top 1",
+            awayStartingPitcherName: "원정선발",
+            homeStartingPitcherName: "홈선발",
+            currentPitcherName: "현재투수",
+            currentBatterName: "현재타자"
+        )
+
+        let contentState = try #require(FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: "lg")).contentState()
+
+        #expect(contentState.isPreGame)
+        #expect(contentState.favoriteScoreText == "-")
+        #expect(contentState.opponentScoreText == "-")
+        #expect(contentState.inningText.isEmpty)
+        #expect(contentState.favoriteStartingPitcherName == "홈선발")
+        #expect(contentState.opponentStartingPitcherName == "원정선발")
+        #expect(contentState.currentBatterName == nil)
+        #expect(contentState.currentPitcherName == nil)
+        #expect(contentState.balls == nil)
         #else
         Issue.record("ActivityKit unavailable in this test environment")
         #endif
@@ -5911,6 +5964,27 @@ private func makeStubSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolStub.self]
     return URLSession(configuration: configuration)
+}
+
+private func httpBodyData(from request: URLRequest) -> Data? {
+    if let httpBody = request.httpBody {
+        return httpBody
+    }
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+
+    stream.open()
+    defer { stream.close() }
+
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 1024)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        guard count > 0 else { break }
+        data.append(buffer, count: count)
+    }
+    return data.isEmpty ? nil : data
 }
 
 private func fixtureData(named name: String) throws -> Data {

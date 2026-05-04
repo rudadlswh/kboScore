@@ -115,6 +115,11 @@
             value = "http://192.168.45.118:8088"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "KBO_NOTIFICATION_REGISTRATION_URL"
+            value = "http://192.168.45.140:8088/devices/register"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction

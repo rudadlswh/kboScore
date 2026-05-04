@@ -11,6 +11,13 @@ import Foundation
 import ActivityKit
 #endif
 
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     let gameID: UUID
     let favoriteTeamID: String
@@ -19,10 +26,13 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     let opponentTeamID: String
     let opponentTeamName: String
     let opponentTeamShortName: String
+    let isPreGame: Bool
     let favoriteScoreText: String
     let opponentScoreText: String
     let inningText: String
     let summaryText: String
+    let favoriteStartingPitcherName: String?
+    let opponentStartingPitcherName: String?
     let balls: Int?
     let strikes: Int?
     let outs: Int?
@@ -37,10 +47,13 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     var contentFingerprint: String {
         var parts: [String] = []
         parts.append(gameID.uuidString)
+        parts.append(isPreGame.description)
         parts.append(favoriteScoreText)
         parts.append(opponentScoreText)
         parts.append(inningText)
         parts.append(summaryText)
+        parts.append(favoriteStartingPitcherName ?? "-")
+        parts.append(opponentStartingPitcherName ?? "-")
         parts.append(balls.map(String.init) ?? "-")
         parts.append(strikes.map(String.init) ?? "-")
         parts.append(outs.map(String.init) ?? "-")
@@ -59,6 +72,8 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
         let opponentTeam: Team
         let favoriteScore: Int?
         let opponentScore: Int?
+        let favoriteStartingPitcherName: String?
+        let opponentStartingPitcherName: String?
         let isHomeGame: Bool
 
         if game.homeTeam.id == favoriteTeamID {
@@ -66,16 +81,22 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
             opponentTeam = game.awayTeam
             favoriteScore = game.homeScore
             opponentScore = game.awayScore
+            favoriteStartingPitcherName = game.homeStartingPitcherName
+            opponentStartingPitcherName = game.awayStartingPitcherName
             isHomeGame = true
         } else if game.awayTeam.id == favoriteTeamID {
             favoriteTeam = game.awayTeam
             opponentTeam = game.homeTeam
             favoriteScore = game.awayScore
             opponentScore = game.homeScore
+            favoriteStartingPitcherName = game.awayStartingPitcherName
+            opponentStartingPitcherName = game.homeStartingPitcherName
             isHomeGame = false
         } else {
             return nil
         }
+        let isPreGame = game.status == .upcoming || (game.status.isFinishedLike == false && Date() < game.scheduledStart)
+        let startTimeText = game.scheduledStart.formatted(date: .omitted, time: .shortened)
 
         return FavoriteTeamLiveActivitySnapshot(
             gameID: game.id,
@@ -85,18 +106,21 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
             opponentTeamID: opponentTeam.id,
             opponentTeamName: opponentTeam.displayName,
             opponentTeamShortName: opponentTeam.displayName,
-            favoriteScoreText: favoriteScore.map(String.init) ?? "-",
-            opponentScoreText: opponentScore.map(String.init) ?? "-",
-            inningText: game.inningText ?? game.status.title,
-            summaryText: game.status.title,
-            balls: game.balls,
-            strikes: game.strikes,
-            outs: game.outs,
-            runnerOnFirst: game.bases?.first,
-            runnerOnSecond: game.bases?.second,
-            runnerOnThird: game.bases?.third,
-            currentBatterName: game.currentBatterName,
-            currentPitcherName: game.currentPitcherName,
+            isPreGame: isPreGame,
+            favoriteScoreText: isPreGame ? "-" : (favoriteScore.map(String.init) ?? "-"),
+            opponentScoreText: isPreGame ? "-" : (opponentScore.map(String.init) ?? "-"),
+            inningText: isPreGame ? "" : (KBOInningFormatter.korean(game.inningText) ?? game.status.title),
+            summaryText: isPreGame ? startTimeText : game.status.title,
+            favoriteStartingPitcherName: favoriteStartingPitcherName?.nilIfBlank,
+            opponentStartingPitcherName: opponentStartingPitcherName?.nilIfBlank,
+            balls: isPreGame ? nil : game.balls,
+            strikes: isPreGame ? nil : game.strikes,
+            outs: isPreGame ? nil : game.outs,
+            runnerOnFirst: isPreGame ? nil : game.bases?.first,
+            runnerOnSecond: isPreGame ? nil : game.bases?.second,
+            runnerOnThird: isPreGame ? nil : game.bases?.third,
+            currentBatterName: isPreGame ? nil : game.currentBatterName,
+            currentPitcherName: isPreGame ? nil : game.currentPitcherName,
             venue: game.venue,
             isHomeGame: isHomeGame
         )
@@ -119,10 +143,13 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
 
     func contentState() -> FavoriteTeamGameActivityAttributes.ContentState {
         FavoriteTeamGameActivityAttributes.ContentState(
+            isPreGame: isPreGame,
             favoriteScoreText: favoriteScoreText,
             opponentScoreText: opponentScoreText,
             inningText: inningText,
             summaryText: summaryText,
+            favoriteStartingPitcherName: favoriteStartingPitcherName,
+            opponentStartingPitcherName: opponentStartingPitcherName,
             balls: balls,
             strikes: strikes,
             outs: outs,
@@ -239,6 +266,13 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
             state: contentState,
             staleDate: Date().addingTimeInterval(120)
         )
+
+        if activity == nil {
+            activity = Activity<FavoriteTeamGameActivityAttributes>.activities.first {
+                $0.attributes.gameID == snapshot.gameID.uuidString
+            }
+            activeGameID = activity == nil ? activeGameID : snapshot.gameID
+        }
 
         if let activity, activeGameID == snapshot.gameID {
             await activity.update(content)

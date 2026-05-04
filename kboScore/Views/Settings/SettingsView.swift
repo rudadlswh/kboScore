@@ -81,11 +81,6 @@ struct SettingsView: View {
             InfoRow(title: "앱 버전", value: appVersion)
         }
 
-//        #if DEBUG
-//        Section("디버그") {
-//            DebugRowsView()
-//        }
-//        #endif
     }
 
     @ViewBuilder
@@ -159,16 +154,6 @@ struct SettingsView: View {
             )
         }
 
-//        #if DEBUG
-//        Section {
-//            DebugRowsView()
-//        } header: {
-//            SettingsSectionHeader(
-//                title: "디버그",
-//                subtitle: "개발 환경 진단용 상태 정보입니다."
-//            )
-//        }
-//        #endif
     }
 
     private var appVersion: String {
