@@ -321,17 +321,17 @@ struct GameDetailView: View {
             }
             .buttonStyle(.plain)
 
-            ShareLink(item: game.shareText) {
-                Label("경기 공유하기", systemImage: "square.and.arrow.up")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(
-                        palette?.elevatedCard ?? Color(.secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-                    .foregroundStyle(palette?.textPrimary ?? .primary)
-            }
+//            ShareLink(item: game.shareText) {
+//                Label("경기 공유하기", systemImage: "square.and.arrow.up")
+//                    .font(.subheadline.weight(.semibold))
+//                    .frame(maxWidth: .infinity)
+//                .padding(.vertical, 12)
+//                .background(
+//                        palette?.elevatedCard ?? Color(.secondarySystemBackground),
+//                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+//                    )
+//                    .foregroundStyle(palette?.textPrimary ?? .primary)
+//            }
         }
     }
 }
@@ -384,6 +384,7 @@ private struct GameDetailPresentation {
     let strikes: Int?
     let outs: Int?
     let bases: RunnerState?
+    let baseRunners: GameCenterBaseRunners?
     let currentBatterName: String?
     let currentPitcherName: String?
     let winningPitcher: String?
@@ -414,6 +415,7 @@ private struct GameDetailPresentation {
         strikes = summary?.strikes ?? game.strikes
         outs = summary?.outs ?? game.outs
         bases = summary?.bases ?? game.bases
+        baseRunners = summary?.baseRunners
         currentBatterName = game.currentBatterName?.nilIfBlank
         currentPitcherName = game.currentPitcherName?.nilIfBlank
         winningPitcher = summary?.winningPitcher?.nilIfBlank
@@ -486,6 +488,18 @@ private struct GameDetailPresentation {
         return segments.isEmpty ? "최종 스코어와 라인스코어를 확인하세요." : segments.joined(separator: " · ")
     }
 
+    var visibleBaseRunners: [BaseRunnerDisplayItem] {
+        [
+            ("1B", bases?.first == true, baseRunners?.first?.nilIfBlank),
+            ("2B", bases?.second == true, baseRunners?.second?.nilIfBlank),
+            ("3B", bases?.third == true, baseRunners?.third?.nilIfBlank)
+        ]
+        .compactMap { item in
+            guard item.1, let name = item.2 else { return nil }
+            return BaseRunnerDisplayItem(base: item.0, name: name)
+        }
+    }
+
     var displayAwayScore: String {
         showsLiveOrFinalScore ? (awayScore.map(String.init) ?? "-") : ""
     }
@@ -497,6 +511,22 @@ private struct GameDetailPresentation {
     var showsLiveOrFinalScore: Bool {
         status.isLiveLike || status.isFinishedLike
     }
+
+    func logRenderedBaseRunnersIfNeeded() {
+        #if DEBUG
+        let rendered = visibleBaseRunners.reduce(into: ["1B": "<hidden>", "2B": "<hidden>", "3B": "<hidden>"]) { result, item in
+            result[item.base] = item.name
+        }
+        print("[BaseRunners] rendered first=\(rendered["1B"] ?? "<hidden>") second=\(rendered["2B"] ?? "<hidden>") third=\(rendered["3B"] ?? "<hidden>")")
+        #endif
+    }
+}
+
+private struct BaseRunnerDisplayItem: Identifiable {
+    let base: String
+    let name: String
+
+    var id: String { base }
 }
 
 private struct GameStatusSummaryCard: View {
@@ -619,7 +649,16 @@ private struct LiveSituationRow: View {
             }
 
             StatusTile(title: "주자 상황") {
-                BasesDiamondView(bases: presentation.bases ?? .empty)
+                HStack(alignment: .center, spacing: 12) {
+                    BasesDiamondView(bases: presentation.bases ?? .empty)
+
+                    if presentation.visibleBaseRunners.isEmpty == false {
+                        BaseRunnerList(runners: presentation.visibleBaseRunners)
+                    }
+                }
+                .onAppear {
+                    presentation.logRenderedBaseRunnersIfNeeded()
+                }
             }
         }
         if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
@@ -638,6 +677,33 @@ private struct LiveSituationRow: View {
                 }
             }
         }
+    }
+}
+
+private struct BaseRunnerList: View {
+    @Environment(AppModel.self) private var appModel
+    let runners: [BaseRunnerDisplayItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(runners) { runner in
+                HStack(spacing: 6) {
+                    Text(runner.base)
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
+                        .frame(width: 24, alignment: .leading)
+                    Text(":")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+                    Text(runner.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1026,10 +1092,12 @@ private struct BattingSectionCard: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
-                    Text(line.position)
+                    Text(displayPosition(line.position))
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.secondary)
-                        .frame(width: 18)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .frame(width: 34, alignment: .center)
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(line.name)
@@ -1072,6 +1140,94 @@ private struct BattingSectionCard: View {
         ]
         .compactMap { $0 }
         .joined(separator: " · ")
+    }
+    
+    private func displayPosition(_ position: String) -> String {
+        let raw = position.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard raw.isEmpty == false else { return "-" }
+
+        let compact = raw
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "－", with: "-")
+            .replacingOccurrences(of: "–", with: "-")
+            .replacingOccurrences(of: "—", with: "-")
+            .replacingOccurrences(of: "ㅡ", with: "-")
+
+        let upper = compact.uppercased()
+
+        let exactMap: [String: String] = [
+            "1루수": "1B", "일루수": "1B", "一": "1B", "1": "1B",
+            "2루수": "2B", "이루수": "2B", "二": "2B", "2": "2B",
+            "3루수": "3B", "삼루수": "3B", "三": "3B", "3": "3B",
+            "포수": "C", "포": "C",
+            "좌익수": "LF", "좌": "LF",
+            "중견수": "CF", "중": "CF",
+            "우익수": "RF", "우": "RF",
+            "지명타자": "DH", "지": "DH",
+            "유격수": "SS", "유": "SS",
+            "투수": "P", "투": "P",
+            "대타": "PH", "타": "PH", "타-": "PH",
+            "대주자": "PR", "주": "PR",
+        ]
+
+        if let mapped = exactMap[compact] ?? exactMap[upper] {
+            return mapped
+        }
+
+        let tokens = compact.split(separator: "/").map(String.init)
+        if tokens.count > 1 {
+            let mapped = tokens.map { token in
+                exactMap[token] ?? exactMap[token.uppercased()] ?? token
+            }
+            return mapped.joined(separator: "/")
+        }
+
+        let mappedParts = compact.compactMap { character -> String? in
+            switch character {
+            case "一":
+                return "1B"
+            case "二":
+                return "2B"
+            case "三":
+                return "3B"
+            case "포":
+                return "c"
+            case "좌":
+                return "LF"
+            case "중":
+                return "CF"
+            case "우":
+                return "RF"
+            case "지":
+                return "DH"
+            case "유":
+                return "SS"
+            case "투":
+                return "P"
+            case "타":
+                return "PH"
+            case "주":
+                return "PR"
+            case "-":
+                return nil
+            default:
+                return nil
+            }
+        }
+
+        if mappedParts.isEmpty == false {
+            var uniqueParts: [String] = []
+
+            for part in mappedParts {
+                if uniqueParts.contains(part) == false {
+                    uniqueParts.append(part)
+                }
+            }
+
+            return uniqueParts.joined(separator: "/")
+        }
+
+        return raw
     }
 }
 

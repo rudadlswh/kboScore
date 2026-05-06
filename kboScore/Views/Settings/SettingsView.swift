@@ -55,14 +55,18 @@ struct SettingsView: View {
         }
 
         Section("알림 설정") {
-            Toggle("경기 시작", isOn: bindableAppModel.settings.notificationPreferences.gameStart)
-            Toggle("점수 변경", isOn: bindableAppModel.settings.notificationPreferences.scoreChange)
-            Toggle("리드 변경", isOn: bindableAppModel.settings.notificationPreferences.leadChange)
-            Toggle("경기 종료", isOn: bindableAppModel.settings.notificationPreferences.gameEnd)
+            Toggle("경기 시작 알림", isOn: bindableAppModel.settings.notificationPreferences.gameStartEnabled)
+            Toggle("점수 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.scoreChangeEnabled)
+            Toggle("리드 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.leadChangeEnabled)
+            Toggle("경기 종료 알림", isOn: bindableAppModel.settings.notificationPreferences.gameEndEnabled)
+            Toggle("출루 알림", isOn: bindableAppModel.settings.notificationPreferences.onBaseEnabled)
+            Toggle("이닝 교체 알림", isOn: bindableAppModel.settings.notificationPreferences.inningChangeEnabled)
+            Toggle("응원팀 내용만 알림", isOn: bindableAppModel.settings.notificationPreferences.favoriteTeamOnlyEnabled)
+            Toggle("지고 있을 때 알림 끄기", isOn: bindableAppModel.settings.notificationPreferences.muteWhenLosingEnabled)
             Toggle("우천/취소", isOn: bindableAppModel.settings.notificationPreferences.rainDelay)
 
             LabeledContent("권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
-            LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
+//            LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
 
             Button("알림 권한 요청") {
                 Task {
@@ -105,21 +109,29 @@ struct SettingsView: View {
         }
 
         Section {
-            Toggle("경기 시작", isOn: bindableAppModel.settings.notificationPreferences.gameStart)
+            Toggle("경기 시작 알림", isOn: bindableAppModel.settings.notificationPreferences.gameStartEnabled)
                 .settingsRowStyle(palette)
-            Toggle("점수 변경", isOn: bindableAppModel.settings.notificationPreferences.scoreChange)
+            Toggle("점수 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.scoreChangeEnabled)
                 .settingsRowStyle(palette)
-            Toggle("리드 변경", isOn: bindableAppModel.settings.notificationPreferences.leadChange)
+            Toggle("리드 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.leadChangeEnabled)
                 .settingsRowStyle(palette)
-            Toggle("경기 종료", isOn: bindableAppModel.settings.notificationPreferences.gameEnd)
+            Toggle("경기 종료 알림", isOn: bindableAppModel.settings.notificationPreferences.gameEndEnabled)
+                .settingsRowStyle(palette)
+            Toggle("출루 알림", isOn: bindableAppModel.settings.notificationPreferences.onBaseEnabled)
+                .settingsRowStyle(palette)
+            Toggle("이닝 교체 알림", isOn: bindableAppModel.settings.notificationPreferences.inningChangeEnabled)
+                .settingsRowStyle(palette)
+            Toggle("응원팀 내용만 알림", isOn: bindableAppModel.settings.notificationPreferences.favoriteTeamOnlyEnabled)
+                .settingsRowStyle(palette)
+            Toggle("지고 있을 때 알림 끄기", isOn: bindableAppModel.settings.notificationPreferences.muteWhenLosingEnabled)
                 .settingsRowStyle(palette)
             Toggle("우천/취소", isOn: bindableAppModel.settings.notificationPreferences.rainDelay)
                 .settingsRowStyle(palette)
 
             InfoRow(title: "권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
                 .settingsRowStyle(palette)
-            InfoRow(title: "기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
-                .settingsRowStyle(palette)
+//            InfoRow(title: "기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
+//                .settingsRowStyle(palette)
 
             Button("알림 권한 요청") {
                 Task {

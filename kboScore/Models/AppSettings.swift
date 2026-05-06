@@ -28,10 +28,14 @@ enum AppearanceOption: String, CaseIterable, Identifiable, Codable, Sendable {
 }
 
 struct NotificationPreferences: Hashable, Codable, Sendable {
-    var gameStart: Bool = true
-    var scoreChange: Bool = true
-    var leadChange: Bool = true
-    var gameEnd: Bool = true
+    var gameStartEnabled: Bool = true
+    var scoreChangeEnabled: Bool = true
+    var leadChangeEnabled: Bool = true
+    var gameEndEnabled: Bool = true
+    var onBaseEnabled: Bool = false
+    var inningChangeEnabled: Bool = false
+    var favoriteTeamOnlyEnabled: Bool = false
+    var muteWhenLosingEnabled: Bool = false
     var rainDelay: Bool = true
 
     nonisolated init(
@@ -39,13 +43,82 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
         scoreChange: Bool = true,
         leadChange: Bool = true,
         gameEnd: Bool = true,
-        rainDelay: Bool = true
+        rainDelay: Bool = true,
+        onBaseEnabled: Bool = false,
+        inningChangeEnabled: Bool = false,
+        favoriteTeamOnlyEnabled: Bool = false,
+        muteWhenLosingEnabled: Bool = false
     ) {
-        self.gameStart = gameStart
-        self.scoreChange = scoreChange
-        self.leadChange = leadChange
-        self.gameEnd = gameEnd
+        self.gameStartEnabled = gameStart
+        self.scoreChangeEnabled = scoreChange
+        self.leadChangeEnabled = leadChange
+        self.gameEndEnabled = gameEnd
         self.rainDelay = rainDelay
+        self.onBaseEnabled = onBaseEnabled
+        self.inningChangeEnabled = inningChangeEnabled
+        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+        self.muteWhenLosingEnabled = muteWhenLosingEnabled
+    }
+
+    var gameStart: Bool {
+        get { gameStartEnabled }
+        set { gameStartEnabled = newValue }
+    }
+
+    var scoreChange: Bool {
+        get { scoreChangeEnabled }
+        set { scoreChangeEnabled = newValue }
+    }
+
+    var leadChange: Bool {
+        get { leadChangeEnabled }
+        set { leadChangeEnabled = newValue }
+    }
+
+    var gameEnd: Bool {
+        get { gameEndEnabled }
+        set { gameEndEnabled = newValue }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case gameStartEnabled
+        case scoreChangeEnabled
+        case leadChangeEnabled
+        case gameEndEnabled
+        case onBaseEnabled
+        case inningChangeEnabled
+        case favoriteTeamOnlyEnabled
+        case muteWhenLosingEnabled
+        case rainDelay
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case gameStart
+        case scoreChange
+        case leadChange
+        case gameEnd
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        gameStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameStartEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .gameStart))
+            ?? true
+        scoreChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .scoreChangeEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .scoreChange))
+            ?? true
+        leadChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .leadChangeEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .leadChange))
+            ?? true
+        gameEndEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameEndEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .gameEnd))
+            ?? true
+        onBaseEnabled = try container.decodeIfPresent(Bool.self, forKey: .onBaseEnabled) ?? false
+        inningChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .inningChangeEnabled) ?? false
+        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled) ?? false
+        muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
+        rainDelay = try container.decodeIfPresent(Bool.self, forKey: .rainDelay) ?? true
     }
 }
 

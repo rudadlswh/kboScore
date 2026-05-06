@@ -34,6 +34,14 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     let notificationsAuthorized: Bool
     let alertTypes: [NotificationAlertType]
     let quietHours: NotificationRegistrationQuietHours?
+    let gameStartEnabled: Bool
+    let scoreChangeEnabled: Bool
+    let leadChangeEnabled: Bool
+    let gameEndEnabled: Bool
+    let onBaseEnabled: Bool
+    let inningChangeEnabled: Bool
+    let favoriteTeamOnlyEnabled: Bool
+    let muteWhenLosingEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case platform
@@ -44,6 +52,14 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
         case notificationsAuthorized
         case alertTypes
         case quietHours
+        case gameStartEnabled
+        case scoreChangeEnabled
+        case leadChangeEnabled
+        case gameEndEnabled
+        case onBaseEnabled
+        case inningChangeEnabled
+        case favoriteTeamOnlyEnabled
+        case muteWhenLosingEnabled
     }
 
     nonisolated init(
@@ -54,7 +70,15 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
         favoriteTeamID: String?,
         notificationsAuthorized: Bool,
         alertTypes: [NotificationAlertType],
-        quietHours: NotificationRegistrationQuietHours?
+        quietHours: NotificationRegistrationQuietHours?,
+        gameStartEnabled: Bool = true,
+        scoreChangeEnabled: Bool = true,
+        leadChangeEnabled: Bool = true,
+        gameEndEnabled: Bool = true,
+        onBaseEnabled: Bool = false,
+        inningChangeEnabled: Bool = false,
+        favoriteTeamOnlyEnabled: Bool = false,
+        muteWhenLosingEnabled: Bool = false
     ) {
         self.platform = platform
         self.environment = environment
@@ -64,6 +88,14 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
         self.notificationsAuthorized = notificationsAuthorized
         self.alertTypes = alertTypes
         self.quietHours = quietHours
+        self.gameStartEnabled = gameStartEnabled
+        self.scoreChangeEnabled = scoreChangeEnabled
+        self.leadChangeEnabled = leadChangeEnabled
+        self.gameEndEnabled = gameEndEnabled
+        self.onBaseEnabled = onBaseEnabled
+        self.inningChangeEnabled = inningChangeEnabled
+        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+        self.muteWhenLosingEnabled = muteWhenLosingEnabled
     }
 
     nonisolated init?(
@@ -83,7 +115,15 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
                     startHour: settings.quietHours.startHour,
                     endHour: settings.quietHours.endHour
                 )
-                : nil
+                : nil,
+            gameStartEnabled: settings.notificationPreferences.gameStartEnabled,
+            scoreChangeEnabled: settings.notificationPreferences.scoreChangeEnabled,
+            leadChangeEnabled: settings.notificationPreferences.leadChangeEnabled,
+            gameEndEnabled: settings.notificationPreferences.gameEndEnabled,
+            onBaseEnabled: settings.notificationPreferences.onBaseEnabled,
+            inningChangeEnabled: settings.notificationPreferences.inningChangeEnabled,
+            favoriteTeamOnlyEnabled: settings.notificationPreferences.favoriteTeamOnlyEnabled,
+            muteWhenLosingEnabled: settings.notificationPreferences.muteWhenLosingEnabled
         )
     }
 
@@ -97,6 +137,14 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
         notificationsAuthorized = try container.decode(Bool.self, forKey: .notificationsAuthorized)
         alertTypes = try container.decode([NotificationAlertType].self, forKey: .alertTypes)
         quietHours = try container.decodeIfPresent(NotificationRegistrationQuietHours.self, forKey: .quietHours)
+        gameStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameStartEnabled) ?? true
+        scoreChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .scoreChangeEnabled) ?? true
+        leadChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .leadChangeEnabled) ?? true
+        gameEndEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameEndEnabled) ?? true
+        onBaseEnabled = try container.decodeIfPresent(Bool.self, forKey: .onBaseEnabled) ?? false
+        inningChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .inningChangeEnabled) ?? false
+        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled) ?? false
+        muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
     }
 
     nonisolated func encode(to encoder: any Encoder) throws {
@@ -109,6 +157,135 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
         try container.encode(notificationsAuthorized, forKey: .notificationsAuthorized)
         try container.encode(alertTypes, forKey: .alertTypes)
         try container.encodeIfPresent(quietHours, forKey: .quietHours)
+        try container.encode(gameStartEnabled, forKey: .gameStartEnabled)
+        try container.encode(scoreChangeEnabled, forKey: .scoreChangeEnabled)
+        try container.encode(leadChangeEnabled, forKey: .leadChangeEnabled)
+        try container.encode(gameEndEnabled, forKey: .gameEndEnabled)
+        try container.encode(onBaseEnabled, forKey: .onBaseEnabled)
+        try container.encode(inningChangeEnabled, forKey: .inningChangeEnabled)
+        try container.encode(favoriteTeamOnlyEnabled, forKey: .favoriteTeamOnlyEnabled)
+        try container.encode(muteWhenLosingEnabled, forKey: .muteWhenLosingEnabled)
+    }
+}
+
+struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
+    let deviceToken: String
+    let environment: String
+    let favoriteTeamID: String?
+    let notificationsEnabled: Bool
+    let endpointDescription: String?
+    let gameStartEnabled: Bool
+    let scoreChangeEnabled: Bool
+    let leadChangeEnabled: Bool
+    let gameEndEnabled: Bool
+    let onBaseEnabled: Bool
+    let inningChangeEnabled: Bool
+    let favoriteTeamOnlyEnabled: Bool
+    let muteWhenLosingEnabled: Bool
+
+    nonisolated init(
+        deviceToken: String,
+        environment: String,
+        favoriteTeamID: String?,
+        notificationsEnabled: Bool,
+        endpointDescription: String?,
+        gameStartEnabled: Bool = true,
+        scoreChangeEnabled: Bool = true,
+        leadChangeEnabled: Bool = true,
+        gameEndEnabled: Bool = true,
+        onBaseEnabled: Bool = false,
+        inningChangeEnabled: Bool = false,
+        favoriteTeamOnlyEnabled: Bool = false,
+        muteWhenLosingEnabled: Bool = false
+    ) {
+        self.deviceToken = deviceToken
+        self.environment = environment
+        self.favoriteTeamID = favoriteTeamID
+        self.notificationsEnabled = notificationsEnabled
+        self.endpointDescription = endpointDescription
+        self.gameStartEnabled = gameStartEnabled
+        self.scoreChangeEnabled = scoreChangeEnabled
+        self.leadChangeEnabled = leadChangeEnabled
+        self.gameEndEnabled = gameEndEnabled
+        self.onBaseEnabled = onBaseEnabled
+        self.inningChangeEnabled = inningChangeEnabled
+        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+        self.muteWhenLosingEnabled = muteWhenLosingEnabled
+    }
+
+    nonisolated init(
+        payload: NotificationRegistrationPayload,
+        endpointDescription: String?
+    ) {
+        self.init(
+            deviceToken: payload.deviceToken,
+            environment: payload.environment,
+            favoriteTeamID: payload.favoriteTeamID,
+            notificationsEnabled: payload.notificationsAuthorized,
+            endpointDescription: endpointDescription,
+            gameStartEnabled: payload.gameStartEnabled,
+            scoreChangeEnabled: payload.scoreChangeEnabled,
+            leadChangeEnabled: payload.leadChangeEnabled,
+            gameEndEnabled: payload.gameEndEnabled,
+            onBaseEnabled: payload.onBaseEnabled,
+            inningChangeEnabled: payload.inningChangeEnabled,
+            favoriteTeamOnlyEnabled: payload.favoriteTeamOnlyEnabled,
+            muteWhenLosingEnabled: payload.muteWhenLosingEnabled
+        )
+    }
+
+    nonisolated var description: String {
+        [
+            "tokenPrefix=\(deviceToken.prefix(12))",
+            "environment=\(environment)",
+            "favoriteTeamID=\(favoriteTeamID ?? "none")",
+            "notificationsEnabled=\(notificationsEnabled)",
+            "endpoint=\(endpointDescription ?? "missing")",
+            "gameStartEnabled=\(gameStartEnabled)",
+            "scoreChangeEnabled=\(scoreChangeEnabled)",
+            "leadChangeEnabled=\(leadChangeEnabled)",
+            "gameEndEnabled=\(gameEndEnabled)",
+            "onBaseEnabled=\(onBaseEnabled)",
+            "inningChangeEnabled=\(inningChangeEnabled)",
+            "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+        ].joined(separator: " ")
+    }
+}
+
+enum NotificationRegistrationStartDecision: Equatable, Sendable {
+    case start(keyChanged: Bool)
+    case skipInFlight
+    case skipAlreadyRegistered
+}
+
+struct NotificationRegistrationDeduplicationState: Sendable {
+    private(set) var inFlightRegistrationKeys: Set<NotificationRegistrationKey> = []
+    private(set) var lastSuccessfulRegistrationKey: NotificationRegistrationKey?
+
+    mutating func start(_ key: NotificationRegistrationKey) -> NotificationRegistrationStartDecision {
+        if inFlightRegistrationKeys.contains(key) {
+            return .skipInFlight
+        }
+
+        if lastSuccessfulRegistrationKey == key {
+            return .skipAlreadyRegistered
+        }
+
+        let keyChanged = lastSuccessfulRegistrationKey != nil && lastSuccessfulRegistrationKey != key
+        inFlightRegistrationKeys.insert(key)
+        return .start(keyChanged: keyChanged)
+    }
+
+    mutating func complete(_ key: NotificationRegistrationKey, status: NotificationRegistrationSyncStatus) {
+        inFlightRegistrationKeys.remove(key)
+        if status == .synced {
+            lastSuccessfulRegistrationKey = key
+        }
+    }
+
+    mutating func fail(_ key: NotificationRegistrationKey) {
+        inFlightRegistrationKeys.remove(key)
     }
 }
 
@@ -139,10 +316,10 @@ enum NotificationRegistrationEnvironment {
 extension NotificationAlertType {
     nonisolated static func enabled(from preferences: NotificationPreferences) -> [NotificationAlertType] {
         var alertTypes: [NotificationAlertType] = []
-        if preferences.gameStart { alertTypes.append(.gameStart) }
-        if preferences.scoreChange { alertTypes.append(.scoreChange) }
-        if preferences.leadChange { alertTypes.append(.leadChange) }
-        if preferences.gameEnd { alertTypes.append(.gameEnd) }
+        if preferences.gameStartEnabled { alertTypes.append(.gameStart) }
+        if preferences.scoreChangeEnabled { alertTypes.append(.scoreChange) }
+        if preferences.leadChangeEnabled { alertTypes.append(.leadChange) }
+        if preferences.gameEndEnabled { alertTypes.append(.gameEnd) }
         if preferences.rainDelay { alertTypes.append(.rainDelay) }
         return alertTypes
     }
