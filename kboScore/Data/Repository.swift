@@ -87,6 +87,18 @@ protocol KBOStandingsGameDataSource: Sendable {
     nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail]
 }
 
+protocol KBOTeamRankDataSource: Sendable {
+    nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow]
+}
+
+protocol KBOLocalTeamRankCacheDataSource: Sendable {
+    nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow]
+}
+
+protocol KBOLocalTeamRankCacheUpserting: Sendable {
+    nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int
+}
+
 extension KBOStandingsDataSource {
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         []

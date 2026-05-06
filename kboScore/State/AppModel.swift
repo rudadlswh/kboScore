@@ -104,7 +104,7 @@ final class AppModel {
     private let usesPersistedSettings: Bool
     private let hasPersistedSettingsAtLaunch: Bool
     private var hasConnectedNotificationDelegate = false
-    private var lastSyncedNotificationRegistrationPayload: NotificationRegistrationPayload?
+    private var notificationRegistrationDeduplicationState = NotificationRegistrationDeduplicationState()
     private var notificationRegistrationSyncTask: Task<Void, Never>?
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
     private var notifiedGameContentKeys: Set<String> = []
@@ -456,6 +456,8 @@ final class AppModel {
               standingsSourceGamesBySeason[season] == nil else {
             return
         }
+        let localRankCount = await loadLocalTeamRanks(season: season)
+        guard localRankCount == 0 else { return }
         await refreshStandings()
     }
 
@@ -480,18 +482,97 @@ final class AppModel {
 
     private func performRefreshStandings(season: Int) async {
         ensureCatalogTeamsLoadedIfNeeded()
+        if await refreshTeamRanksFromRemote(season: season) {
+            return
+        }
+
+        await refreshStandingsFromGamesFallback(season: season, reason: "rankFetchUnavailable")
+    }
+
+    private func loadLocalTeamRanks(season: Int) async -> Int {
+        guard let localRankCache = repository as? any KBOLocalTeamRankCacheDataSource else {
+            #if DEBUG
+            print("[StandingsRank] local load count=0")
+            #endif
+            return 0
+        }
+        let rows = await localRankCache.fetchLocalTeamRanks(season: season)
+            .sorted { $0.rank < $1.rank }
+        #if DEBUG
+        print("[StandingsRank] local load count=\(rows.count)")
+        #endif
+        guard rows.isEmpty == false else { return 0 }
+        standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
+        standingsSourceGamesBySeason[season] = nil
+        #if DEBUG
+        print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0)")
+        #endif
+        return rows.count
+    }
+
+    private func refreshTeamRanksFromRemote(season: Int) async -> Bool {
+        guard let teamRankSource = repository as? any KBOTeamRankDataSource else {
+            #if DEBUG
+            print("[StandingsRank] fallback to games reason=unsupportedRepository")
+            #endif
+            return false
+        }
+
         do {
-            let fetchedStandings = try await repository.fetchStandings()
-            if fetchedStandings.isEmpty == false {
-                standingsSnapshotCacheBySeason[season] = fetchedStandings
-                standingsSourceGamesBySeason[season] = nil
-                markRefreshSuccess(for: .games, at: Date(), isStale: false)
-                await refreshRepositoryDebugInfo(dataSets: [])
+            #if DEBUG
+            print("[StandingsRank] remote fetch start view=team_rank_2026")
+            #endif
+            let rows = try await teamRankSource.fetchTeamRanks(season: season)
+                .sorted { $0.rank < $1.rank }
+            #if DEBUG
+            print("[StandingsRank] remote fetch success count=\(rows.count)")
+            #endif
+
+            guard rows.isEmpty == false else {
                 #if DEBUG
-                print("[StandingsCache] season=\(season) source=standings count=\(fetchedStandings.count)")
+                print("[StandingsRank] fallback to games reason=emptyRows")
                 #endif
-                return
+                return false
             }
+
+            if let localRankCache = repository as? any KBOLocalTeamRankCacheUpserting {
+                let count = await localRankCache.replaceLocalTeamRanks(rows, season: season)
+                #if DEBUG
+                print("[StandingsRank] remote cache write count=\(count)")
+                #endif
+                _ = await loadLocalTeamRanks(season: season)
+            } else {
+                standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
+                standingsSourceGamesBySeason[season] = nil
+                #if DEBUG
+                print("[StandingsRank] remote cache write count=0")
+                print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0)")
+                #endif
+            }
+
+            markRefreshSuccess(for: .games, at: Date(), isStale: false)
+            await refreshRepositoryDebugInfo(dataSets: [])
+            return true
+        } catch {
+            #if DEBUG
+            print("[StandingsRank] refresh failed keeping local data error=\(error)")
+            #endif
+            guard standingsSnapshotCacheBySeason[season]?.isEmpty != false else {
+                markRefreshFailure(for: .games, hasUsableData: true)
+                return true
+            }
+            #if DEBUG
+            print("[StandingsRank] fallback to games reason=remoteError")
+            #endif
+            return false
+        }
+    }
+
+    private func refreshStandingsFromGamesFallback(season: Int, reason: String) async {
+        do {
+            #if DEBUG
+            print("[StandingsRank] fallback to games reason=\(reason)")
+            #endif
 
             let sourceGames: [GameDetail]
             if let standingsGameSource = repository as? any KBOStandingsGameDataSource {
@@ -519,6 +600,66 @@ final class AppModel {
         } catch {
             markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
         }
+    }
+
+    private func makeStandingsSnapshots(from rows: [TeamRankRow]) -> [TeamStandingsSnapshot] {
+        rows.sorted { $0.rank < $1.rank }.map { row in
+            TeamStandingsSnapshot(
+                team: team(for: row),
+                rank: row.rank,
+                wins: row.wins,
+                losses: row.losses,
+                ties: row.draws,
+                remainingRegularSeasonGames: max(0, 144 - row.gamesPlayed),
+                recentResults: recentResults(for: row),
+                precomputedGamesBehind: row.gamesBehind,
+                precomputedStreakText: row.streakText
+            )
+        }
+    }
+
+    private func team(for row: TeamRankRow) -> Team {
+        if let canonicalID = Self.canonicalTeamIdentifier(row.teamCode),
+           let team = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == canonicalID }) {
+            return team
+        }
+        if let canonicalID = Self.canonicalTeamIdentifier(row.teamName),
+           let team = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == canonicalID }) {
+            return team
+        }
+        let fallbackID = Self.canonicalTeamIdentifier(row.teamCode) ?? Self.canonicalTeamIdentifier(row.teamName) ?? row.teamID.uuidString
+        if let identity = TeamIdentity.catalog[fallbackID] {
+            return Team(
+                id: fallbackID,
+                name: row.teamName,
+                shortName: identity.shortLabel,
+                englishName: identity.displayName,
+                markText: identity.monogram
+            )
+        }
+        return Team(
+            id: fallbackID,
+            name: row.teamName,
+            shortName: Team.displayName(forTeamID: fallbackID, fallback: row.teamName),
+            englishName: row.teamName,
+            markText: String(row.teamName.prefix(2))
+        )
+    }
+
+    private func recentResults(for row: TeamRankRow) -> [TeamGameResult] {
+        let result: TeamGameResult?
+        switch row.streakType.uppercased() {
+        case "WIN":
+            result = .win
+        case "LOSS":
+            result = .loss
+        case "DRAW":
+            result = .tie
+        default:
+            result = nil
+        }
+        guard let result else { return [] }
+        return Array(repeating: result, count: max(0, min(row.streakCount, 5)))
     }
 
     private func currentStandingsSeason() -> Int {
@@ -956,7 +1097,12 @@ final class AppModel {
     var standingsSnapshots: [TeamStandingsSnapshot] {
         let season = currentStandingsSeason()
         if let cached = standingsSnapshotCacheBySeason[season], cached.isEmpty == false {
-            return cached.sorted(by: standingsComparator)
+            return cached.sorted { left, right in
+                if left.rank != right.rank {
+                    return left.rank < right.rank
+                }
+                return left.team.name.localizedStandardCompare(right.team.name) == .orderedAscending
+            }
         }
 
         let rankedSnapshots = teams
@@ -991,6 +1137,9 @@ final class AppModel {
 
 #if DEBUG
     var debugStandingsDiagnosticMessage: String? {
+        if standingsSnapshotCacheBySeason[currentStandingsSeason()]?.isEmpty == false {
+            return nil
+        }
         let sourceGames = standingsCalculationGames
         let completedGames = sourceGames.filter(\.hasCompleteFinalScore)
         let completedRegularSeasonGames = regularSeasonGames.filter(\.hasCompleteFinalScore)
@@ -2638,23 +2787,45 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
-    private func scheduleNotificationRegistrationSync(force: Bool) {
+    private func scheduleNotificationRegistrationSync(force _: Bool) {
         guard let payload = currentNotificationRegistrationPayload else {
             notificationRegistrationSyncStatus = .waitingForToken
             return
         }
 
-        if force == false, payload == lastSyncedNotificationRegistrationPayload {
+        let key = NotificationRegistrationKey(
+            payload: payload,
+            endpointDescription: notificationRegistrationClient.debugEndpointDescription
+        )
+        switch notificationRegistrationDeduplicationState.start(key) {
+        case .skipInFlight:
+            #if DEBUG
+            print("[NotificationPipeline] registration skipped reason=inFlight key=\(key)")
+            #endif
             return
+        case .skipAlreadyRegistered:
+            notificationRegistrationSyncStatus = .synced
+            #if DEBUG
+            print("[NotificationPipeline] registration skipped reason=alreadyRegistered key=\(key)")
+            #endif
+            return
+        case .start(let keyChanged):
+            if keyChanged {
+                #if DEBUG
+                print("[NotificationPipeline] registration key changed key=\(key)")
+                #endif
+            }
         }
 
-        notificationRegistrationSyncTask?.cancel()
         notificationRegistrationSyncTask = Task { [weak self] in
-            await self?.performNotificationRegistrationSync(payload)
+            await self?.performNotificationRegistrationSync(payload, key: key)
         }
     }
 
-    private func performNotificationRegistrationSync(_ payload: NotificationRegistrationPayload) async {
+    private func performNotificationRegistrationSync(
+        _ payload: NotificationRegistrationPayload,
+        key: NotificationRegistrationKey
+    ) async {
         notificationRegistrationSyncStatus = .syncing
         notificationRegistrationLastAttemptAt = Date()
 
@@ -2672,11 +2843,10 @@ final class AppModel {
                 print("[NotificationPipeline] backend token registration skipped")
             }
             #endif
-            if status == .synced || status == .skipped {
-                lastSyncedNotificationRegistrationPayload = payload
-            }
+            notificationRegistrationDeduplicationState.complete(key, status: status)
         } catch {
             notificationRegistrationSyncStatus = .failed
+            notificationRegistrationDeduplicationState.fail(key)
             #if DEBUG
             print("[NotificationPipeline] backend token registration failure error=\(error)")
             print("[NotificationPipeline] registration failure error=\(error)")

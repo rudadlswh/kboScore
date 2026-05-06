@@ -52,10 +52,17 @@ protocol SupabaseKBOReading: Sendable {
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow]
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow]
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow]
+    nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow]
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow]
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow]
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow]
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow?
+}
+
+extension SupabaseKBOReading {
+    nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow] {
+        []
+    }
 }
 
 actor SupabaseTeamRowCache {
@@ -84,7 +91,7 @@ actor SupabaseTeamRowCache {
 
 // Read-only overlay: the iOS app only selects public data from Supabase.
 // Inserts/updates/deletes must stay in trusted backend, admin, or scheduled jobs.
-struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReading>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, Sendable {
+struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReading>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, Sendable {
     let base: Base
     let source: Source
     let runtimeState: RepositoryRuntimeState?
@@ -302,6 +309,48 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
             return try await base.fetchGames()
                 .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
         }
+    }
+
+    nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
+        guard season == 2026 else {
+            return []
+        }
+        #if DEBUG
+        print("[StandingsRank] remote fetch start view=team_rank_2026")
+        #endif
+        let teamsTask = Task { try await cachedTeamRows() }
+        let rows = try await source.fetchTeamRanks2026()
+        let teamRows = try await teamsTask.value
+        let teamCodeByID = Dictionary(uniqueKeysWithValues: teamRows.map { ($0.id, SupabaseKBOMapper.normalizeTeamCode($0.code)) })
+        let enriched = rows
+            .map { row in
+                TeamRankRow(
+                    season: row.season,
+                    teamID: row.teamID,
+                    teamCode: teamCodeByID[row.teamID] ?? row.teamCode,
+                    rank: row.rank,
+                    teamName: row.teamName,
+                    gamesPlayed: row.gamesPlayed,
+                    wins: row.wins,
+                    losses: row.losses,
+                    draws: row.draws,
+                    winningPercentage: row.winningPercentage,
+                    gamesBehind: row.gamesBehind,
+                    streakType: row.streakType,
+                    streakCount: row.streakCount,
+                    streakText: row.streakText,
+                    lastGameDate: row.lastGameDate,
+                    calculatedAt: row.calculatedAt,
+                    updatedAt: row.updatedAt,
+                    createdAt: row.createdAt
+                )
+            }
+            .sorted { $0.rank < $1.rank }
+        await runtimeState?.record(source: .supabase, delivery: .supabase)
+        #if DEBUG
+        print("[StandingsRank] remote fetch success count=\(enriched.count)")
+        #endif
+        return enriched
     }
 
     nonisolated private func fetchSupabaseBootstrap() async throws -> KBOBootstrapData {
@@ -759,6 +808,22 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .value
         #if DEBUG
         print("[SupabaseKBO] fetchGames(standings:) success schema=\(schemaName) table=games season=\(season) count=\(rows.count)")
+        #endif
+        return rows
+    }
+
+    nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow] {
+        #if DEBUG
+        print("[SupabaseKBO] fetchTeamRanks query start schema=\(schemaName) view=team_rank_2026")
+        #endif
+        let rows: [TeamRankRow] = try await database
+            .from("team_rank_2026")
+            .select("*")
+            .order("rank", ascending: true)
+            .execute()
+            .value
+        #if DEBUG
+        print("[SupabaseKBO] fetchTeamRanks success schema=\(schemaName) view=team_rank_2026 count=\(rows.count)")
         #endif
         return rows
     }

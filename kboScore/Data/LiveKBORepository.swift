@@ -640,6 +640,33 @@ private struct BootstrapCachePayload: Codable, Sendable {
     }
 }
 
+private struct TeamRanksDiskCacheEntry: Codable, Sendable {
+    let value: [TeamRankRow]
+    let timestamp: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case timestamp
+    }
+
+    nonisolated init(value: [TeamRankRow], timestamp: Date) {
+        self.value = value
+        self.timestamp = timestamp
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        value = try container.decode([TeamRankRow].self, forKey: .value)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(value, forKey: .value)
+        try container.encode(timestamp, forKey: .timestamp)
+    }
+}
+
 private struct GamesCachePayload: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case teams
@@ -833,6 +860,15 @@ private actor RepositoryDiskCache {
         }
     }
 
+    func loadTeamRanks(season: Int) -> RepositoryCacheEntry<[TeamRankRow]>? {
+        let fileURL = directoryURL.appendingPathComponent(teamRanksFileName(season: season))
+        guard let data = try? Data(contentsOf: fileURL),
+              let entry = try? decoder.decode(TeamRanksDiskCacheEntry.self, from: data) else {
+            return nil
+        }
+        return RepositoryCacheEntry(value: entry.value.sorted { $0.rank < $1.rank }, timestamp: entry.timestamp)
+    }
+
     func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) {
         store(BootstrapDiskCacheEntry(value: BootstrapCachePayload(value: value), timestamp: timestamp), fileName: "bootstrap.json")
     }
@@ -852,6 +888,13 @@ private actor RepositoryDiskCache {
         store(
             GamesDiskCacheEntry(value: GamesCachePayload(games: value), timestamp: timestamp),
             fileName: monthlyScheduleFileName(for: month)
+        )
+    }
+
+    func storeTeamRanks(_ value: [TeamRankRow], season: Int, timestamp: Date) {
+        store(
+            TeamRanksDiskCacheEntry(value: value.sorted { $0.rank < $1.rank }, timestamp: timestamp),
+            fileName: teamRanksFileName(season: season)
         )
     }
 
@@ -899,6 +942,10 @@ private actor RepositoryDiskCache {
     private func monthlyScheduleFileName(for month: KBOMonthScheduleKey) -> String {
         "schedule-\(month.yearMonthText).json"
     }
+
+    private func teamRanksFileName(season: Int) -> String {
+        "team-ranks-\(season).json"
+    }
 }
 
 private actor RepositoryResponseCache {
@@ -907,6 +954,7 @@ private actor RepositoryResponseCache {
     private var gamesEntry: RepositoryCacheEntry<[GameDetail]>?
     private var notificationsEntry: RepositoryCacheEntry<[NotificationItem]>?
     private var monthlyScheduleEntries: [KBOMonthScheduleKey: RepositoryCacheEntry<[GameDetail]>] = [:]
+    private var teamRankEntries: [Int: RepositoryCacheEntry<[TeamRankRow]>] = [:]
 
     private var bootstrapTask: Task<KBOBootstrapData, Error>?
     private var gamesTask: Task<[GameDetail], Error>?
@@ -1119,6 +1167,17 @@ private actor RepositoryResponseCache {
         return (result.inserted, result.updated, result.skippedExisting)
     }
 
+    func localTeamRanks(season: Int) async -> [TeamRankRow] {
+        let rows = await cachedTeamRankEntry(season: season)?.value ?? []
+        return rows.sorted { $0.rank < $1.rank }
+    }
+
+    func replaceTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
+        let sorted = ranks.sorted { $0.rank < $1.rank }
+        await storeTeamRanks(sorted, season: season, timestamp: .now)
+        return sorted.count
+    }
+
     private func cachedBootstrapEntry() async -> RepositoryCacheEntry<KBOBootstrapData>? {
         if let bootstrapEntry {
             return bootstrapEntry
@@ -1159,6 +1218,16 @@ private actor RepositoryResponseCache {
         return diskEntry
     }
 
+    private func cachedTeamRankEntry(season: Int) async -> RepositoryCacheEntry<[TeamRankRow]>? {
+        if let entry = teamRankEntries[season] {
+            return entry
+        }
+
+        let diskEntry = await diskCache.loadTeamRanks(season: season)
+        teamRankEntries[season] = diskEntry
+        return diskEntry
+    }
+
     private func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) async {
         bootstrapEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeBootstrap(value, timestamp: timestamp)
@@ -1177,6 +1246,11 @@ private actor RepositoryResponseCache {
     private func storeMonthlySchedule(_ value: [GameDetail], for month: KBOMonthScheduleKey, timestamp: Date) async {
         monthlyScheduleEntries[month] = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeMonthlySchedule(value, for: month, timestamp: timestamp)
+    }
+
+    private func storeTeamRanks(_ value: [TeamRankRow], season: Int, timestamp: Date) async {
+        teamRankEntries[season] = RepositoryCacheEntry(value: value, timestamp: timestamp)
+        await diskCache.storeTeamRanks(value, season: season, timestamp: timestamp)
     }
 
     private static func upsert(
@@ -1312,7 +1386,7 @@ private actor RepositoryResponseCache {
     }
 }
 
-struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
@@ -1320,6 +1394,9 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
     private let fetchScheduleByDateBlock: @Sendable (Date, Bool) async throws -> [GameDetail]
     private let fetchStandingsBlock: @Sendable () async throws -> [TeamStandingsSnapshot]
     private let fetchStandingsSourceBlock: (@Sendable (Int) async throws -> [GameDetail])?
+    private let fetchTeamRanksBlock: (@Sendable (Int) async throws -> [TeamRankRow])?
+    private let fetchLocalTeamRanksBlock: (@Sendable (Int) async -> [TeamRankRow])?
+    private let replaceLocalTeamRanksBlock: (@Sendable ([TeamRankRow], Int) async -> Int)?
     private let fetchFavoriteTeamScheduleBlock: (@Sendable (Date, Team.ID, Bool) async throws -> [GameDetail])?
     private let fetchGameDetailSnapshotBlock: (@Sendable (GameDetail, String, [Team]) async throws -> GameDetail?)?
     private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
@@ -1341,6 +1418,23 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
             }
         } else {
             fetchStandingsSourceBlock = nil
+        }
+        if let teamRankSource = base as? any KBOTeamRankDataSource {
+            fetchTeamRanksBlock = { season in try await teamRankSource.fetchTeamRanks(season: season) }
+        } else {
+            fetchTeamRanksBlock = nil
+        }
+        if let localTeamRankCache = base as? any KBOLocalTeamRankCacheDataSource {
+            fetchLocalTeamRanksBlock = { season in await localTeamRankCache.fetchLocalTeamRanks(season: season) }
+        } else {
+            fetchLocalTeamRanksBlock = nil
+        }
+        if let localTeamRankUpserting = base as? any KBOLocalTeamRankCacheUpserting {
+            replaceLocalTeamRanksBlock = { ranks, season in
+                await localTeamRankUpserting.replaceLocalTeamRanks(ranks, season: season)
+            }
+        } else {
+            replaceLocalTeamRanksBlock = nil
         }
         if let favoriteTeamScheduleSource = base as? any KBOFavoriteTeamScheduleDataSource {
             fetchFavoriteTeamScheduleBlock = { date, favoriteTeamID, bypassingCache in
@@ -1412,6 +1506,21 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
                 .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
         }
         return try await fetchStandingsSourceBlock(season)
+    }
+
+    nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
+        guard let fetchTeamRanksBlock else { return [] }
+        return try await fetchTeamRanksBlock(season)
+    }
+
+    nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow] {
+        guard let fetchLocalTeamRanksBlock else { return [] }
+        return await fetchLocalTeamRanksBlock(season)
+    }
+
+    nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
+        guard let replaceLocalTeamRanksBlock else { return 0 }
+        return await replaceLocalTeamRanksBlock(ranks, season)
     }
 
     nonisolated func fetchFavoriteTeamSchedule(
@@ -1531,7 +1640,7 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, KBOS
     }
 }
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -1647,6 +1756,21 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamS
                 .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
         }
         return try await standingsGameSource.fetchStandingsSource(season: season)
+    }
+
+    nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
+        guard let teamRankSource = base as? any KBOTeamRankDataSource else {
+            return []
+        }
+        return try await teamRankSource.fetchTeamRanks(season: season)
+    }
+
+    nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow] {
+        await cache.localTeamRanks(season: season)
+    }
+
+    nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
+        await cache.replaceTeamRanks(ranks, season: season)
     }
 
     nonisolated func fetchGameDetailSnapshot(

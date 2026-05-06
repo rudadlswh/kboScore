@@ -2648,7 +2648,11 @@ struct kboScoreTests {
                 scoreChange: false,
                 leadChange: true,
                 gameEnd: true,
-                rainDelay: false
+                rainDelay: false,
+                onBaseEnabled: true,
+                inningChangeEnabled: true,
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: true
             ),
             quietHours: QuietHours(isEnabled: true, startHour: 23, endHour: 7),
             liveActivitiesEnabled: true,
@@ -2672,6 +2676,14 @@ struct kboScoreTests {
         #expect(payload.notificationsAuthorized == true)
         #expect(payload.alertTypes == [.gameStart, .leadChange, .gameEnd])
         #expect(payload.quietHours == NotificationRegistrationQuietHours(startHour: 23, endHour: 7))
+        #expect(payload.gameStartEnabled == true)
+        #expect(payload.scoreChangeEnabled == false)
+        #expect(payload.leadChangeEnabled == true)
+        #expect(payload.gameEndEnabled == true)
+        #expect(payload.onBaseEnabled == true)
+        #expect(payload.inningChangeEnabled == true)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(payload.muteWhenLosingEnabled == true)
     }
 
     @Test func notificationRegistrationPayloadSupportsDeniedAuthorizationState() async throws {
@@ -2688,6 +2700,177 @@ struct kboScoreTests {
         #expect(payload.environment == NotificationRegistrationEnvironment.current)
         #expect(payload.installationId.isEmpty == false)
         #expect(payload.alertTypes.contains(.scoreChange))
+    }
+
+    @Test func notificationPreferencesDefaultDetailedValuesMatchBackendDefaults() async throws {
+        let preferences = NotificationPreferences()
+
+        #expect(preferences.gameStartEnabled == true)
+        #expect(preferences.scoreChangeEnabled == true)
+        #expect(preferences.leadChangeEnabled == true)
+        #expect(preferences.gameEndEnabled == true)
+        #expect(preferences.onBaseEnabled == false)
+        #expect(preferences.inningChangeEnabled == false)
+        #expect(preferences.favoriteTeamOnlyEnabled == false)
+        #expect(preferences.muteWhenLosingEnabled == false)
+    }
+
+    @Test func appSettingsPersistenceRoundTripPreservesDetailedNotificationPreferences() async throws {
+        let settings = AppSettings(
+            favoriteTeamID: "lotte",
+            notificationPreferences: NotificationPreferences(
+                gameStart: false,
+                scoreChange: true,
+                leadChange: false,
+                gameEnd: true,
+                rainDelay: true,
+                onBaseEnabled: true,
+                inningChangeEnabled: true,
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: false
+            ),
+            quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
+            liveActivitiesEnabled: true,
+            appearance: .system,
+            teamThemeMode: .favoriteTeam
+        )
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+
+        #expect(decoded.notificationPreferences.gameStartEnabled == false)
+        #expect(decoded.notificationPreferences.scoreChangeEnabled == true)
+        #expect(decoded.notificationPreferences.leadChangeEnabled == false)
+        #expect(decoded.notificationPreferences.gameEndEnabled == true)
+        #expect(decoded.notificationPreferences.onBaseEnabled == true)
+        #expect(decoded.notificationPreferences.inningChangeEnabled == true)
+        #expect(decoded.notificationPreferences.favoriteTeamOnlyEnabled == true)
+        #expect(decoded.notificationPreferences.muteWhenLosingEnabled == false)
+    }
+
+    @Test func notificationRegistrationKeyChangesWhenDetailedNotificationSettingsChange() async throws {
+        let basePayload = NotificationRegistrationPayload(
+            platform: "ios",
+            environment: "sandbox",
+            deviceToken: "abc123",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            notificationsAuthorized: true,
+            alertTypes: [.gameStart, .scoreChange],
+            quietHours: nil,
+            scoreChangeEnabled: true
+        )
+        let updatedPayload = NotificationRegistrationPayload(
+            platform: "ios",
+            environment: "sandbox",
+            deviceToken: "abc123",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            notificationsAuthorized: true,
+            alertTypes: [.gameStart],
+            quietHours: nil,
+            scoreChangeEnabled: false
+        )
+
+        let baseKey = NotificationRegistrationKey(payload: basePayload, endpointDescription: "https://example.com/devices/register")
+        let updatedKey = NotificationRegistrationKey(payload: updatedPayload, endpointDescription: "https://example.com/devices/register")
+
+        #expect(baseKey != updatedKey)
+    }
+
+    @Test func notificationRegistrationDeduplicationSkipsDuplicateInFlightKey() async throws {
+        let key = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: true,
+            endpointDescription: "https://example.com/devices/register"
+        )
+        var state = NotificationRegistrationDeduplicationState()
+
+        #expect(state.start(key) == .start(keyChanged: false))
+        #expect(state.start(key) == .skipInFlight)
+        #expect(state.start(key) == .skipInFlight)
+        #expect(state.inFlightRegistrationKeys == Set([key]))
+    }
+
+    @Test func notificationRegistrationDeduplicationSkipsAlreadyRegisteredKeyAfterSuccess() async throws {
+        let key = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: true,
+            endpointDescription: "https://example.com/devices/register"
+        )
+        var state = NotificationRegistrationDeduplicationState()
+
+        #expect(state.start(key) == .start(keyChanged: false))
+        state.complete(key, status: .synced)
+
+        #expect(state.start(key) == .skipAlreadyRegistered)
+        #expect(state.lastSuccessfulRegistrationKey == key)
+        #expect(state.inFlightRegistrationKeys.isEmpty)
+    }
+
+    @Test func notificationRegistrationDeduplicationStartsWhenRegistrationKeyChanges() async throws {
+        let endpoint = "https://example.com/devices/register"
+        let originalKey = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: true,
+            endpointDescription: endpoint
+        )
+        let changedTeamKey = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lg",
+            notificationsEnabled: true,
+            endpointDescription: endpoint
+        )
+        let changedAuthorizationKey = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: false,
+            endpointDescription: endpoint
+        )
+        let changedTokenKey = NotificationRegistrationKey(
+            deviceToken: "def456",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: true,
+            endpointDescription: endpoint
+        )
+        var state = NotificationRegistrationDeduplicationState()
+
+        #expect(state.start(originalKey) == .start(keyChanged: false))
+        state.complete(originalKey, status: .synced)
+
+        #expect(state.start(changedTeamKey) == .start(keyChanged: true))
+        state.fail(changedTeamKey)
+        #expect(state.start(changedAuthorizationKey) == .start(keyChanged: true))
+        state.fail(changedAuthorizationKey)
+        #expect(state.start(changedTokenKey) == .start(keyChanged: true))
+    }
+
+    @Test func notificationRegistrationDeduplicationDoesNotCacheFailedOrSkippedRequestsAsSuccess() async throws {
+        let key = NotificationRegistrationKey(
+            deviceToken: "abc123",
+            environment: "sandbox",
+            favoriteTeamID: "lotte",
+            notificationsEnabled: true,
+            endpointDescription: "https://example.com/devices/register"
+        )
+        var state = NotificationRegistrationDeduplicationState()
+
+        #expect(state.start(key) == .start(keyChanged: false))
+        state.fail(key)
+        #expect(state.lastSuccessfulRegistrationKey == nil)
+        #expect(state.start(key) == .start(keyChanged: false))
+
+        state.complete(key, status: .skipped)
+        #expect(state.lastSuccessfulRegistrationKey == nil)
+        #expect(state.start(key) == .start(keyChanged: false))
     }
 
     @Test func remoteNotificationRegistrationClientPostsJSONPayload() async throws {
@@ -2726,6 +2909,14 @@ struct kboScoreTests {
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(decoded == payload)
         #expect(decoded.installationId == "install-1")
+        #expect(decoded.gameStartEnabled == true)
+        #expect(decoded.scoreChangeEnabled == true)
+        #expect(decoded.leadChangeEnabled == true)
+        #expect(decoded.gameEndEnabled == true)
+        #expect(decoded.onBaseEnabled == false)
+        #expect(decoded.inningChangeEnabled == false)
+        #expect(decoded.favoriteTeamOnlyEnabled == false)
+        #expect(decoded.muteWhenLosingEnabled == false)
     }
 
     @Test func teamIdentityCatalogUsesRealLogoAssetNames() async throws {
@@ -3316,6 +3507,217 @@ struct kboScoreTests {
 
         #expect(reconciled.count == 1)
         #expect(reconciled[0].scheduledStart == isoDate("2026-03-28T17:00:00+09:00"))
+    }
+
+    @Test func officialGameCenterClientMapsLiveBaseRunnerNamesFromBattingOrderTable() async throws {
+        let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
+        let awayOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "4번" }, { "Text": "1루수" }, { "Text": "김민수" }] },
+            { "row": [{ "Text": "9번" }, { "Text": "중견수" }, { "Text": "박철우" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let homeOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "유격수" }, { "Text": "이정훈" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328KTLG0",
+              "G_TM": "14:00",
+              "S_NM": "잠실",
+              "AWAY_ID": "KT",
+              "HOME_ID": "LG",
+              "AWAY_NM": "KT",
+              "HOME_NM": "LG",
+              "GAME_STATE_SC": "2",
+              "CANCEL_SC_NM": "정상경기",
+              "GAME_INN_NO": 7,
+              "GAME_TB_SC_NM": "초",
+              "T_SCORE_CN": "3",
+              "B_SCORE_CN": "2",
+              "OUT_CN": 1,
+              "B1_BAT_ORDER_NO": 9,
+              "B2_BAT_ORDER_NO": 0,
+              "B3_BAT_ORDER_NO": 4
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let scoreboardPayload = """
+        {
+          "S_NM": "잠실",
+          "START_TM": "14:00",
+          "table2": \(try jsonStringLiteral(emptyGridTable)),
+          "table3": \(try jsonStringLiteral(emptyGridTable))
+        }
+        """.data(using: .utf8)!
+        let boxScorePayload = """
+        {
+          "arrHitter": [
+            { "table1": \(try jsonStringLiteral(awayOrderTable)) },
+            { "table1": \(try jsonStringLiteral(homeOrderTable)) }
+          ]
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetScoreBoardScroll": StubResponse(statusCode: 200, data: scoreboardPayload),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll": StubResponse(statusCode: 200, data: boxScorePayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            homeTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260328KTLG0"
+        )
+
+        let detail = try await client.fetchDetail(for: game)
+
+        #expect(detail?.summary.bases?.first == true)
+        #expect(detail?.summary.bases?.second == false)
+        #expect(detail?.summary.bases?.third == true)
+        #expect(detail?.summary.baseRunners?.first == "박철우")
+        #expect(detail?.summary.baseRunners?.second == nil)
+        #expect(detail?.summary.baseRunners?.third == "김민수")
+    }
+
+    @Test func officialGameCenterClientFallsBackToLineupAnalysisForLiveBaseRunnerNames() async throws {
+        let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
+        let awayOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "유격수" }, { "Text": "원정선수" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let homeOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1번" }, { "Text": "우익수" }, { "Text": "홍창기" }] },
+            { "row": [{ "Text": "3번" }, { "Text": "지명타자" }, { "Text": "오스틴" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328KTLG0",
+              "G_TM": "14:00",
+              "S_NM": "잠실",
+              "AWAY_ID": "KT",
+              "HOME_ID": "LG",
+              "AWAY_NM": "KT",
+              "HOME_NM": "LG",
+              "GAME_STATE_SC": "2",
+              "CANCEL_SC_NM": "정상경기",
+              "GAME_INN_NO": 7,
+              "GAME_TB_SC_NM": "말",
+              "T_SCORE_CN": "3",
+              "B_SCORE_CN": "2",
+              "OUT_CN": 1,
+              "B1BATORDERNO": 3,
+              "B2BATORDERNO": 0,
+              "BASE3_BAT_ORDER_NO": 1
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let scoreboardPayload = """
+        {
+          "S_NM": "잠실",
+          "START_TM": "14:00",
+          "table2": \(try jsonStringLiteral(emptyGridTable)),
+          "table3": \(try jsonStringLiteral(emptyGridTable))
+        }
+        """.data(using: .utf8)!
+        let boxScorePayload = #"{"code":"100","msg":"성공"}"#.data(using: .utf8)!
+        let lineupPayload = """
+        [
+          [{ "LINEUP_CK": true }],
+          [{ "T_ID": "LG" }],
+          [{ "T_ID": "KT" }],
+          [\(try jsonStringLiteral(homeOrderTable))],
+          [\(try jsonStringLiteral(awayOrderTable))]
+        ]
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetScoreBoardScroll": StubResponse(statusCode: 200, data: scoreboardPayload),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll": StubResponse(statusCode: 200, data: boxScorePayload),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetLineUpAnalysis": StubResponse(statusCode: 200, data: lineupPayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            homeTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260328KTLG0"
+        )
+
+        let detail = try await client.fetchDetail(for: game)
+
+        #expect(detail?.summary.bases?.first == true)
+        #expect(detail?.summary.bases?.second == false)
+        #expect(detail?.summary.bases?.third == true)
+        #expect(detail?.summary.baseRunners?.first == "오스틴")
+        #expect(detail?.summary.baseRunners?.second == nil)
+        #expect(detail?.summary.baseRunners?.third == "홍창기")
     }
 
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
@@ -5562,6 +5964,367 @@ struct kboScoreTests {
         #expect(row.shortName == "LG")
     }
 
+    @Test func standingsTabRendersLocalTeamRankRowsImmediately() async throws {
+        let state = TeamRankFlowState(localRanks: sampleTeamRankRows())
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        #expect(model.standingsSnapshots.map(\.team.id).prefix(2) == ["lg", "kia"])
+        #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
+        #expect(await state.remoteFetchCount == 0)
+    }
+
+    @Test func standingsTabAutoFetchesTeamRankViewWhenLocalRankCacheIsEmpty() async throws {
+        let state = TeamRankFlowState(localRanks: [], remoteRanks: sampleTeamRankRows())
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        #expect(await state.remoteFetchCount == 1)
+        #expect(await state.cachedRanksCount == 2)
+        #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
+    }
+
+    @Test func manualStandingsRefreshFetchesTeamRankViewAndUpdatesLocalCache() async throws {
+        let state = TeamRankFlowState(
+            localRanks: [sampleTeamRankRows()[1]],
+            remoteRanks: sampleTeamRankRows()
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+        await model.refreshStandings()
+
+        #expect(await state.remoteFetchCount == 1)
+        #expect(await state.cachedRanksCount == 2)
+        #expect(model.standingsSnapshots.first?.team.id == "lg")
+    }
+
+    @Test func standingsAreNotClearedWhileTeamRankRefreshIsRunning() async throws {
+        let gate = RankFetchGate()
+        let state = TeamRankFlowState(
+            localRanks: sampleTeamRankRows(),
+            remoteRanks: Array(sampleTeamRankRows().reversed()),
+            gate: gate
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+        let refreshTask = Task { await model.refreshStandings() }
+        await gate.waitUntilStarted()
+
+        #expect(model.standingsSnapshots.isEmpty == false)
+        #expect(model.standingsSnapshots.first?.team.id == "lg")
+
+        await gate.release()
+        await refreshTask.value
+    }
+
+    @Test func emptyTeamRankViewFallsBackToGamesBasedStandingsCalculation() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let lg = try #require(teams.first { $0.id == "lg" })
+        let kia = try #require(teams.first { $0.id == "kia" })
+        let completedGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: isoDate("2026-04-10T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: kia,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let state = TeamRankFlowState(localRanks: [], remoteRanks: [], standingsGames: [completedGame])
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(model.standingsSnapshots.first?.team.id == "lg")
+        #expect(model.standingsSnapshots.first?.wins == 1)
+    }
+
+    @Test func teamRankFetchFailureKeepsExistingLocalRanksVisible() async throws {
+        let state = TeamRankFlowState(
+            localRanks: sampleTeamRankRows(),
+            remoteError: TestRepositoryError.supabaseUnavailable
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+        await model.refreshStandings()
+
+        #expect(model.standingsSnapshots.first?.team.id == "lg")
+        #expect(model.standingsSnapshots.count == 2)
+    }
+
+    @Test func supabaseSnakeCaseColumnsDecodeIntoTeamRankRow() throws {
+        let teamID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let rows = try JSONDecoder().decode(
+            [TeamRankRow].self,
+            from: Data(
+                """
+                [{
+                  "season": 2026,
+                  "team_id": "\(teamID.uuidString)",
+                  "rank": 1,
+                  "team_name": "LG 트윈스",
+                  "games_played": 40,
+                  "wins": 25,
+                  "losses": 13,
+                  "draws": 2,
+                  "winning_percentage": "0.658",
+                  "games_behind": "0.0",
+                  "streak_type": "WIN",
+                  "streak_count": 3,
+                  "streak_text": "3승",
+                  "last_game_date": "2026-05-05",
+                  "calculated_at": "2026-05-06T12:00:00+09:00",
+                  "updated_at": "2026-05-06T12:00:00+09:00",
+                  "created_at": "2026-05-06T12:00:00+09:00"
+                }]
+                """.utf8
+            )
+        )
+
+        let row = try #require(rows.first)
+        #expect(row.teamID == teamID)
+        #expect(row.teamName == "LG 트윈스")
+        #expect(row.gamesPlayed == 40)
+        #expect(row.winningPercentage == 0.658)
+        #expect(row.gamesBehind == 0.0)
+        #expect(row.streakType == "WIN")
+        #expect(row.streakCount == 3)
+        #expect(row.streakText == "3승")
+        #expect(row.lastGameDate != nil)
+        #expect(row.calculatedAt != nil)
+        #expect(row.updatedAt != nil)
+        #expect(row.createdAt != nil)
+    }
+
+    @Test func teamRankRowsRenderSortedByRankAscending() async throws {
+        let state = TeamRankFlowState(localRanks: Array(sampleTeamRankRows().reversed()))
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        #expect(model.standingsSnapshots.map(\.rank) == [1, 2])
+        #expect(model.standingsSnapshots.map(\.team.id) == ["lg", "kia"])
+    }
+
+}
+
+private func sampleTeamRankRows() -> [TeamRankRow] {
+    [
+        TeamRankRow(
+            season: 2026,
+            teamID: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+            teamCode: "lg",
+            rank: 1,
+            teamName: "LG 트윈스",
+            gamesPlayed: 40,
+            wins: 25,
+            losses: 13,
+            draws: 2,
+            winningPercentage: 0.658,
+            gamesBehind: 0.0,
+            streakType: "WIN",
+            streakCount: 3,
+            streakText: "3승"
+        ),
+        TeamRankRow(
+            season: 2026,
+            teamID: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
+            teamCode: "kia",
+            rank: 2,
+            teamName: "KIA 타이거즈",
+            gamesPlayed: 41,
+            wins: 23,
+            losses: 16,
+            draws: 2,
+            winningPercentage: 0.590,
+            gamesBehind: 3.0,
+            streakType: "LOSS",
+            streakCount: 1,
+            streakText: "1패"
+        )
+    ]
+}
+
+private actor RankFetchGate {
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+    private var didStart = false
+    private var didRelease = false
+
+    func wait() async {
+        didStart = true
+        startedContinuation?.resume()
+        startedContinuation = nil
+        guard didRelease == false else { return }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        guard didStart == false else { return }
+        await withCheckedContinuation { continuation in
+            startedContinuation = continuation
+        }
+    }
+
+    func release() {
+        didRelease = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+}
+
+private actor TeamRankFlowState {
+    private var localRanks: [TeamRankRow]
+    private let remoteRanks: [TeamRankRow]
+    private let remoteError: (any Error)?
+    private let gate: RankFetchGate?
+    private let standingsGames: [GameDetail]
+    private(set) var remoteFetchCount = 0
+    private(set) var standingsSourceFetchCount = 0
+
+    init(
+        localRanks: [TeamRankRow],
+        remoteRanks: [TeamRankRow] = [],
+        remoteError: (any Error)? = nil,
+        gate: RankFetchGate? = nil,
+        standingsGames: [GameDetail] = []
+    ) {
+        self.localRanks = localRanks
+        self.remoteRanks = remoteRanks
+        self.remoteError = remoteError
+        self.gate = gate
+        self.standingsGames = standingsGames
+    }
+
+    var cachedRanksCount: Int {
+        localRanks.count
+    }
+
+    func fetchLocalRanks(season: Int) -> [TeamRankRow] {
+        localRanks.filter { $0.season == season }.sorted { $0.rank < $1.rank }
+    }
+
+    func replaceLocalRanks(_ ranks: [TeamRankRow], season: Int) -> Int {
+        localRanks.removeAll { $0.season == season }
+        localRanks.append(contentsOf: ranks)
+        return ranks.count
+    }
+
+    func fetchRemoteRanks(season: Int) async throws -> [TeamRankRow] {
+        remoteFetchCount += 1
+        if let gate {
+            await gate.wait()
+        }
+        if let remoteError {
+            throw remoteError
+        }
+        return remoteRanks.filter { $0.season == season }.sorted { $0.rank < $1.rank }
+    }
+
+    func fetchStandingsSource(season: Int) -> [GameDetail] {
+        standingsSourceFetchCount += 1
+        return standingsGames
+    }
+}
+
+private struct TeamRankFlowRepository: KBORepository, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOStandingsGameDataSource, Sendable {
+    let state: TeamRankFlowState
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        MockKBOData.makeBootstrap()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        []
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        []
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        []
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        []
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        []
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        []
+    }
+
+    nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
+        try await state.fetchRemoteRanks(season: season)
+    }
+
+    nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow] {
+        await state.fetchLocalRanks(season: season)
+    }
+
+    nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
+        await state.replaceLocalRanks(ranks, season: season)
+    }
+
+    nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
+        await state.fetchStandingsSource(season: season)
+    }
 }
 
 private actor RepositoryCallTracker {
@@ -5964,6 +6727,11 @@ private func makeStubSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolStub.self]
     return URLSession(configuration: configuration)
+}
+
+private func jsonStringLiteral(_ value: String) throws -> String {
+    let data = try JSONSerialization.data(withJSONObject: value, options: [])
+    return String(data: data, encoding: .utf8) ?? "\"\""
 }
 
 private func httpBodyData(from request: URLRequest) -> Data? {

@@ -7,6 +7,159 @@
 
 import Foundation
 
+struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
+    let season: Int
+    let teamID: UUID
+    let teamCode: String?
+    let rank: Int
+    let teamName: String
+    let gamesPlayed: Int
+    let wins: Int
+    let losses: Int
+    let draws: Int
+    let winningPercentage: Double
+    let gamesBehind: Double
+    let streakType: String
+    let streakCount: Int
+    let streakText: String
+    let lastGameDate: Date?
+    let calculatedAt: Date?
+    let updatedAt: Date?
+    let createdAt: Date?
+
+    var id: String { "\(season)-\(teamID.uuidString)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case season
+        case teamID = "team_id"
+        case teamCode = "team_code"
+        case rank
+        case teamName = "team_name"
+        case gamesPlayed = "games_played"
+        case wins
+        case losses
+        case draws
+        case winningPercentage = "winning_percentage"
+        case gamesBehind = "games_behind"
+        case streakType = "streak_type"
+        case streakCount = "streak_count"
+        case streakText = "streak_text"
+        case lastGameDate = "last_game_date"
+        case calculatedAt = "calculated_at"
+        case updatedAt = "updated_at"
+        case createdAt = "created_at"
+    }
+
+    nonisolated init(
+        season: Int,
+        teamID: UUID,
+        teamCode: String? = nil,
+        rank: Int,
+        teamName: String,
+        gamesPlayed: Int,
+        wins: Int,
+        losses: Int,
+        draws: Int,
+        winningPercentage: Double,
+        gamesBehind: Double,
+        streakType: String,
+        streakCount: Int,
+        streakText: String,
+        lastGameDate: Date? = nil,
+        calculatedAt: Date? = nil,
+        updatedAt: Date? = nil,
+        createdAt: Date? = nil
+    ) {
+        self.season = season
+        self.teamID = teamID
+        self.teamCode = teamCode
+        self.rank = rank
+        self.teamName = teamName
+        self.gamesPlayed = gamesPlayed
+        self.wins = wins
+        self.losses = losses
+        self.draws = draws
+        self.winningPercentage = winningPercentage
+        self.gamesBehind = gamesBehind
+        self.streakType = streakType
+        self.streakCount = streakCount
+        self.streakText = streakText
+        self.lastGameDate = lastGameDate
+        self.calculatedAt = calculatedAt
+        self.updatedAt = updatedAt
+        self.createdAt = createdAt
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        season = try container.decode(Int.self, forKey: .season)
+        teamID = try container.decode(UUID.self, forKey: .teamID)
+        teamCode = try container.decodeIfPresent(String.self, forKey: .teamCode)
+        rank = try container.decode(Int.self, forKey: .rank)
+        teamName = try container.decode(String.self, forKey: .teamName)
+        gamesPlayed = try container.decode(Int.self, forKey: .gamesPlayed)
+        wins = try container.decode(Int.self, forKey: .wins)
+        losses = try container.decode(Int.self, forKey: .losses)
+        draws = try container.decode(Int.self, forKey: .draws)
+        winningPercentage = try container.decodeFlexibleDouble(forKey: .winningPercentage)
+        gamesBehind = try container.decodeFlexibleDouble(forKey: .gamesBehind)
+        streakType = try container.decode(String.self, forKey: .streakType)
+        streakCount = try container.decode(Int.self, forKey: .streakCount)
+        streakText = try container.decode(String.self, forKey: .streakText)
+        lastGameDate = SupabaseDateParser.parseGameDate(try? container.decodeIfPresent(String.self, forKey: .lastGameDate))
+        calculatedAt = (try? container.decodeIfPresent(Date.self, forKey: .calculatedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .calculatedAt))
+        updatedAt = (try? container.decodeIfPresent(Date.self, forKey: .updatedAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
+        createdAt = (try? container.decodeIfPresent(Date.self, forKey: .createdAt)) ??
+            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
+    }
+
+    nonisolated func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(season, forKey: .season)
+        try container.encode(teamID, forKey: .teamID)
+        try container.encodeIfPresent(teamCode, forKey: .teamCode)
+        try container.encode(rank, forKey: .rank)
+        try container.encode(teamName, forKey: .teamName)
+        try container.encode(gamesPlayed, forKey: .gamesPlayed)
+        try container.encode(wins, forKey: .wins)
+        try container.encode(losses, forKey: .losses)
+        try container.encode(draws, forKey: .draws)
+        try container.encode(winningPercentage, forKey: .winningPercentage)
+        try container.encode(gamesBehind, forKey: .gamesBehind)
+        try container.encode(streakType, forKey: .streakType)
+        try container.encode(streakCount, forKey: .streakCount)
+        try container.encode(streakText, forKey: .streakText)
+        try container.encodeIfPresent(lastGameDate.map(Self.dateString), forKey: .lastGameDate)
+        try container.encodeIfPresent(calculatedAt, forKey: .calculatedAt)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
+    }
+
+    private nonisolated static func dateString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeFlexibleDouble(forKey key: Key) throws -> Double {
+        if let value = try? decode(Double.self, forKey: key) {
+            return value
+        }
+        if let value = try? decode(String.self, forKey: key),
+           let double = Double(value) {
+            return double
+        }
+        return try Double(decode(Int.self, forKey: key))
+    }
+}
+
 enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
     case resolved
     case tiebreakGameRequired = "tiebreak_game_required"
@@ -105,6 +258,8 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let postseasonQualificationProbability: Double?
     let postseasonQualificationStatus: PostseasonQualificationStatus?
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
+    let precomputedGamesBehind: Double?
+    let precomputedStreakText: String?
 
     nonisolated init(
         team: Team,
@@ -122,7 +277,9 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         rankingResolutionPosition: Int? = nil,
         postseasonQualificationProbability: Double? = nil,
         postseasonQualificationStatus: PostseasonQualificationStatus? = nil,
-        postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason? = nil
+        postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason? = nil,
+        precomputedGamesBehind: Double? = nil,
+        precomputedStreakText: String? = nil
     ) {
         self.team = team
         self.rank = rank
@@ -140,6 +297,8 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.postseasonQualificationProbability = postseasonQualificationProbability
         self.postseasonQualificationStatus = postseasonQualificationStatus
         self.postseasonProbabilityUnavailableReason = postseasonProbabilityUnavailableReason
+        self.precomputedGamesBehind = precomputedGamesBehind
+        self.precomputedStreakText = precomputedStreakText
     }
 
     var id: String { team.id }

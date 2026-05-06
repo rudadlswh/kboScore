@@ -336,6 +336,10 @@ private extension TeamStandingsSnapshot {
     }
 
     var currentStreakText: String {
+        if let precomputedStreakText,
+           precomputedStreakText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return precomputedStreakText
+        }
         guard let firstResult = recentResults.first else { return "-" }
 
         var count = 0
@@ -348,6 +352,13 @@ private extension TeamStandingsSnapshot {
     }
 
     func gamesBehindText(leader: TeamStandingsSnapshot?) -> String {
+        if let precomputedGamesBehind {
+            guard precomputedGamesBehind > 0 else { return "-" }
+            if precomputedGamesBehind.rounded(.towardZero) == precomputedGamesBehind {
+                return String(format: "%.0f", precomputedGamesBehind)
+            }
+            return String(format: "%.1f", precomputedGamesBehind)
+        }
         guard let leader else { return "-" }
         guard rank != leader.rank else { return "-" }
 
