@@ -1142,25 +1142,7 @@ private extension OfficialPreviewRecordCell {
     }
 }
 
-private struct OfficialGridTableDTO: Decodable {
-    let headers: [OfficialGridRowDTO]
-    let rows: [OfficialGridRowDTO]
-    let tfoot: [OfficialGridRowDTO]
-
-    var table: OfficialGridTable {
-        OfficialGridTable(
-            headers: headers.map(\.row),
-            rows: rows.map(\.row),
-            tfoot: tfoot.map(\.row)
-        )
-    }
-}
-
-private struct OfficialGridTable: Sendable {
-    let headers: [OfficialGridRow]
-    let rows: [OfficialGridRow]
-    let tfoot: [OfficialGridRow]
-
+private extension OfficialGridTable {
     var battingTableInterpretation: OfficialBattingTableInterpretation {
         let labels = headers.first?.cells.map { $0.text.normalizedKeyStatLabel } ?? []
         let aggregateLabels: Set<String> = ["타수", "AB", "득점", "R", "안타", "H", "타점", "RBI", "홈런", "HR", "HRA", "볼넷", "BB", "4구", "삼진", "SO", "K"]

@@ -7,6 +7,26 @@
 
 import Foundation
 
+struct OfficialGridTableDTO: Decodable {
+    let headers: [OfficialGridRowDTO]
+    let rows: [OfficialGridRowDTO]
+    let tfoot: [OfficialGridRowDTO]
+
+    var table: OfficialGridTable {
+        OfficialGridTable(
+            headers: headers.map(\.row),
+            rows: rows.map(\.row),
+            tfoot: tfoot.map(\.row)
+        )
+    }
+}
+
+struct OfficialGridTable: Sendable {
+    let headers: [OfficialGridRow]
+    let rows: [OfficialGridRow]
+    let tfoot: [OfficialGridRow]
+}
+
 struct OfficialGridRowDTO: Decodable {
     let row: OfficialGridRow
 }
