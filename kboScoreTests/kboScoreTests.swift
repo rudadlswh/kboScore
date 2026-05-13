@@ -4197,6 +4197,191 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == nil)
     }
 
+    @Test func liveActivityAutoStartRejectsScheduledGameThirtyOneMinutesBeforeStart() async throws {
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let now = scheduledAt.addingTimeInterval(-31 * 60)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .upcoming,
+            scheduledAt: scheduledAt,
+            now: now
+        )
+
+        #expect(isEligible == false)
+    }
+
+    @Test func liveActivityAutoStartAllowsScheduledGameExactlyThirtyMinutesBeforeStart() async throws {
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let now = scheduledAt.addingTimeInterval(-30 * 60)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .upcoming,
+            scheduledAt: scheduledAt,
+            now: now
+        )
+
+        #expect(isEligible)
+    }
+
+    @Test func liveActivityAutoStartAllowsScheduledGameTenMinutesBeforeStart() async throws {
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let now = scheduledAt.addingTimeInterval(-10 * 60)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .upcoming,
+            scheduledAt: scheduledAt,
+            now: now
+        )
+
+        #expect(isEligible)
+    }
+
+    @Test func liveActivityAutoStartAllowsScheduledGameAfterStartWhenStillUpcoming() async throws {
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let now = scheduledAt.addingTimeInterval(10 * 60)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .upcoming,
+            scheduledAt: scheduledAt,
+            now: now
+        )
+
+        #expect(isEligible)
+    }
+
+    @Test func liveActivityAutoStartAllowsLiveGameWithoutScheduledAt() async throws {
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .live,
+            scheduledAt: nil,
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(isEligible)
+    }
+
+    @Test func liveActivityAutoStartRejectsScheduledGameWithoutScheduledAt() async throws {
+        let decision = LiveActivityAutoStartEligibility.decision(
+            status: .upcoming,
+            scheduledAt: nil,
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(decision == .missingScheduledAt)
+    }
+
+    @Test func liveActivityAutoStartRejectsFinalGame() async throws {
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .final,
+            scheduledAt: isoDate("2026-04-28T18:30:00+09:00"),
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(isEligible == false)
+    }
+
+    @Test func liveActivityAutoStartRejectsCancelledGame() async throws {
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .cancelled,
+            scheduledAt: isoDate("2026-04-28T18:30:00+09:00"),
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(isEligible == false)
+    }
+
+    @Test func liveActivityAutoStartRejectsPostponedGameMappedAsCancelled() async throws {
+        let status = KBODataMapper.mapGameStatus(code: "postponed", text: nil)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: status,
+            scheduledAt: isoDate("2026-04-28T18:30:00+09:00"),
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(status == .cancelled)
+        #expect(isEligible == false)
+    }
+
+    @Test func liveActivityAutoStartRejectsCompletedGameMappedAsFinal() async throws {
+        let status = KBODataMapper.mapGameStatus(code: "completed", text: nil)
+
+        let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: status,
+            scheduledAt: isoDate("2026-04-28T18:30:00+09:00"),
+            now: isoDate("2026-04-28T18:30:00+09:00")
+        )
+
+        #expect(status == .final)
+        #expect(isEligible == false)
+    }
+
+    @Test func gameDetailAutoStartDoesNotCallLiveActivityControllerWhenEligibilityIsFalse() async throws {
+        let controller = TestLiveActivityController(isSupported: true)
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1")!,
+            scheduledStart: scheduledAt,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let model = AppModel(
+            liveActivityController: controller,
+            bootstrap: KBOBootstrapData(teams: teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { scheduledAt.addingTimeInterval(-31 * 60) }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.settings.liveActivitiesEnabled = true
+
+        await model.startOrUpdateLiveActivityIfNeeded(for: game)
+
+        #expect(controller.snapshots.isEmpty)
+        #expect(model.isLiveActivityOn(for: game.id) == false)
+    }
+
+    @Test func gameDetailAutoStartCallsLiveActivityControllerWhenSettingsAndEligibilityAllow() async throws {
+        let controller = TestLiveActivityController(isSupported: true)
+        let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2")!,
+            scheduledStart: scheduledAt,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            awayStartingPitcherName: "원정선발",
+            homeStartingPitcherName: "홈선발"
+        )
+        let model = AppModel(
+            liveActivityController: controller,
+            bootstrap: KBOBootstrapData(teams: teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { scheduledAt.addingTimeInterval(-30 * 60) }
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.settings.liveActivitiesEnabled = true
+
+        await model.startOrUpdateLiveActivityIfNeeded(for: game)
+
+        #expect(controller.snapshots.count == 1)
+        #expect(controller.activeGameID == game.id)
+        #expect(model.isLiveActivityOn(for: game.id))
+    }
+
     @Test func liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()

@@ -1716,7 +1716,11 @@ final class AppModel {
     }
 
     func shouldAutoStartLiveActivity(for game: GameDetail) -> Bool {
-        (game.status == .upcoming || game.status.isLiveLike) && game.involves(teamID: settings.favoriteTeamID)
+        game.involves(teamID: settings.favoriteTeamID) &&
+            LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+                game: game,
+                now: currentDateProvider()
+            )
     }
 
     func isLiveActivityOn(for gameID: UUID) -> Bool {
@@ -1777,10 +1781,38 @@ final class AppModel {
         let resolvedGame = self.game(withIdentity: game.canonicalGameIdentityValue) ??
             self.game(withIdentity: game.stableDetailIdentity) ??
             game
-        guard settings.liveActivitiesEnabled,
-              liveActivitySupported,
-              shouldAutoStartLiveActivity(for: resolvedGame),
-              let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: resolvedGame, favoriteTeamID: settings.favoriteTeamID) else {
+
+        guard settings.liveActivitiesEnabled else {
+            #if DEBUG
+            logLiveActivityAutoStartSkipped(reason: "disabledInSettings", game: resolvedGame)
+            #endif
+            return
+        }
+
+        guard liveActivitySupported else {
+            return
+        }
+
+        guard resolvedGame.involves(teamID: settings.favoriteTeamID) else {
+            return
+        }
+
+        let eligibilityDecision = LiveActivityAutoStartEligibility.decision(
+            for: resolvedGame,
+            now: currentDateProvider()
+        )
+        guard eligibilityDecision == .eligible else {
+            #if DEBUG
+            logLiveActivityAutoStartSkipped(reason: eligibilityDecision.logReason, game: resolvedGame)
+            #endif
+            return
+        }
+
+        #if DEBUG
+        print("[LiveActivityAutoStart] eligible gameID=\(resolvedGame.id.uuidString) status=\(resolvedGame.status.rawValue) scheduledAt=\(resolvedGame.scheduledStart)")
+        #endif
+
+        guard let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: resolvedGame, favoriteTeamID: settings.favoriteTeamID) else {
             return
         }
 
@@ -1793,6 +1825,12 @@ final class AppModel {
             #endif
         }
     }
+
+    #if DEBUG
+    private func logLiveActivityAutoStartSkipped(reason: String, game: GameDetail) {
+        print("[LiveActivityAutoStart] skipped reason=\(reason) gameID=\(game.id.uuidString) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
+    }
+    #endif
 
     func isGameAlertEnabled(for gameID: UUID) -> Bool {
         gameAlertOverrides[gameID, default: true]

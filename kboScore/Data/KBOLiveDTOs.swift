@@ -599,7 +599,10 @@ enum KBODataMapper {
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .joined(separator: " ")
 
-        if normalized.contains("cancel") || normalized.contains("취소") {
+        if normalized.contains("cancel") ||
+            normalized.contains("postpon") ||
+            normalized.contains("취소") ||
+            normalized.contains("연기") {
             return .cancelled
         }
 
