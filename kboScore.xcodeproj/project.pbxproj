@@ -13,7 +13,7 @@
 		9A7B13E42F9B0BC500A2FCEA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 9A7B13E32F9B0BC500A2FCEA /* Supabase */; };
 		A1B2C3D4E5F6000000000001 /* FavoriteTeamScheduleWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000003 /* FavoriteTeamScheduleWidget.swift */; };
 		A1B2C3D4E5F6000000000002 /* FavoriteTeamScheduleWidgetShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */; };
-		A1B2C3D4E5F6000000000006 /* kboScore/Models/Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */; };
+		A1B2C3D4E5F6000000000006 /* kboScore/Domain/Models/Team.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000009 /* kboScore/Domain/Models/Team.swift */; };
 		A1B2C3D4E5F6000000000007 /* kboScore/Models/TeamBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */; };
 		A1B2C3D4E5F6000000000008 /* kboScore/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */; };
 		C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19882FE9C0B099E95FE387FF /* KBOScoreLiveActivityWidget.swift */; };
@@ -66,7 +66,7 @@
 		9ACDD1C42F7418780049BF00 /* kboScoreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kboScoreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1B2C3D4E5F6000000000003 /* FavoriteTeamScheduleWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamScheduleWidget.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000004 /* FavoriteTeamScheduleWidgetShared.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamScheduleWidgetShared.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/Team.swift; sourceTree = SOURCE_ROOT; };
+		A1B2C3D4E5F6000000000009 /* kboScore/Domain/Models/Team.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Domain/Models/Team.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kboScore/Models/TeamBrand.swift; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = kboScore/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		C66A6C22655B55A1DBE41893 /* FavoriteTeamGameActivityAttributes.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FavoriteTeamGameActivityAttributes.swift; sourceTree = "<group>"; };
@@ -159,7 +159,7 @@
 				5D38420BBCAF36CC55B6F0FA /* kboScoreLiveActivityExtension */,
 				BD0D7A35B5EA04A6D30B0C32 /* LiveActivitiesShared */,
 				A1B2C3D4E5F6000000000005 /* kboScore/WidgetsShared */,
-				A1B2C3D4E5F6000000000009 /* kboScore/Models/Team.swift */,
+				A1B2C3D4E5F6000000000009 /* kboScore/Domain/Models/Team.swift */,
 				A1B2C3D4E5F600000000000A /* kboScore/Models/TeamBrand.swift */,
 				A1B2C3D4E5F600000000000B /* kboScore/Assets.xcassets */,
 			);
@@ -389,7 +389,7 @@
 				A1B2C3D4E5F6000000000002 /* FavoriteTeamScheduleWidgetShared.swift in Sources */,
 				A1B2C3D4E5F6000000000001 /* FavoriteTeamScheduleWidget.swift in Sources */,
 				A1B2C3D4E5F6000000000007 /* kboScore/Models/TeamBrand.swift in Sources */,
-				A1B2C3D4E5F6000000000006 /* kboScore/Models/Team.swift in Sources */,
+				A1B2C3D4E5F6000000000006 /* kboScore/Domain/Models/Team.swift in Sources */,
 				227A8A4633A90B208DCEED71 /* KBOScoreLiveActivityWidgetBundle.swift in Sources */,
 				C299A616D0114D44F7EC39C2 /* KBOScoreLiveActivityWidget.swift in Sources */,
 				0E9566BEBD854D9D1E4A685A /* FavoriteTeamGameActivityAttributes.swift in Sources */,
