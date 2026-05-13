@@ -117,6 +117,13 @@ protocol KBOGameDetailSnapshotDataSource: Sendable {
     ) async throws -> GameDetail?
 }
 
+protocol KBOGameIdentityResolutionDataSource: Sendable {
+    nonisolated func fetchGameDetailIdentitySnapshot(
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail?
+}
+
 struct KBOScheduleMissingGamesResult: Sendable {
     let remoteCount: Int
     let games: [GameDetail]

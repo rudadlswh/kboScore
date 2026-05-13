@@ -9,6 +9,7 @@ import Foundation
 
 enum SupabaseGameLookup: Sendable, Equatable {
     case providerGameID(String)
+    case officialProviderGameID(String)
     case publicGameID(String)
     case databaseID(UUID)
     case dateTeamIDs(gameDate: String, awayTeamID: UUID, homeTeamID: UUID)
@@ -18,6 +19,8 @@ enum SupabaseGameLookup: Sendable, Equatable {
         switch self {
         case .providerGameID:
             return "provider_game_id"
+        case .officialProviderGameID:
+            return "official_provider_game_id"
         case .publicGameID:
             return "public_game_id"
         case .databaseID:
@@ -31,7 +34,7 @@ enum SupabaseGameLookup: Sendable, Equatable {
 
     nonisolated var debugValue: String {
         switch self {
-        case .providerGameID(let value), .publicGameID(let value):
+        case .providerGameID(let value), .officialProviderGameID(let value), .publicGameID(let value):
             return value
         case .databaseID(let id):
             return id.uuidString
@@ -385,7 +388,46 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
 
 }
 
-extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource {
+extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource {
+    nonisolated func fetchGameDetailIdentitySnapshot(
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        let lookups = identityFallbackDetailLookups(for: identity)
+        guard lookups.isEmpty == false else { return nil }
+        let fetchedTeamRows = try await cachedTeamRows()
+
+        for lookup in lookups {
+            #if DEBUG
+            print("[GameDetailFetch] fallback query key=\(lookup.debugKey) value=\(lookup.debugValue)")
+            #endif
+            let rows = try await source.fetchGame(lookup: lookup)
+            #if DEBUG
+            print("[GameDetailFetch] fallback fetched count=\(rows.count)")
+            #endif
+            guard let row = rows.first else { continue }
+            let snapshot = try await source.fetchLatestSnapshot(gameID: row.id)
+            let mappedGames = SupabaseKBOMapper.mapGames(gameRows: [row], teamRows: fetchedTeamRows)
+            guard let baseMapped = mappedGames.first else { continue }
+            let mapped = SupabaseKBOMapper.mapGame(
+                row: row,
+                teamRows: fetchedTeamRows,
+                snapshot: snapshot,
+                fallbackGame: baseMapped
+            )
+            await runtimeState?.record(source: .supabase, delivery: .supabase)
+            #if DEBUG
+            print("[GameDetailFetch] fallback success publicGameID=\(mapped.publicGameID ?? "<nil>") providerGameID=\(mapped.providerGameID ?? "<nil>") officialProviderGameID=\(mapped.officialProviderGameID ?? "<nil>")")
+            #endif
+            return mapped
+        }
+
+        #if DEBUG
+        print("[GameDetailFetch] fallback failure selectedIdentity=\(identity)")
+        #endif
+        return nil
+    }
+
     nonisolated func fetchGameDetailSnapshot(
         for game: GameDetail,
         identity: String,
@@ -443,6 +485,60 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource {
         return nil
     }
 
+    nonisolated private func identityFallbackDetailLookups(for identity: String) -> [SupabaseGameLookup] {
+        let trimmed = identity.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return [] }
+        var lookups: [SupabaseGameLookup] = []
+        var seen: Set<String> = []
+
+        func append(_ lookup: SupabaseGameLookup) {
+            let key = "\(lookup.debugKey)=\(lookup.debugValue)"
+            guard seen.insert(key).inserted else { return }
+            lookups.append(lookup)
+        }
+
+        if trimmed.hasPrefix("public:") {
+            let value = String(trimmed.dropFirst("public:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.isEmpty == false {
+                append(.publicGameID(value))
+            }
+            return lookups
+        }
+
+        if trimmed.hasPrefix("provider:") {
+            let value = String(trimmed.dropFirst("provider:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.isEmpty == false {
+                append(.providerGameID(value))
+                append(.officialProviderGameID(value))
+            }
+            return lookups
+        }
+
+        if UUID(uuidString: trimmed) != nil {
+            return []
+        }
+
+        if trimmed.hasPrefix("sched-") {
+            append(.providerGameID(trimmed))
+            append(.officialProviderGameID(trimmed))
+            return lookups
+        }
+
+        if trimmed.contains("-") {
+            append(.publicGameID(trimmed))
+            append(.providerGameID(trimmed))
+            append(.officialProviderGameID(trimmed))
+            return lookups
+        }
+
+        append(.providerGameID(trimmed))
+        append(.officialProviderGameID(trimmed))
+        append(.publicGameID(trimmed))
+        return lookups
+    }
+
     nonisolated private func directDetailLookups(for game: GameDetail, identity: String) -> [SupabaseGameLookup] {
         var lookups: [SupabaseGameLookup] = []
         var seen: Set<String> = []
@@ -453,12 +549,23 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource {
             lookups.append(lookup)
         }
 
-        if let providerGameID = game.officialGameCenterID?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let providerGameID = game.providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
             append(.providerGameID(providerGameID))
         }
+        if let officialProviderGameID = game.officialProviderGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           officialProviderGameID.isEmpty == false {
+            append(.providerGameID(officialProviderGameID))
+        }
         if let publicGameID = game.supabaseNoteToken("public_game_id") {
             append(.publicGameID(publicGameID))
+        }
+        if identity.hasPrefix("provider:") {
+            let providerGameID = String(identity.dropFirst("provider:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if providerGameID.isEmpty == false {
+                append(.providerGameID(providerGameID))
+            }
         }
         if identity.hasPrefix("public:") {
             let publicGameID = String(identity.dropFirst("public:".count))
@@ -835,6 +942,14 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .from("games")
                 .select(Self.gameSelectColumns)
                 .eq("provider_game_id", value: providerGameID)
+                .limit(1)
+                .execute()
+                .value
+        case .officialProviderGameID(let officialProviderGameID):
+            rows = try await database
+                .from("games")
+                .select(Self.gameSelectColumns)
+                .eq("official_provider_game_id", value: officialProviderGameID)
                 .limit(1)
                 .execute()
                 .value

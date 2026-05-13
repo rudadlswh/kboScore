@@ -176,7 +176,13 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 
     nonisolated var officialGameCenterID: String? {
-        providerGameID ?? Self.providerGameID(from: note)
+        officialProviderGameID ?? providerGameID ?? Self.providerGameID(from: note)
+    }
+
+    nonisolated var officialProviderGameID: String? {
+        Self.noteValue("official_provider_game_id", from: note) ??
+            Self.officialProviderFallback(from: providerGameID) ??
+            Self.officialProviderFallback(from: Self.providerGameID(from: note))
     }
 
     nonisolated var publicGameID: String? {
@@ -215,13 +221,43 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
            providerGameID.isEmpty == false {
             aliases.insert(GameIdentifier.providerKey(providerGameID))
         }
-        if let officialGameCenterID = Self.providerGameID(from: note) {
-            aliases.insert(GameIdentifier.providerKey(officialGameCenterID))
+        if let officialProviderGameID {
+            aliases.insert(GameIdentifier.providerKey(officialProviderGameID))
         }
         if let publicGameID = Self.noteValue("public_game_id", from: note) {
             aliases.insert("public:\(publicGameID.lowercased())")
         }
         return aliases
+    }
+
+    nonisolated var gameIdentityMatchTokens: [GameIdentifier.IdentityMatchToken] {
+        var tokens: [GameIdentifier.IdentityMatchToken] = []
+        var seen: Set<String> = []
+
+        func append(_ value: String?, priority: Int, reason: String) {
+            guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  value.isEmpty == false,
+                  seen.insert("\(priority)::\(value)").inserted else { return }
+            tokens.append(GameIdentifier.IdentityMatchToken(value: value, priority: priority, reason: reason))
+        }
+
+        if let publicGameID {
+            append(publicGameID, priority: 1, reason: "publicGameID")
+            append("public:\(publicGameID)", priority: 2, reason: "publicStableIdentity")
+            append("public:\(publicGameID.lowercased())", priority: 7, reason: "stableIdentityAlias")
+        }
+        if let officialProviderGameID {
+            append(officialProviderGameID, priority: 3, reason: "officialProviderGameID")
+            append(GameIdentifier.providerKey(officialProviderGameID), priority: 4, reason: "officialProviderStableIdentity")
+        }
+        if let providerGameID {
+            append(providerGameID, priority: 5, reason: "providerGameID")
+            append(GameIdentifier.providerKey(providerGameID), priority: 6, reason: "providerStableIdentity")
+        }
+        append(stableDetailIdentity, priority: 7, reason: "stableDetailIdentity")
+        append(canonicalGameIdentityKey, priority: 7, reason: "canonicalGameIdentityKey")
+        append(GameIdentifier.idKey(id), priority: 7, reason: "databaseID")
+        return tokens
     }
 
     nonisolated var attendanceStorageKey: String {
@@ -276,6 +312,16 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
     nonisolated private static func providerGameID(from note: String?) -> String? {
         noteValue("provider_game_id", from: note)
+    }
+
+    nonisolated private static func officialProviderFallback(from value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.count >= 9,
+              value.hasPrefix("sched-") == false,
+              value.prefix(8).allSatisfy(\.isNumber) else {
+            return nil
+        }
+        return value
     }
 
     nonisolated private static func noteValue(_ key: String, from note: String?) -> String? {

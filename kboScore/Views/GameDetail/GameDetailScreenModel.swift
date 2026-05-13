@@ -244,7 +244,16 @@ final class GameDetailViewModel: ObservableObject {
         if game == nil {
             configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: requestedIdentity))
         }
+        if game == nil {
+            let fetched = await appModel.refreshGameDetail(for: requestedIdentity, forceRefresh: manual)
+            if let fetched {
+                apply(fetched)
+                return fetched
+            }
+            return nil
+        }
         guard let currentGame = game else { return nil }
+        let refreshIdentity = requestedIdentity
 
         if manual == false, bypassAutomaticThrottle == false {
             if let lastAutomaticRefreshAt,
@@ -252,21 +261,21 @@ final class GameDetailViewModel: ObservableObject {
                 return game
             }
 
-            if let recentRefresh = Self.recentAutomaticRefreshesByStableIdentity[stableIdentity],
+            if let recentRefresh = Self.recentAutomaticRefreshesByStableIdentity[refreshIdentity],
                Date().timeIntervalSince(recentRefresh.date) < Self.automaticRefreshStableIdentityThrottle {
                 if recentRefresh.game != game {
                     apply(recentRefresh.game)
                 }
                 #if DEBUG
-                print("GameDetailFetch skipped recent stableIdentity=\(stableIdentity)")
+                print("GameDetailFetch skipped recent stableIdentity=\(refreshIdentity)")
                 #endif
                 return game
             }
         }
 
-        if let inFlightRefresh = Self.inFlightRefreshesByStableIdentity[stableIdentity] {
+        if let inFlightRefresh = Self.inFlightRefreshesByStableIdentity[refreshIdentity] {
             #if DEBUG
-            print("GameDetailFetch deduped awaitExistingFetch stableIdentity=\(stableIdentity)")
+            print("GameDetailFetch deduped awaitExistingFetch stableIdentity=\(refreshIdentity)")
             #endif
             if let fetched = await inFlightRefresh.value {
                 apply(fetched)
@@ -280,17 +289,16 @@ final class GameDetailViewModel: ObservableObject {
         }
 
         #if DEBUG
-        print("GameDetailFetch start stableIdentity=\(stableIdentity)")
+        print("GameDetailFetch start stableIdentity=\(refreshIdentity)")
         #endif
-        let identity = stableIdentity
         let task = Task { @MainActor in
-            await appModel.refreshGameDetail(for: identity, forceRefresh: manual)
+            await appModel.refreshGameDetail(for: refreshIdentity, forceRefresh: manual)
         }
-        Self.inFlightRefreshesByStableIdentity[stableIdentity] = task
+        Self.inFlightRefreshesByStableIdentity[refreshIdentity] = task
         let fetched = await task.value
-        Self.inFlightRefreshesByStableIdentity[stableIdentity] = nil
+        Self.inFlightRefreshesByStableIdentity[refreshIdentity] = nil
         if manual == false {
-            Self.recentAutomaticRefreshesByStableIdentity[stableIdentity] = (Date(), fetched ?? currentGame)
+            Self.recentAutomaticRefreshesByStableIdentity[refreshIdentity] = (Date(), fetched ?? currentGame)
         }
         if let fetched {
             apply(fetched)

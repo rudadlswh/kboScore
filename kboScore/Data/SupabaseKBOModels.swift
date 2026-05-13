@@ -365,6 +365,7 @@ enum SupabaseKBOMapper {
                 provider: row.provider,
                 publicGameID: row.publicGameID,
                 providerGameID: classifiedRow.providerGameID,
+                officialProviderGameID: row.officialProviderGameID,
                 sourceUpdatedAt: row.sourceUpdatedAt,
                 updatedAt: row.updatedAt,
                 liveLastCheckedAt: row.liveLastCheckedAt,
@@ -393,6 +394,7 @@ enum SupabaseKBOMapper {
         provider: String?,
         publicGameID: String?,
         providerGameID: String?,
+        officialProviderGameID: String?,
         sourceUpdatedAt: Date?,
         updatedAt: Date?,
         liveLastCheckedAt: Date?,
@@ -408,6 +410,10 @@ enum SupabaseKBOMapper {
         }
         if let providerGameID = providerGameID?.nilIfBlank {
             components.append("provider_game_id=\(providerGameID)")
+        }
+        if let officialProviderGameID = officialProviderGameID?.nilIfBlank,
+           officialProviderGameID != providerGameID?.nilIfBlank {
+            components.append("official_provider_game_id=\(officialProviderGameID)")
         }
         if let sourceUpdatedAt {
             components.append("source_updated_at=\(SupabaseDateParser.debugTimestamp(sourceUpdatedAt))")

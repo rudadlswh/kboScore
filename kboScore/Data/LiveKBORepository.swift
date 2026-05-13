@@ -1386,7 +1386,7 @@ private actor RepositoryResponseCache {
     }
 }
 
-struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
@@ -1399,6 +1399,7 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
     private let replaceLocalTeamRanksBlock: (@Sendable ([TeamRankRow], Int) async -> Int)?
     private let fetchFavoriteTeamScheduleBlock: (@Sendable (Date, Team.ID, Bool) async throws -> [GameDetail])?
     private let fetchGameDetailSnapshotBlock: (@Sendable (GameDetail, String, [Team]) async throws -> GameDetail?)?
+    private let fetchGameDetailIdentitySnapshotBlock: (@Sendable (String, [Team]) async throws -> GameDetail?)?
     private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
     private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
     private let upsertLocalGamesBlock: (@Sendable ([GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int))?
@@ -1453,6 +1454,13 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
             }
         } else {
             fetchGameDetailSnapshotBlock = nil
+        }
+        if let identitySource = base as? any KBOGameIdentityResolutionDataSource {
+            fetchGameDetailIdentitySnapshotBlock = { identity, cachedTeams in
+                try await identitySource.fetchGameDetailIdentitySnapshot(identity: identity, cachedTeams: cachedTeams)
+            }
+        } else {
+            fetchGameDetailIdentitySnapshotBlock = nil
         }
         if let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource {
             fetchRemoteGameCountBlock = { try await scheduleSyncSource.fetchRemoteGameCount() }
@@ -1544,6 +1552,14 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
         return try await fetchGameDetailSnapshotBlock(game, identity, cachedTeams)
     }
 
+    nonisolated func fetchGameDetailIdentitySnapshot(
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let fetchGameDetailIdentitySnapshotBlock else { return nil }
+        return try await fetchGameDetailIdentitySnapshotBlock(identity, cachedTeams)
+    }
+
     nonisolated func fetchRemoteGameCount() async throws -> Int {
         guard let fetchRemoteGameCountBlock else {
             throw KBOScheduleSyncError.unsupported
@@ -1566,7 +1582,7 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
     }
 }
 
-struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, KBOStandingsGameDataSource, KBOGameDetailSnapshotDataSource, Sendable {
+struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, KBOStandingsGameDataSource, KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource, Sendable {
     let base: Base
     let source: RepositoryDataSourceKind
     let delivery: RepositoryDeliverySourceKind
@@ -1638,9 +1654,23 @@ struct RuntimeStateReportingRepository<Base: KBORepository>: KBORepository, KBOS
         }
         return value
     }
+
+    nonisolated func fetchGameDetailIdentitySnapshot(
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let identitySource = base as? any KBOGameIdentityResolutionDataSource else {
+            return nil
+        }
+        let value = try await identitySource.fetchGameDetailIdentitySnapshot(identity: identity, cachedTeams: cachedTeams)
+        if value != nil {
+            await runtimeState?.record(source: source, delivery: delivery)
+        }
+        return value
+    }
 }
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -1782,6 +1812,16 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamS
             return nil
         }
         return try await detailSource.fetchGameDetailSnapshot(for: game, identity: identity, cachedTeams: cachedTeams)
+    }
+
+    nonisolated func fetchGameDetailIdentitySnapshot(
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetail? {
+        guard let identitySource = base as? any KBOGameIdentityResolutionDataSource else {
+            return nil
+        }
+        return try await identitySource.fetchGameDetailIdentitySnapshot(identity: identity, cachedTeams: cachedTeams)
     }
 
     nonisolated func fetchRemoteGameCount() async throws -> Int {

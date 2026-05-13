@@ -1525,28 +1525,17 @@ final class AppModel {
     }
 
     func game(withIdentity gameIdentity: String) -> GameDetail? {
-        let lookupKeys = GameIdentifier.lookupKeys(from: gameIdentity)
-        guard lookupKeys.isEmpty == false else { return nil }
+        selectedGameMatch(for: gameIdentity)?.game
+    }
 
-        let providerKeys = lookupKeys.filter { $0.hasPrefix("provider:") }
-        if let providerMatch = preferredGame(matchingAnyOf: providerKeys) {
-            return providerMatch
+    func resolveGameDetailSelection(for gameIdentity: String) async -> GameDetail? {
+        if let match = selectedGameMatch(for: gameIdentity) {
+            #if DEBUG
+            print("[GameDetailFetch] selectedGame resolved selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
+            #endif
+            return match.game
         }
-
-        let publicKeys = lookupKeys.filter { $0.hasPrefix("public:") }
-        if let publicMatch = preferredGame(matchingAnyOf: publicKeys) {
-            return publicMatch
-        }
-
-        let idKeys = lookupKeys.filter { $0.hasPrefix("id:") }
-        if let idMatch = preferredGame(matchingAnyOf: idKeys) {
-            let resolved = equivalentGames(to: idMatch).reduce(idMatch) { preferred, candidate in
-                preferredKnownScheduleGame(existing: preferred, candidate: candidate)
-            }
-            return resolved
-        }
-
-        return nil
+        return await fetchSelectedGameFromRepository(for: gameIdentity)
     }
 
     func fetchIsolatedGameDetailSnapshot(
@@ -1574,7 +1563,7 @@ final class AppModel {
 
     @discardableResult
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
-        guard let selectedGame = game(withIdentity: gameIdentity) else {
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else {
             #if DEBUG
             debugLogMissingSelectedGame(gameIdentity)
             #endif
@@ -1609,6 +1598,49 @@ final class AppModel {
         inFlightGameDetailRefreshTasks[stableRefreshKey] = nil
         lastGameDetailRefreshAt[stableRefreshKey] = currentDateProvider()
         return result
+    }
+
+    private func fetchSelectedGameFromRepository(for gameIdentity: String) async -> GameDetail? {
+        #if DEBUG
+        debugLogLocalCandidateMiss(gameIdentity)
+        #endif
+        guard let identitySource = repository as? any KBOGameIdentityResolutionDataSource else {
+            #if DEBUG
+            print("[GameDetailFetch] fallback failure selectedIdentity=\(gameIdentity) reason=unsupportedRepository")
+            #endif
+            return nil
+        }
+
+        do {
+            guard let fetchedGame = try await identitySource.fetchGameDetailIdentitySnapshot(
+                identity: gameIdentity,
+                cachedTeams: teams
+            ) else {
+                #if DEBUG
+                print("[GameDetailFetch] fallback failure selectedIdentity=\(gameIdentity) reason=noRows")
+                #endif
+                return nil
+            }
+            let upsertResult = upsertScheduleGamesIntoLocalStore([fetchedGame])
+            let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([fetchedGame])
+            refreshLoadedScheduleMonthsFromLocalStore(including: scheduleMonthKey(for: fetchedGame.scheduledStart))
+            #if DEBUG
+            print("[GameDetailFetch] fallback selectedGame resolved selectedIdentity=\(gameIdentity) publicGameID=\(fetchedGame.publicGameID ?? "<nil>") providerGameID=\(fetchedGame.providerGameID ?? "<nil>") officialProviderGameID=\(fetchedGame.officialProviderGameID ?? "<nil>") localInserted=\(upsertResult.inserted) localUpdated=\(upsertResult.updated) cacheInserted=\(cacheUpsertResult.inserted) cacheUpdated=\(cacheUpsertResult.updated)")
+            #endif
+            return game(withIdentity: fetchedGame.canonicalGameIdentityValue) ??
+                game(withIdentity: gameIdentity) ??
+                fetchedGame
+        } catch is CancellationError {
+            #if DEBUG
+            print("[GameDetailFetch] fallback failure selectedIdentity=\(gameIdentity) reason=cancelled")
+            #endif
+            return nil
+        } catch {
+            #if DEBUG
+            print("[GameDetailFetch] fallback failure selectedIdentity=\(gameIdentity) error=\(error)")
+            #endif
+            return nil
+        }
     }
 
     private func performRefreshGameDetail(
@@ -3828,30 +3860,75 @@ final class AppModel {
         ].joined()
     }
 
-    private func preferredGame(matchingAnyOf lookupKeys: [String]) -> GameDetail? {
-        guard lookupKeys.isEmpty == false else { return nil }
-        let lookupKeySet = Set(lookupKeys)
-        let matches = allKnownGames().filter { game in
-            identityAliases(for: game).isDisjoint(with: lookupKeySet) == false
+    private struct SelectedGameMatch {
+        let game: GameDetail
+        let priority: Int
+        let token: String
+        let reason: String
+    }
+
+    private func selectedGameMatch(for gameIdentity: String) -> SelectedGameMatch? {
+        let requestTokens = GameIdentifier.requestedIdentityTokens(from: gameIdentity)
+        guard requestTokens.isEmpty == false else { return nil }
+
+        let matches = allKnownGames().compactMap { game -> SelectedGameMatch? in
+            guard let match = GameIdentifier.bestMatch(
+                requestTokens: requestTokens,
+                candidateTokens: identityMatchTokens(for: game)
+            ) else {
+                return nil
+            }
+            return SelectedGameMatch(game: game, priority: match.priority, token: match.token, reason: match.reason)
         }
-        return matches.reduce(nil) { preferred, candidate in
-            preferredKnownScheduleGame(existing: preferred, candidate: candidate)
+
+        guard let bestPriority = matches.map(\.priority).min() else { return nil }
+        let bestMatches = matches.filter { $0.priority == bestPriority }
+        let publicIDs = Set(bestMatches.compactMap { nonBlank($0.game.publicGameID) })
+        if bestMatches.count > 1, publicIDs.count > 1 {
+            #if DEBUG
+            print("[GameDetailFetch] selectedGame ambiguous selectedIdentity=\(gameIdentity) priority=\(bestPriority) token=\(bestMatches.map(\.token).sorted().joined(separator: ",")) publicIDs=\(publicIDs.sorted().joined(separator: ","))")
+            #endif
+            return nil
         }
+
+        let selected = bestMatches.reduce(nil as GameDetail?) { preferred, match in
+            preferredKnownScheduleGame(existing: preferred, candidate: match.game)
+        }
+        guard let selected else { return nil }
+        let reason = bestMatches.first?.reason ?? "unknown"
+        let token = bestMatches.first?.token ?? ""
+        return SelectedGameMatch(game: selected, priority: bestPriority, token: token, reason: reason)
     }
 
     #if DEBUG
+    private func debugLogLocalCandidateMiss(_ gameIdentity: String) {
+        let rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
+        let candidates = allKnownGames()
+        let requestTokens = GameIdentifier.requestedIdentityTokens(from: gameIdentity)
+            .sorted()
+            .joined(separator: ",")
+        print("[GameDetailFetch] selectedGame localMiss selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) candidateCount=\(candidates.count) requestedTokens=[\(requestTokens)]")
+    }
+
     private func debugLogMissingSelectedGame(_ gameIdentity: String) {
         let rawIdentifier: String
-        if let separator = gameIdentity.firstIndex(of: ":") {
-            rawIdentifier = String(gameIdentity[gameIdentity.index(after: separator)...])
-        } else {
-            rawIdentifier = gameIdentity
-        }
+        rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
         let candidates = allKnownGames()
         let hasPublicIDs = candidates.contains { nonBlank($0.publicGameID) != nil }
         let hasProviderIDs = candidates.contains { nonBlank($0.providerGameID) != nil }
-        let hasOfficialIDs = candidates.contains { nonBlank($0.officialGameCenterID) != nil }
-        print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) skipped=noSelectedGame candidateCount=\(candidates.count) hasPublicIDs=\(hasPublicIDs) hasProviderIDs=\(hasProviderIDs) hasOfficialIDs=\(hasOfficialIDs)")
+        let hasOfficialIDs = candidates.contains { nonBlank($0.officialProviderGameID) != nil }
+        let requestTokens = GameIdentifier.requestedIdentityTokens(from: gameIdentity)
+            .sorted()
+            .joined(separator: ",")
+        let candidateDescriptions = candidates.map { candidate in
+            let tokens = identityMatchTokens(for: candidate)
+                .map { "\($0.priority):\($0.value)" }
+                .sorted()
+                .joined(separator: "|")
+            return "public=\(candidate.publicGameID ?? "<nil>") provider=\(candidate.providerGameID ?? "<nil>") official=\(candidate.officialProviderGameID ?? "<nil>") stable=\(candidate.stableDetailIdentity) tokens=[\(tokens)]"
+        }
+            .joined(separator: " ; ")
+        print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) skipped=noSelectedGame candidateCount=\(candidates.count) hasPublicIDs=\(hasPublicIDs) hasProviderIDs=\(hasProviderIDs) hasOfficialIDs=\(hasOfficialIDs) requestedTokens=[\(requestTokens)] candidates=\(candidateDescriptions)")
     }
     #endif
 
@@ -3881,6 +3958,10 @@ final class AppModel {
 
     private func identityAliases(for game: GameDetail) -> Set<String> {
         game.gameIdentityAliases
+    }
+
+    private func identityMatchTokens(for game: GameDetail) -> [GameIdentifier.IdentityMatchToken] {
+        game.gameIdentityMatchTokens
     }
 
     private func attendanceEquivalentKeys(for game: GameDetail) -> Set<String> {

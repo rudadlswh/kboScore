@@ -522,6 +522,34 @@ struct kboScoreTests {
         #expect(row.homeScore == 5)
     }
 
+    @Test func supabaseMapperPreservesScheduledAndOfficialProviderIdentifiers() throws {
+        let awayTeamID = UUID(uuidString: "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa")!
+        let homeTeamID = UUID(uuidString: "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb")!
+        let row = try makeSupabaseGameRow(
+            id: UUID(uuidString: "cccccccc-3333-3333-3333-cccccccccccc")!,
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-799034c4-c5d5aa85",
+            officialProviderGameID: "20260508HTLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 4,
+            homeScore: 3,
+            inningState: "Final"
+        )
+
+        let game = SupabaseKBOMapper.mapGames(
+            gameRows: [row],
+            teamRows: [
+                SupabaseTeamRow(id: awayTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데"),
+                SupabaseTeamRow(id: homeTeamID, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+            ]
+        )[0]
+
+        #expect(game.providerGameID == "sched-202605080930-799034c4-c5d5aa85")
+        #expect(game.officialProviderGameID == "20260508HTLT0")
+        #expect(game.publicGameID == "20260508-LOT-KIA")
+    }
+
     @Test func supabaseLatestSnapshotMapsCurrentBatterAndPitcherFields() throws {
         let gameID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
         let row = try JSONDecoder().decode(
@@ -883,6 +911,394 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "provider:20260509HTLT0")?.publicGameID == "20260509-LOT-KIA")
         #expect(model.game(withIdentity: "20260509-LOT-KIA")?.providerGameID == "20260509HTLT0")
         #expect(model.game(withIdentity: "public:20260509-LOT-KIA")?.providerGameID == "20260509HTLT0")
+    }
+
+    @Test func gameLookupResolvesOfficialAndScheduledProviderIdentities() throws {
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "08080808-0808-0808-0808-080808080808")!,
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-799034c4-c5d5aa85",
+            officialProviderGameID: "20260508HTLT0",
+            scheduledStart: isoDate("2026-05-08T18:30:00+09:00")
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: "provider:20260508HTLT0")?.publicGameID == "20260508-LOT-KIA")
+        #expect(model.game(withIdentity: "20260508HTLT0")?.publicGameID == "20260508-LOT-KIA")
+        #expect(model.game(withIdentity: "provider:sched-202605080930-799034c4-c5d5aa85")?.publicGameID == "20260508-LOT-KIA")
+        #expect(model.game(withIdentity: "sched-202605080930-799034c4-c5d5aa85")?.publicGameID == "20260508-LOT-KIA")
+        #expect(model.game(withIdentity: "public:20260508-LOT-KIA")?.publicGameID == "20260508-LOT-KIA")
+        #expect(model.game(withIdentity: "20260508-LOT-KIA")?.publicGameID == "20260508-LOT-KIA")
+    }
+
+    @Test func gameLookupResolvesRawOfficialProviderIdentity() throws {
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "09090909-0909-0909-0909-090909090901")!,
+            publicGameID: "20260509-LOT-KIA",
+            providerGameID: "sched-202605091700-799034c4-c5d5aa85",
+            officialProviderGameID: "20260509HTLT0",
+            scheduledStart: isoDate("2026-05-09T17:00:00+09:00")
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: "20260509HTLT0")?.publicGameID == "20260509-LOT-KIA")
+    }
+
+    @Test func gameLookupKeepsKnownScheduledProviderStableIdentityWorking() throws {
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131313")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: "provider:sched-202605130930-c5d5aa85-89747089")?.publicGameID == "20260513-KIW-HAN")
+    }
+
+    @Test func gameLookupDoesNotChooseAmbiguousSamePriorityProviderMatch() throws {
+        let first = try makeIdentityLookupGame(
+            id: UUID(uuidString: "08080808-0808-0808-0808-080808080801")!,
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-aaaaaaaa-bbbbbbbb",
+            officialProviderGameID: "20260508HTLT0",
+            scheduledStart: isoDate("2026-05-08T18:30:00+09:00")
+        )
+        let second = try makeIdentityLookupGame(
+            id: UUID(uuidString: "08080808-0808-0808-0808-080808080802")!,
+            publicGameID: "20260508-KIA-LOT",
+            providerGameID: "sched-202605080930-cccccccc-dddddddd",
+            officialProviderGameID: "20260508HTLT0",
+            scheduledStart: isoDate("2026-05-08T18:30:00+09:00"),
+            awayTeamID: "kia",
+            homeTeamID: "lotte"
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [first, second], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: "provider:20260508HTLT0") == nil)
+    }
+
+    @Test func gameDetailBoxscoreUsesPublicIDAfterOfficialProviderResolution() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "08080808-0808-0808-0808-080808080803")!,
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-799034c4-c5d5aa85",
+            officialProviderGameID: "20260508HTLT0",
+            scheduledStart: isoDate("2026-05-08T18:30:00+09:00")
+        )
+        let appModel = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        let selected = try #require(appModel.game(withIdentity: "provider:20260508HTLT0"))
+        let state = RecordingBoxscoreState(result: .success(GameBoxscoreResponse.empty(gameId: "20260508-LOT-KIA")))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+
+        await model.load(for: selected)
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(await state.requestedGameIDs == ["20260508-LOT-KIA"])
+    }
+
+    @Test func gameDetailRefreshFallsBackToRepositoryWhenOfficialProviderMissingLocally() async throws {
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131301")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260509-LG-HAN",
+            providerGameID: "sched-202605091700-lg-hanwha",
+            officialProviderGameID: "20260509LGHH0",
+            awayCode: "lg",
+            homeCode: "hanwha"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: "provider:20260509LGHH0", forceRefresh: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed?.publicGameID == "20260509-LG-HAN")
+        #expect(model.game(withIdentity: "provider:20260509LGHH0")?.publicGameID == "20260509-LG-HAN")
+        #expect(Array(lookups.prefix(2)) == [
+            .providerGameID("20260509LGHH0"),
+            .officialProviderGameID("20260509LGHH0")
+        ])
+    }
+
+    @Test func gameDetailViewModelWithoutInitialGameUsesFallbackForRequestedIdentity() async throws {
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131306")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260509-LG-HAN",
+            providerGameID: "sched-202605091700-lg-hanwha",
+            officialProviderGameID: "20260509LGHH0",
+            awayCode: "lg",
+            homeCode: "hanwha"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        let viewModel = GameDetailViewModel(gameIdentity: "provider:20260509LGHH0", initialGame: nil)
+
+        let refreshed = await viewModel.refreshIfNeeded(appModel: model, manual: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed?.publicGameID == "20260509-LG-HAN")
+        #expect(viewModel.game?.publicGameID == "20260509-LG-HAN")
+        #expect(Array(lookups.prefix(2)) == [
+            .providerGameID("20260509LGHH0"),
+            .officialProviderGameID("20260509LGHH0")
+        ])
+    }
+
+    @Test func gameDetailFallbackByOfficialProviderUsesPublicGameIDForBoxscore() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131302")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260509-LOT-KIA",
+            providerGameID: "sched-202605091700-799034c4-c5d5aa85",
+            officialProviderGameID: "20260509HTLT0",
+            awayCode: "lotte",
+            homeCode: "kia"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let appModel = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        let selected = try #require(await appModel.refreshGameDetail(for: "provider:20260509HTLT0", forceRefresh: true))
+        let boxscoreState = RecordingBoxscoreState(result: .success(GameBoxscoreResponse.empty(gameId: "20260509-LOT-KIA")))
+        let screenModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: boxscoreState),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+
+        await screenModel.load(for: selected)
+        await screenModel.waitForBoxscoreLoadForTesting()
+
+        #expect(selected.publicGameID == "20260509-LOT-KIA")
+        #expect(await boxscoreState.requestedGameIDs == ["20260509-LOT-KIA"])
+    }
+
+    @Test func gameDetailRefreshKeepsExistingProviderFallbackBehavior() async throws {
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131307")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260502-KIW-DOO",
+            providerGameID: "20260502OBWO0",
+            officialProviderGameID: nil,
+            awayCode: "kiwoom",
+            homeCode: "doosan"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: "provider:20260502OBWO0", forceRefresh: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed?.publicGameID == "20260502-KIW-DOO")
+        #expect(lookups.first == .providerGameID("20260502OBWO0"))
+    }
+
+    @Test func gameDetailRefreshFallsBackToRepositoryByScheduledProviderID() async throws {
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131303")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-799034c4-c5d5aa85",
+            officialProviderGameID: "20260508HTLT0",
+            awayCode: "lotte",
+            homeCode: "kia"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: "provider:sched-202605080930-799034c4-c5d5aa85", forceRefresh: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed?.publicGameID == "20260508-LOT-KIA")
+        #expect(lookups.first == .providerGameID("sched-202605080930-799034c4-c5d5aa85"))
+    }
+
+    @Test func gameDetailRefreshUsesLocalCandidateWithoutIdentityFallback() async throws {
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            awayCode: "kiwoom",
+            homeCode: "hanwha"
+        )
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131304")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: "provider:sched-202605130930-c5d5aa85-89747089", forceRefresh: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed?.publicGameID == "20260513-KIW-HAN")
+        #expect(lookups == [.providerGameID("sched-202605130930-c5d5aa85-89747089")])
+    }
+
+    @Test func gameDetailRefreshKeepsNoSelectedGameWhenIdentityFallbackMisses() async throws {
+        let unrelated = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131305")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+        let source = try makeIdentityFallbackSupabaseSource(
+            publicGameID: "20260508-LOT-KIA",
+            providerGameID: "sched-202605080930-799034c4-c5d5aa85",
+            officialProviderGameID: "20260508HTLT0",
+            awayCode: "lotte",
+            homeCode: "kia"
+        )
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default)
+            }),
+            source: source.supabaseSource,
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [unrelated], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: "provider:20260509LGHH0", forceRefresh: true)
+        let lookups = await source.tracker.singleLookups
+
+        #expect(refreshed == nil)
+        #expect(lookups == [
+            .providerGameID("20260509LGHH0"),
+            .officialProviderGameID("20260509LGHH0")
+        ])
     }
 
     @Test func gameCenterReviewReportsDisplayableRecordsWhenBattingLinesExist() throws {
@@ -8083,6 +8499,8 @@ private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
             switch lookup {
             case .providerGameID(let providerGameID):
                 return row.providerGameID == providerGameID
+            case .officialProviderGameID(let officialProviderGameID):
+                return row.officialProviderGameID == officialProviderGameID
             case .publicGameID(let publicGameID):
                 return row.publicGameID == publicGameID
             case .databaseID(let id):
@@ -8180,6 +8598,8 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
             switch lookup {
             case .providerGameID(let providerGameID):
                 return row.providerGameID == providerGameID
+            case .officialProviderGameID(let officialProviderGameID):
+                return row.officialProviderGameID == officialProviderGameID
             case .publicGameID(let publicGameID):
                 return row.publicGameID == publicGameID
             case .databaseID(let id):
@@ -8532,6 +8952,125 @@ private func makeBoxscoreDetailGame() throws -> GameDetail {
         note: "public_game_id=20260510-DOO-SSG provider_game_id=20260510SKOB0",
         providerGameID: "20260510SKOB0"
     )
+}
+
+private func makeIdentityLookupGame(
+    id: UUID,
+    publicGameID: String,
+    providerGameID: String,
+    officialProviderGameID: String?,
+    scheduledStart: Date,
+    awayTeamID: String = "lotte",
+    homeTeamID: String = "kia"
+) throws -> GameDetail {
+    let teams = MockKBOData.makeBootstrap().teams
+    let awayTeam = try #require(teams.first(where: { $0.id == awayTeamID }))
+    let homeTeam = try #require(teams.first(where: { $0.id == homeTeamID }))
+    let officialToken = officialProviderGameID.map { " official_provider_game_id=\($0)" } ?? ""
+    return makeGameDetail(
+        id: id,
+        scheduledStart: scheduledStart,
+        venue: "광주",
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: 4,
+        homeScore: 3,
+        status: .final,
+        seasonClassification: .regularSeason,
+        note: "public_game_id=\(publicGameID) provider_game_id=\(providerGameID)\(officialToken)",
+        providerGameID: providerGameID
+    )
+}
+
+private struct IdentityFallbackSupabaseFixture {
+    let tracker: DetailFetchTracker
+    let supabaseSource: TrackingSupabaseSource
+}
+
+private func makeIdentityFallbackSupabaseSource(
+    publicGameID: String,
+    providerGameID: String,
+    officialProviderGameID: String?,
+    awayCode: String,
+    homeCode: String
+) throws -> IdentityFallbackSupabaseFixture {
+    let awayTeamID = supabaseTeamUUID(for: awayCode)
+    let homeTeamID = supabaseTeamUUID(for: homeCode)
+    let row = try makeSupabaseGameRow(
+        id: GameIdentifier.uuid(from: publicGameID) ?? UUID(),
+        publicGameID: publicGameID,
+        providerGameID: providerGameID,
+        officialProviderGameID: officialProviderGameID,
+        gameDate: supabaseGameDate(from: publicGameID),
+        scheduledAt: "\(supabaseGameDate(from: publicGameID))T18:30:00+09:00",
+        stadium: "잠실",
+        awayTeamID: awayTeamID,
+        homeTeamID: homeTeamID,
+        awayScore: 4,
+        homeScore: 3,
+        inningState: "Final"
+    )
+    let tracker = DetailFetchTracker()
+    return IdentityFallbackSupabaseFixture(
+        tracker: tracker,
+        supabaseSource: TrackingSupabaseSource(
+            teamRows: [
+                supabaseTeamRow(code: awayCode, id: awayTeamID),
+                supabaseTeamRow(code: homeCode, id: homeTeamID)
+            ],
+            gameRows: [row],
+            tracker: tracker
+        )
+    )
+}
+
+private func supabaseTeamUUID(for code: String) -> UUID {
+    switch code {
+    case "lg":
+        return UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+    case "hanwha":
+        return UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+    case "lotte":
+        return UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+    case "kia":
+        return UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+    case "kiwoom":
+        return UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+    case "doosan":
+        return UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+    default:
+        return GameIdentifier.uuid(from: code) ?? UUID()
+    }
+}
+
+private func supabaseTeamRow(code: String, id: UUID) -> SupabaseTeamRow {
+    switch code {
+    case "lg":
+        return SupabaseTeamRow(id: id, code: "lg", name: "LG 트윈스", shortName: "LG")
+    case "hanwha":
+        return SupabaseTeamRow(id: id, code: "hanwha", name: "한화 이글스", shortName: "한화")
+    case "lotte":
+        return SupabaseTeamRow(id: id, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+    case "kia":
+        return SupabaseTeamRow(id: id, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+    case "kiwoom":
+        return SupabaseTeamRow(id: id, code: "kiwoom", name: "키움 히어로즈", shortName: "키움")
+    case "doosan":
+        return SupabaseTeamRow(id: id, code: "doosan", name: "두산 베어스", shortName: "두산")
+    default:
+        return SupabaseTeamRow(id: id, code: code, name: code, shortName: code.uppercased())
+    }
+}
+
+private func supabaseGameDate(from publicGameID: String) -> String {
+    let compactDate = String(publicGameID.prefix(8))
+    guard compactDate.count == 8 else { return "2026-01-01" }
+    let year = compactDate.prefix(4)
+    let monthStart = compactDate.index(compactDate.startIndex, offsetBy: 4)
+    let monthEnd = compactDate.index(compactDate.startIndex, offsetBy: 6)
+    let month = compactDate[monthStart..<monthEnd]
+    let day = compactDate.suffix(2)
+    return "\(year)-\(month)-\(day)"
 }
 
 private func sampleGameCenterDetailPayload(game: GameDetail) -> GameCenterDetailPayload {
@@ -9178,6 +9717,7 @@ private func makeSupabaseGameRow(
     id: UUID,
     publicGameID: String,
     providerGameID: String,
+    officialProviderGameID: String? = nil,
     gameDate: String = "2026-04-28",
     scheduledAt: String = "2026-04-28T18:30:00+09:00",
     stadium: String = "사직",
@@ -9188,6 +9728,7 @@ private func makeSupabaseGameRow(
     homeScore: Int,
     inningState: String
 ) throws -> SupabaseGameRow {
+    let resolvedOfficialProviderGameID = officialProviderGameID ?? providerGameID
     let payload = """
     [
       {
@@ -9195,7 +9736,7 @@ private func makeSupabaseGameRow(
         "public_game_id": "\(publicGameID)",
         "provider": "kbo",
         "provider_game_id": "\(providerGameID)",
-        "official_provider_game_id": "\(providerGameID)",
+        "official_provider_game_id": "\(resolvedOfficialProviderGameID)",
         "game_date": "\(gameDate)",
         "scheduled_at": "\(scheduledAt)",
         "stadium": "\(stadium)",
