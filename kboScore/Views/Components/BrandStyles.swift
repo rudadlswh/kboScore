@@ -434,7 +434,7 @@ extension GameStatus {
 extension NotificationType {
     var tintColor: Color {
         switch self {
-        case .scoreChange, .leadChange, .onBase:
+        case .scoreChange, .leadChange, .onBase, .inningChange:
             KBOLivePalette.primary
         case .gameStart:
             Color.gray
@@ -447,7 +447,7 @@ extension NotificationType {
 
     var doosanTintColor: Color {
         switch self {
-        case .scoreChange, .leadChange, .onBase:
+        case .scoreChange, .leadChange, .onBase, .inningChange:
             DoosanPalette.primary
         case .gameStart:
             DoosanPalette.secondary
@@ -460,7 +460,7 @@ extension NotificationType {
 
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
-        case .scoreChange, .leadChange, .onBase:
+        case .scoreChange, .leadChange, .onBase, .inningChange:
             palette.primary
         case .gameStart:
             palette.secondary
@@ -483,6 +483,8 @@ extension NotificationType {
             "arrow.left.arrow.right.circle.fill"
         case .gameEnd:
             "flag.fill"
+        case .inningChange:
+            "arrow.triangle.2.circlepath.circle.fill"
         case .rainDelay:
             "cloud.rain.fill"
         }
@@ -597,6 +599,7 @@ struct TeamMarkView: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
     var size: CGFloat = 38
+    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
 
     var body: some View {
         let identity = team.identity
@@ -606,11 +609,11 @@ struct TeamMarkView: View {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
                 .fill(stadiumPalette?.recessedSurface ?? identity.theme.badgeBackground)
 
-            if identity.hasLogoAsset {
-                Image(identity.logoAssetName)
+            if TeamLogoAssetResolver.hasPreferredAsset(for: identity, style: assetStyle) {
+                Image(TeamLogoAssetResolver.preferredAssetName(for: identity, style: assetStyle))
                     .resizable()
                     .scaledToFit()
-                    .padding(size * 0.16)
+                    .padding(assetStyle == .mascotPreferred ? size * 0.08 : size * 0.16)
             } else {
                 Text(identity.monogram)
                     .font(.system(size: size * 0.28, weight: .bold, design: .rounded))
@@ -630,6 +633,8 @@ struct TeamMarkView: View {
             radius: stadiumPalette == nil ? size * 0.12 : size * 0.14,
             y: stadiumPalette == nil ? size * 0.06 : size * 0.08
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TeamLogoAssetResolver.accessibilityLabel(for: identity, style: assetStyle))
     }
 }
 

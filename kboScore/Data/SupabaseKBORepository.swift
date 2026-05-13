@@ -315,9 +315,6 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         guard season == 2026 else {
             return []
         }
-        #if DEBUG
-        print("[StandingsRank] remote fetch start view=team_rank_2026")
-        #endif
         let teamsTask = Task { try await cachedTeamRows() }
         let rows = try await source.fetchTeamRanks2026()
         let teamRows = try await teamsTask.value
@@ -347,9 +344,6 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
             }
             .sorted { $0.rank < $1.rank }
         await runtimeState?.record(source: .supabase, delivery: .supabase)
-        #if DEBUG
-        print("[StandingsRank] remote fetch success count=\(enriched.count)")
-        #endif
         return enriched
     }
 

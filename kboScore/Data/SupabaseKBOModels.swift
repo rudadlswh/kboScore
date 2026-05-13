@@ -147,6 +147,9 @@ struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     let runnerOnFirst: Bool?
     let runnerOnSecond: Bool?
     let runnerOnThird: Bool?
+    let firstBaseRunnerName: String?
+    let secondBaseRunnerName: String?
+    let thirdBaseRunnerName: String?
     let currentPitcherName: String?
     let currentBatterName: String?
 #if DEBUG
@@ -163,6 +166,18 @@ struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
         runnerOnFirst = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_first"))
         runnerOnSecond = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_second"))
         runnerOnThird = try container.decodeIfPresent(Bool.self, forKey: DynamicCodingKey("runner_on_third"))
+        firstBaseRunnerName = try Self.firstNonBlankString(
+            in: container,
+            keys: ["first_base_runner_name", "firstBaseRunnerName"]
+        )
+        secondBaseRunnerName = try Self.firstNonBlankString(
+            in: container,
+            keys: ["second_base_runner_name", "secondBaseRunnerName"]
+        )
+        thirdBaseRunnerName = try Self.firstNonBlankString(
+            in: container,
+            keys: ["third_base_runner_name", "thirdBaseRunnerName"]
+        )
         currentPitcherName = try Self.firstNonBlankString(
             in: container,
             keys: ["current_pitcher_name", "pitcher_name", "pitcher", "currentPitcherName", "pitcherName"]
@@ -313,6 +328,18 @@ enum SupabaseKBOMapper {
         }
         let currentPitcherName = snapshot?.currentPitcherName?.nilIfBlank
         let currentBatterName = snapshot?.currentBatterName?.nilIfBlank
+        let baseRunners = snapshot.map {
+            KBOBaseRunnersDTO(
+                first: $0.firstBaseRunnerName?.nilIfBlank,
+                second: $0.secondBaseRunnerName?.nilIfBlank,
+                third: $0.thirdBaseRunnerName?.nilIfBlank
+            )
+        }
+#if DEBUG
+        if let snapshot {
+            print("[BaseRunners] snapshot names first=\(snapshot.firstBaseRunnerName ?? "<nil>") second=\(snapshot.secondBaseRunnerName ?? "<nil>") third=\(snapshot.thirdBaseRunnerName ?? "<nil>")")
+        }
+#endif
 
         return KBOGameDTO(
             id: row.id,
@@ -328,6 +355,7 @@ enum SupabaseKBOMapper {
             seasonClassification: classifiedRow.seasonClassification.rawValue,
             inningText: inningText,
             bases: bases,
+            baseRunners: baseRunners,
             balls: snapshot?.balls,
             strikes: snapshot?.strikes,
             outs: snapshot?.outs,

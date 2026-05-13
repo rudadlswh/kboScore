@@ -14,8 +14,30 @@ enum ScoreNotificationEventType: String, Codable, Sendable {
     case onBase
     case leadChange
     case gameEnd
+    case inningChange
     case rainDelay
     case general
+
+    init(remoteValue: String?) {
+        switch remoteValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "game_start", "game_started", "gamestart":
+            self = .gameStart
+        case "score_changed", "scorechange":
+            self = .scoreChange
+        case "on_base", "onbase":
+            self = .onBase
+        case "lead_changed", "leadchange":
+            self = .leadChange
+        case "game_end", "game_final", "gameend":
+            self = .gameEnd
+        case "inning_changed", "inningchange":
+            self = .inningChange
+        case "game_cancelled", "rain_delay", "raindelay":
+            self = .rainDelay
+        default:
+            self = .general
+        }
+    }
 }
 
 enum NotificationRouteHint: String, Codable, Sendable {
@@ -64,6 +86,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     let eventType: ScoreNotificationEventType
     let title: String
     let body: String
+    let publicGameID: String?
     let teamIDs: [String]
     let routeHint: NotificationRouteHint
 
@@ -72,6 +95,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         eventType: ScoreNotificationEventType,
         title: String,
         body: String,
+        publicGameID: String? = nil,
         teamIDs: [String] = [],
         routeHint: NotificationRouteHint = .gameDetail
     ) {
@@ -79,6 +103,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         self.eventType = eventType
         self.title = title
         self.body = body
+        self.publicGameID = publicGameID
         self.teamIDs = teamIDs
         self.routeHint = routeHint
     }
@@ -90,6 +115,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
                 "eventType": eventType.rawValue,
                 "title": title,
                 "body": body,
+                "publicGameId": publicGameID as Any,
                 "teamIds": teamIDs,
                 "routeHint": routeHint.rawValue
             ]
@@ -114,6 +140,9 @@ enum ScoreNotificationPayloadExtractor {
         if let nested = normalizedRoot["kbo_live"] as? [String: Any] {
             return payload(from: nested, aps: normalizedRoot["aps"] as? [String: Any])
         }
+        if let nested = normalizedRoot["data"] as? [String: Any] {
+            return payload(from: nested, aps: normalizedRoot["aps"] as? [String: Any])
+        }
 
         return payload(from: normalizedRoot, aps: normalizedRoot["aps"] as? [String: Any])
     }
@@ -133,22 +162,39 @@ enum ScoreNotificationPayloadExtractor {
     }
 
     nonisolated private static func payload(from dictionary: [String: Any], aps: [String: Any]?) -> ScoreNotificationPayload? {
-        let title = (dictionary["title"] as? String) ?? ((aps?["alert"] as? [String: Any])?["title"] as? String)
-        let body = (dictionary["body"] as? String) ?? ((aps?["alert"] as? [String: Any])?["body"] as? String)
+        let alert = aps?["alert"] as? [String: Any]
+        let title = (dictionary["title"] as? String) ?? (alert?["title"] as? String)
+        let body = (dictionary["body"] as? String) ?? (alert?["body"] as? String)
 
         guard let title, let body else { return nil }
 
-        let eventType = (dictionary["eventType"] as? String).flatMap(ScoreNotificationEventType.init(rawValue:)) ?? .general
+        let eventType = ScoreNotificationEventType(remoteValue: dictionary["eventType"] as? String)
         let routeHint = (dictionary["routeHint"] as? String).flatMap(NotificationRouteHint.init(rawValue:)) ?? .gameDetail
-        let teamIDs = (dictionary["teamIds"] as? [String]) ?? []
+        let teamIDs = notificationTeamIDs(from: dictionary)
 
         return ScoreNotificationPayload(
             gameID: dictionary["gameId"] as? String,
             eventType: eventType,
             title: title,
             body: body,
+            publicGameID: dictionary["publicGameId"] as? String,
             teamIDs: teamIDs,
             routeHint: routeHint
         )
+    }
+
+    nonisolated private static func notificationTeamIDs(from dictionary: [String: Any]) -> [String] {
+        if let teamIDs = dictionary["teamIds"] as? [String] {
+            return teamIDs
+        }
+        return [dictionary["awayTeamId"], dictionary["homeTeamId"], dictionary["eventTeamId"]]
+            .compactMap { $0 as? String }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { $0.isEmpty == false }
+            .reduce(into: []) { result, teamID in
+                if !result.contains(teamID) {
+                    result.append(teamID)
+                }
+            }
     }
 }

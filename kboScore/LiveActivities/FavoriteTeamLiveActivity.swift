@@ -95,7 +95,7 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
         } else {
             return nil
         }
-        let isPreGame = game.status == .upcoming || (game.status.isFinishedLike == false && Date() < game.scheduledStart)
+        let isPreGame = game.status == .upcoming
         let startTimeText = game.scheduledStart.formatted(date: .omitted, time: .shortened)
 
         return FavoriteTeamLiveActivitySnapshot(

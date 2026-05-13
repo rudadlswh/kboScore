@@ -112,6 +112,7 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let seasonClassification: GameSeasonClassification
     let inningText: String?
     let bases: RunnerState?
+    var baseRunners: GameBaseRunners? = nil
     let balls: Int?
     let strikes: Int?
     let outs: Int?
@@ -151,6 +152,7 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
             currentPitcherName: currentPitcherName,
             currentBatterName: currentBatterName,
             bases: bases,
+            baseRunners: baseRunners,
             balls: balls,
             strikes: strikes,
             outs: outs
@@ -329,6 +331,12 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+struct GameBaseRunners: Hashable, Codable, Sendable {
+    let first: String?
+    let second: String?
+    let third: String?
+}
+
 struct GameSummary: Identifiable, Hashable, Sendable {
     let id: UUID
     let scheduledStart: Date
@@ -346,6 +354,7 @@ struct GameSummary: Identifiable, Hashable, Sendable {
     let currentPitcherName: String?
     let currentBatterName: String?
     let bases: RunnerState?
+    let baseRunners: GameBaseRunners?
     let balls: Int?
     let strikes: Int?
     let outs: Int?

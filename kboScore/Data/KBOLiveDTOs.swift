@@ -89,6 +89,18 @@ struct KBORunnerStateDTO: Codable, Sendable {
     }
 }
 
+struct KBOBaseRunnersDTO: Codable, Sendable {
+    let first: String?
+    let second: String?
+    let third: String?
+
+    nonisolated init(first: String?, second: String?, third: String?) {
+        self.first = first
+        self.second = second
+        self.third = third
+    }
+}
+
 struct KBOGameEventDTO: Codable, Sendable {
     let id: UUID
     let type: String
@@ -134,6 +146,7 @@ struct KBOGameDTO: Codable, Sendable {
     let seasonClassification: String?
     let inningText: String?
     let bases: KBORunnerStateDTO?
+    let baseRunners: KBOBaseRunnersDTO?
     let balls: Int?
     let strikes: Int?
     let outs: Int?
@@ -165,6 +178,8 @@ struct KBOGameDTO: Codable, Sendable {
         case seasonType
         case inningText
         case bases
+        case baseRunners
+        case base_runners
         case balls
         case ballCount
         case strikes
@@ -198,6 +213,7 @@ struct KBOGameDTO: Codable, Sendable {
         seasonClassification: String? = nil,
         inningText: String?,
         bases: KBORunnerStateDTO?,
+        baseRunners: KBOBaseRunnersDTO? = nil,
         balls: Int? = nil,
         strikes: Int? = nil,
         outs: Int?,
@@ -223,6 +239,7 @@ struct KBOGameDTO: Codable, Sendable {
         self.seasonClassification = seasonClassification
         self.inningText = inningText
         self.bases = bases
+        self.baseRunners = baseRunners
         self.balls = balls
         self.strikes = strikes
         self.outs = outs
@@ -270,6 +287,8 @@ struct KBOGameDTO: Codable, Sendable {
             (try container.decodeIfPresent(String.self, forKey: .seasonType))
         inningText = try container.decodeIfPresent(String.self, forKey: .inningText)
         bases = try container.decodeIfPresent(KBORunnerStateDTO.self, forKey: .bases)
+        baseRunners = try container.decodeIfPresent(KBOBaseRunnersDTO.self, forKey: .baseRunners) ??
+            container.decodeIfPresent(KBOBaseRunnersDTO.self, forKey: .base_runners)
         balls = try container.decodeIfPresent(Int.self, forKey: .balls) ??
             (try container.decodeIfPresent(Int.self, forKey: .ballCount))
         strikes = try container.decodeIfPresent(Int.self, forKey: .strikes) ??
@@ -655,6 +674,13 @@ enum KBODataMapper {
             seasonClassification: seasonClassification,
             inningText: inningText,
             bases: dto.bases.map { RunnerState(first: $0.first, second: $0.second, third: $0.third) },
+            baseRunners: dto.baseRunners.map {
+                GameBaseRunners(
+                    first: $0.first?.nilIfBlank,
+                    second: $0.second?.nilIfBlank,
+                    third: $0.third?.nilIfBlank
+                )
+            },
             balls: dto.balls,
             strikes: dto.strikes,
             outs: dto.outs,
@@ -767,6 +793,8 @@ enum KBODataMapper {
             .leadChange
         case "gameend", "final", "종료":
             .gameEnd
+        case "inningchange", "inning_changed", "inning", "이닝":
+            .inningChange
         case "raindelay", "cancelled", "rain", "우천", "취소":
             .rainDelay
         default:
