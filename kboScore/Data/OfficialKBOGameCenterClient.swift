@@ -1156,24 +1156,6 @@ private struct OfficialGridTableDTO: Decodable {
     }
 }
 
-private struct OfficialGridRowDTO: Decodable {
-    let row: OfficialGridRow
-}
-
-private struct OfficialGridRow: Decodable {
-    let cells: [OfficialGridCell]
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let rawCells = try container.decode([OfficialGridCellDTO].self)
-        cells = rawCells.map { OfficialGridCell(text: $0.text.normalizedGridText) }
-    }
-}
-
-private struct OfficialGridCell: Sendable {
-    let text: String
-}
-
 private struct OfficialGridTable: Sendable {
     let headers: [OfficialGridRow]
     let rows: [OfficialGridRow]
