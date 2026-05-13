@@ -1170,14 +1170,6 @@ private struct OfficialGridRow: Decodable {
     }
 }
 
-private struct OfficialGridCellDTO: Decodable {
-    let text: String
-
-    private enum CodingKeys: String, CodingKey {
-        case text = "Text"
-    }
-}
-
 private struct OfficialGridCell: Sendable {
     let text: String
 }
