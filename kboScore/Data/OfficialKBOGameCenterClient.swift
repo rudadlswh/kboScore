@@ -29,13 +29,6 @@ private struct GameCenterBoxScorePayload: Sendable {
     }
 }
 
-private enum OfficialBattingTableInterpretation: String {
-    case lineup
-    case aggregateBattingStats
-    case plateAppearanceResults
-    case unknown
-}
-
 private struct PlateAppearanceDerivedStats: Sendable, Equatable {
     let homeRuns: Int
     let walks: Int
@@ -1139,47 +1132,6 @@ private enum OfficialKBOGameCenterError: Error {
 private extension OfficialPreviewRecordCell {
     var normalizedText: String {
         text.normalizedGridText
-    }
-}
-
-private extension OfficialGridTable {
-    var battingTableInterpretation: OfficialBattingTableInterpretation {
-        let labels = headers.first?.cells.map { $0.text.normalizedKeyStatLabel } ?? []
-        let aggregateLabels: Set<String> = ["타수", "AB", "득점", "R", "안타", "H", "타점", "RBI", "홈런", "HR", "HRA", "볼넷", "BB", "4구", "삼진", "SO", "K"]
-            .map(\.normalizedKeyStatLabel)
-            .reduce(into: Set<String>()) { $0.insert($1) }
-        if labels.contains(where: aggregateLabels.contains) {
-            return .aggregateBattingStats
-        }
-
-        if rows.contains(where: \.isCurrentKBOBattingAggregateRow) || tfoot.contains(where: \.isCurrentKBOBattingAggregateRow) {
-            return .aggregateBattingStats
-        }
-
-        if let firstRow = rows.first,
-           firstRow.cells.count == 3,
-           firstRow.cells[0].text.battingOrderNumber != nil,
-           firstRow.cells[2].text.nilIfBlank != nil {
-            return .lineup
-        }
-
-        let sampleValues = rows.prefix(3).flatMap { $0.cells.map(\.text) }
-        if sampleValues.contains(where: { $0.nilIfBlank != nil && $0.isIntegerStatValue == false }) {
-            return .plateAppearanceResults
-        }
-
-        return .unknown
-    }
-}
-
-private extension OfficialGridRow {
-    var isCurrentKBOBattingAggregateRow: Bool {
-        guard cells.count >= 5 else { return false }
-        return cells[0].text.isIntegerStatValue &&
-            cells[1].text.isIntegerStatValue &&
-            cells[2].text.isIntegerStatValue &&
-            cells[3].text.isIntegerStatValue &&
-            cells[4].text.isDecimalStatValue
     }
 }
 
