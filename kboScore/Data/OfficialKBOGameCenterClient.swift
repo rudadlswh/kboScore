@@ -69,6 +69,28 @@ struct GameCenterReview: Sendable {
     let homeBatting: GameCenterBattingSection
     let awayPitching: GameCenterPitchingSection
     let homePitching: GameCenterPitchingSection
+
+    var hasDisplayableRecords: Bool {
+        awayBatting.lines.isEmpty == false ||
+            homeBatting.lines.isEmpty == false ||
+            awayPitching.lines.isEmpty == false ||
+            homePitching.lines.isEmpty == false ||
+            summaryItems.isEmpty == false
+    }
+}
+
+struct GameCenterKeyStatsComparison: Sendable, Equatable {
+    let away: GameCenterTeamKeyStats
+    let home: GameCenterTeamKeyStats
+}
+
+struct GameCenterTeamKeyStats: Sendable, Equatable {
+    let hits: Int
+    let homeRuns: Int
+    let stolenBases: Int
+    let strikeouts: Int
+    let doublePlays: Int
+    let errors: Int
 }
 
 private struct GameCenterBoxScorePayload: Sendable {
@@ -77,16 +99,18 @@ private struct GameCenterBoxScorePayload: Sendable {
     let pitchingSections: [GameCenterPitchingSection]
 
     var review: GameCenterReview? {
-        guard battingSections.count == 2, pitchingSections.count == 2 else {
+        guard battingSections.count >= 2 || pitchingSections.count >= 2 else {
             return nil
         }
+        let emptyBatting = GameCenterBattingSection(lines: [], totals: nil)
+        let emptyPitching = GameCenterPitchingSection(lines: [])
 
         return GameCenterReview(
             summaryItems: summaryItems,
-            awayBatting: battingSections[0],
-            homeBatting: battingSections[1],
-            awayPitching: pitchingSections[0],
-            homePitching: pitchingSections[1]
+            awayBatting: battingSections[safe: 0] ?? emptyBatting,
+            homeBatting: battingSections[safe: 1] ?? emptyBatting,
+            awayPitching: pitchingSections[safe: 0] ?? emptyPitching,
+            homePitching: pitchingSections[safe: 1] ?? emptyPitching
         )
     }
 }
@@ -95,6 +119,13 @@ struct GameCenterSummaryItem: Identifiable, Hashable, Sendable {
     let id = UUID()
     let title: String
     let value: String
+    let values: [String]
+
+    init(title: String, value: String, values: [String]? = nil) {
+        self.title = title
+        self.value = value
+        self.values = values ?? [value]
+    }
 }
 
 struct GameCenterBattingSection: Sendable {
@@ -108,10 +139,51 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
     let position: String
     let name: String
     let atBats: String?
+    let runs: String?
     let hits: String?
     let runsBattedIn: String?
-    let runs: String?
+    let homeRuns: String?
+    let walks: String?
+    let strikeouts: String?
+    let stolenBases: String?
     let average: String?
+    let plateAppearanceHomeRuns: String?
+    let plateAppearanceWalks: String?
+    let plateAppearanceStrikeouts: String?
+
+    init(
+        battingOrder: String,
+        position: String,
+        name: String,
+        atBats: String?,
+        runs: String?,
+        hits: String?,
+        runsBattedIn: String?,
+        homeRuns: String?,
+        walks: String?,
+        strikeouts: String?,
+        stolenBases: String? = nil,
+        average: String?,
+        plateAppearanceHomeRuns: String? = nil,
+        plateAppearanceWalks: String? = nil,
+        plateAppearanceStrikeouts: String? = nil
+    ) {
+        self.battingOrder = battingOrder
+        self.position = position
+        self.name = name
+        self.atBats = atBats
+        self.runs = runs
+        self.hits = hits
+        self.runsBattedIn = runsBattedIn
+        self.homeRuns = homeRuns
+        self.walks = walks
+        self.strikeouts = strikeouts
+        self.stolenBases = stolenBases
+        self.average = average
+        self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
+        self.plateAppearanceWalks = plateAppearanceWalks
+        self.plateAppearanceStrikeouts = plateAppearanceStrikeouts
+    }
 
     var battingOrderNumber: String? {
         battingOrder.battingOrderNumber
@@ -120,10 +192,45 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
 
 struct GameCenterBattingTotals: Sendable {
     let atBats: String?
+    let runs: String?
     let hits: String?
     let runsBattedIn: String?
-    let runs: String?
+    let homeRuns: String?
+    let walks: String?
+    let strikeouts: String?
+    let stolenBases: String?
     let average: String?
+    let plateAppearanceHomeRuns: String?
+    let plateAppearanceWalks: String?
+    let plateAppearanceStrikeouts: String?
+
+    init(
+        atBats: String?,
+        runs: String?,
+        hits: String?,
+        runsBattedIn: String?,
+        homeRuns: String?,
+        walks: String?,
+        strikeouts: String?,
+        stolenBases: String? = nil,
+        average: String?,
+        plateAppearanceHomeRuns: String? = nil,
+        plateAppearanceWalks: String? = nil,
+        plateAppearanceStrikeouts: String? = nil
+    ) {
+        self.atBats = atBats
+        self.runs = runs
+        self.hits = hits
+        self.runsBattedIn = runsBattedIn
+        self.homeRuns = homeRuns
+        self.walks = walks
+        self.strikeouts = strikeouts
+        self.stolenBases = stolenBases
+        self.average = average
+        self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
+        self.plateAppearanceWalks = plateAppearanceWalks
+        self.plateAppearanceStrikeouts = plateAppearanceStrikeouts
+    }
 }
 
 struct GameCenterPitchingSection: Sendable {
@@ -132,17 +239,61 @@ struct GameCenterPitchingSection: Sendable {
 
 struct GameCenterPitchingLine: Identifiable, Hashable, Sendable {
     let id = UUID()
+    let pitchingOrder: String?
     let name: String
     let role: String?
     let result: String?
     let innings: String?
+    let battersFaced: String?
     let pitches: String?
+    let atBats: String?
     let hitsAllowed: String?
     let walksAllowed: String?
+    let hitBatters: String?
+    let walksOrHitByPitch: String?
     let strikeouts: String?
+    let homeRunsAllowed: String?
     let runsAllowed: String?
     let earnedRuns: String?
     let earnedRunAverage: String?
+
+    init(
+        pitchingOrder: String? = nil,
+        name: String,
+        role: String?,
+        result: String?,
+        innings: String?,
+        battersFaced: String? = nil,
+        pitches: String?,
+        atBats: String? = nil,
+        hitsAllowed: String?,
+        walksAllowed: String?,
+        hitBatters: String?,
+        walksOrHitByPitch: String? = nil,
+        strikeouts: String?,
+        homeRunsAllowed: String?,
+        runsAllowed: String?,
+        earnedRuns: String?,
+        earnedRunAverage: String?
+    ) {
+        self.pitchingOrder = pitchingOrder
+        self.name = name
+        self.role = role
+        self.result = result
+        self.innings = innings
+        self.battersFaced = battersFaced
+        self.pitches = pitches
+        self.atBats = atBats
+        self.hitsAllowed = hitsAllowed
+        self.walksAllowed = walksAllowed
+        self.hitBatters = hitBatters
+        self.walksOrHitByPitch = walksOrHitByPitch
+        self.strikeouts = strikeouts
+        self.homeRunsAllowed = homeRunsAllowed
+        self.runsAllowed = runsAllowed
+        self.earnedRuns = earnedRuns
+        self.earnedRunAverage = earnedRunAverage
+    }
 }
 
 struct GameCenterPreview: Sendable {
@@ -159,6 +310,219 @@ struct GameCenterMatchupSnapshot: Sendable {
     let battingAverage: String?
     let runsScored: String?
     let runsAllowed: String?
+}
+
+private enum OfficialBattingTableInterpretation: String {
+    case lineup
+    case aggregateBattingStats
+    case plateAppearanceResults
+    case unknown
+}
+
+private struct PlateAppearanceDerivedStats: Sendable, Equatable {
+    let homeRuns: Int
+    let walks: Int
+    let strikeouts: Int
+
+    init(homeRuns: Int = 0, walks: Int = 0, strikeouts: Int = 0) {
+        self.homeRuns = homeRuns
+        self.walks = walks
+        self.strikeouts = strikeouts
+    }
+
+    func adding(resultText: String) -> PlateAppearanceDerivedStats {
+        resultText.plateAppearanceResultTokens.reduce(self) { stats, result in
+            PlateAppearanceDerivedStats(
+                homeRuns: stats.homeRuns + (result.isHomeRunPlateAppearance ? 1 : 0),
+                walks: stats.walks + (result.isWalkPlateAppearance ? 1 : 0),
+                strikeouts: stats.strikeouts + (result.isStrikeoutPlateAppearance ? 1 : 0)
+            )
+        }
+    }
+
+    static func + (lhs: PlateAppearanceDerivedStats, rhs: PlateAppearanceDerivedStats) -> PlateAppearanceDerivedStats {
+        PlateAppearanceDerivedStats(
+            homeRuns: lhs.homeRuns + rhs.homeRuns,
+            walks: lhs.walks + rhs.walks,
+            strikeouts: lhs.strikeouts + rhs.strikeouts
+        )
+    }
+}
+
+extension GameCenterReview {
+    func keyStats(
+        awayTeam: Team,
+        homeTeam: Team,
+        lineScore: GameCenterLineScore?
+    ) -> GameCenterKeyStatsComparison {
+        GameCenterKeyStatsMapper(
+            review: self,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            lineScore: lineScore
+        ).comparison
+    }
+}
+
+private struct GameCenterKeyStatsMapper {
+    enum Side: CaseIterable {
+        case away
+        case home
+    }
+
+    let review: GameCenterReview
+    let awayTeam: Team
+    let homeTeam: Team
+    let lineScore: GameCenterLineScore?
+
+    var comparison: GameCenterKeyStatsComparison {
+        GameCenterKeyStatsComparison(
+            away: stats(for: .away),
+            home: stats(for: .home)
+        )
+    }
+
+    private func stats(for side: Side) -> GameCenterTeamKeyStats {
+        let batting = battingSection(for: side)
+        return GameCenterTeamKeyStats(
+            hits: lineScoreHits(for: side) ?? batting.totalHits ?? 0,
+            homeRuns: extraRecordValue(for: side, aliases: homeRunAliases) ?? batting.totalHomeRuns ?? 0,
+            stolenBases: extraRecordValue(for: side, aliases: stolenBaseAliases) ?? 0,
+            strikeouts: batting.totalStrikeouts ?? extraRecordValue(for: side, aliases: strikeoutAliases) ?? 0,
+            doublePlays: extraRecordValue(for: side, aliases: doublePlayAliases) ?? 0,
+            errors: lineScoreErrors(for: side) ?? extraRecordValue(for: side, aliases: errorAliases) ?? 0
+        )
+    }
+
+    private var homeRunAliases: Set<String> {
+        normalizedAliases(["홈런", "HR", "HRA", "HOMERUN", "HOMERUNS"])
+    }
+
+    private var stolenBaseAliases: Set<String> {
+        normalizedAliases(["도루", "SB", "STOLENBASE", "STOLENBASES"])
+    }
+
+    private var strikeoutAliases: Set<String> {
+        normalizedAliases(["삼진", "SO", "K", "STRIKEOUT", "STRIKEOUTS"])
+    }
+
+    private var doublePlayAliases: Set<String> {
+        normalizedAliases(["병살", "병살타", "GDP", "GIDP", "DOUBLEPLAY", "DOUBLEPLAYS", "GROUNDEDINTODOUBLEPLAY"])
+    }
+
+    private var errorAliases: Set<String> {
+        normalizedAliases(["실책", "E", "ERROR", "ERRORS"])
+    }
+
+    private func battingSection(for side: Side) -> GameCenterBattingSection {
+        switch side {
+        case .away:
+            review.awayBatting
+        case .home:
+            review.homeBatting
+        }
+    }
+
+    private func team(for side: Side) -> Team {
+        switch side {
+        case .away:
+            awayTeam
+        case .home:
+            homeTeam
+        }
+    }
+
+    private func lineScoreHits(for side: Side) -> Int? {
+        switch side {
+        case .away:
+            lineScore?.awayTotals.hits?.gameCenterStatInt
+        case .home:
+            lineScore?.homeTotals.hits?.gameCenterStatInt
+        }
+    }
+
+    private func lineScoreErrors(for side: Side) -> Int? {
+        switch side {
+        case .away:
+            lineScore?.awayTotals.errors?.gameCenterStatInt
+        case .home:
+            lineScore?.homeTotals.errors?.gameCenterStatInt
+        }
+    }
+
+    private func extraRecordValue(for side: Side, aliases: Set<String>) -> Int? {
+        let matchingItems = review.summaryItems.filter { aliases.contains($0.title.normalizedKeyStatLabel) }
+        guard matchingItems.isEmpty == false else { return nil }
+
+        var total = 0
+        var didResolve = false
+        for item in matchingItems {
+            if let value = sideColumnValue(in: item, side: side) {
+                total += value
+                didResolve = true
+                continue
+            }
+            if let value = teamNamedValue(in: item, side: side) {
+                total += value
+                didResolve = true
+                continue
+            }
+
+            let eventCount = playerEventCount(in: item.value, side: side)
+            total += eventCount
+            didResolve = didResolve || eventCount > 0 || item.value.representsNoOfficialEvents
+        }
+
+        return didResolve ? total : nil
+    }
+
+    private func sideColumnValue(in item: GameCenterSummaryItem, side: Side) -> Int? {
+        guard item.values.count >= 2 else { return nil }
+        let index = side == .away ? 0 : 1
+        return item.values[safe: index]?.gameCenterStatInt
+    }
+
+    private func teamNamedValue(in item: GameCenterSummaryItem, side: Side) -> Int? {
+        let value = item.value
+        let names = teamNames(for: side)
+        for name in names {
+            let pattern = "\(NSRegularExpression.escapedPattern(for: name))\\s*[:：]?\\s*(\\d+)"
+            if let capture = value.firstGameCenterRegexCapture(pattern: pattern),
+               let intValue = Int(capture) {
+                return intValue
+            }
+        }
+        return nil
+    }
+
+    private func playerEventCount(in value: String, side: Side) -> Int {
+        let playerNames = playerNames(for: side)
+        guard playerNames.isEmpty == false else { return 0 }
+        return playerNames.reduce(0) { count, name in
+            count + value.gameCenterRegexMatchCount(
+                pattern: "\(NSRegularExpression.escapedPattern(for: name))(?=\\s|\\d|\\(|\\[|,|，|/|·|ㆍ|$)"
+            )
+        }
+    }
+
+    private func playerNames(for side: Side) -> [String] {
+        battingSection(for: side)
+            .lines
+            .map(\.name)
+            .compactMap(\.nilIfBlank)
+            .sorted { $0.count > $1.count }
+    }
+
+    private func teamNames(for side: Side) -> [String] {
+        let team = team(for: side)
+        return [team.displayName, team.shortName, team.name, team.markText]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+    }
+
+    private func normalizedAliases(_ aliases: [String]) -> Set<String> {
+        Set(aliases.map(\.normalizedKeyStatLabel))
+    }
 }
 
 struct OfficialKBOGameCenterClient: Sendable {
@@ -220,7 +584,7 @@ struct OfficialKBOGameCenterClient: Sendable {
                 savePitcher: context.entry.savePitcherName
             ),
             lineScore: scoreboardValue?.lineScore,
-            review: context.entry.status == .final ? boxScoreValue?.review : nil,
+            review: boxScoreValue?.review?.enrichingBatterPositions(from: lineupBattingSectionsValue),
             preview: try await preview
         )
     }
@@ -321,17 +685,22 @@ struct OfficialKBOGameCenterClient: Sendable {
 
             let summaryItems: [GameCenterSummaryItem] = decodeGridTable(from: payload.summaryTable)?.rows.compactMap { row in
                 guard row.cells.count >= 2,
-                      let title = row.cells[0].text.nilIfBlank,
-                      let value = row.cells[1].text.nilIfBlank else {
+                      let title = row.cells[0].text.nilIfBlank else {
                     return nil
                 }
-                return GameCenterSummaryItem(title: title, value: value)
+                let values = row.cells.dropFirst().compactMap { $0.text.nilIfBlank }
+                guard values.isEmpty == false else { return nil }
+                return GameCenterSummaryItem(
+                    title: title,
+                    value: values.joined(separator: " · "),
+                    values: values
+                )
             } ?? []
 
             let battingSections = payload.battingTables.compactMap(makeBattingSection(from:))
             let pitchingSections = payload.pitchingTables.compactMap(makePitchingSection(from:))
 
-            guard battingSections.count == 2 else {
+            guard battingSections.count >= 2 || pitchingSections.count >= 2 else {
                 #if DEBUG
                 print("[BaseRunners] source=official skipped=missingBattingSections source=boxscore count=\(battingSections.count)")
                 #endif
@@ -480,6 +849,7 @@ struct OfficialKBOGameCenterClient: Sendable {
             seasonClassification: game.seasonClassification,
             inningText: game.inningText,
             bases: game.bases,
+            baseRunners: game.baseRunners,
             balls: game.balls,
             strikes: game.strikes,
             outs: game.outs,
@@ -568,49 +938,212 @@ struct OfficialKBOGameCenterClient: Sendable {
             return nil
         }
 
-        return makeBattingSection(orderTable: orderTable, summaryTable: tableGroup.summaryTable.flatMap(decodeGridTable(from:)))
+        return makeBattingSection(
+            orderTable: orderTable,
+            detailTable: tableGroup.detailTable.flatMap(decodeGridTable(from:)),
+            summaryTable: tableGroup.summaryTable.flatMap(decodeGridTable(from:))
+        )
     }
 
     private func makeBattingSection(fromRawTable rawTable: String) -> GameCenterBattingSection? {
         guard let orderTable = decodeGridTable(from: rawTable) else {
             return nil
         }
-        return makeBattingSection(orderTable: orderTable, summaryTable: nil)
+        return makeBattingSection(orderTable: orderTable, detailTable: nil, summaryTable: nil)
     }
 
-    private func makeBattingSection(orderTable: OfficialGridTable, summaryTable: OfficialGridTable?) -> GameCenterBattingSection? {
+    private func makeBattingSection(
+        orderTable: OfficialGridTable,
+        detailTable: OfficialGridTable?,
+        summaryTable: OfficialGridTable?
+    ) -> GameCenterBattingSection? {
         let lines = orderTable.rows.indices.compactMap { index -> GameCenterBattingLine? in
             let orderRow = orderTable.rows[index]
+            let detailRow = detailTable?.rows[safe: index]
             let summaryRow = summaryTable?.rows[safe: index]
+            let plateAppearanceStats = plateAppearanceDerivedStats(table: detailTable, row: detailRow)
             guard orderRow.cells.count >= 3,
                   orderRow.cells[0].text.battingOrderNumber != nil,
                   orderRow.cells[2].text.nilIfBlank != nil else {
                 return nil
             }
 
+            logPlateAppearanceDiagnosticsIfNeeded(table: detailTable, row: detailRow, stats: plateAppearanceStats, rowIndex: index)
+
             return GameCenterBattingLine(
                 battingOrder: orderRow.cells[0].text,
                 position: orderRow.cells[1].text,
                 name: orderRow.cells[2].text,
-                atBats: summaryRow?.cells[safe: 0]?.text.nilIfBlank,
-                hits: summaryRow?.cells[safe: 1]?.text.nilIfBlank,
-                runsBattedIn: summaryRow?.cells[safe: 2]?.text.nilIfBlank,
-                runs: summaryRow?.cells[safe: 3]?.text.nilIfBlank,
-                average: summaryRow?.cells[safe: 4]?.text.nilIfBlank
+                atBats: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["타수", "AB"], summaryFallbackIndex: 0),
+                runs: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["득점", "R"], summaryFallbackIndex: 3),
+                hits: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["안타", "H"], summaryFallbackIndex: 1),
+                runsBattedIn: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["타점", "RBI"], summaryFallbackIndex: 2),
+                homeRuns: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["홈런", "HR", "HRA"], summaryFallbackIndex: nil),
+                walks: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["볼넷", "BB", "4구"], summaryFallbackIndex: nil),
+                strikeouts: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["삼진", "SO", "K"], summaryFallbackIndex: nil),
+                average: battingAverageStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow),
+                plateAppearanceHomeRuns: plateAppearanceStats?.homeRuns.stringValue,
+                plateAppearanceWalks: plateAppearanceStats?.walks.stringValue,
+                plateAppearanceStrikeouts: plateAppearanceStats?.strikeouts.stringValue
             )
         }
 
-        let totals = summaryTable?.tfoot.first.map { footer in
-            GameCenterBattingTotals(
-                atBats: footer.cells[safe: 0]?.text.nilIfBlank,
-                hits: footer.cells[safe: 1]?.text.nilIfBlank,
-                runsBattedIn: footer.cells[safe: 2]?.text.nilIfBlank,
-                runs: footer.cells[safe: 3]?.text.nilIfBlank,
-                average: footer.cells[safe: 4]?.text.nilIfBlank
-            )
-        }
+        let detailFooter = detailTable?.tfoot.first
+        let summaryFooter = summaryTable?.tfoot.first
+        let plateAppearanceTotals = plateAppearanceTotals(table: detailTable)
+        let totals = (detailFooter != nil || summaryFooter != nil) ? GameCenterBattingTotals(
+            atBats: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["타수", "AB"], summaryFallbackIndex: 0),
+            runs: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["득점", "R"], summaryFallbackIndex: 3),
+            hits: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["안타", "H"], summaryFallbackIndex: 1),
+            runsBattedIn: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["타점", "RBI"], summaryFallbackIndex: 2),
+            homeRuns: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["홈런", "HR", "HRA"], summaryFallbackIndex: nil),
+            walks: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["볼넷", "BB", "4구"], summaryFallbackIndex: nil),
+            strikeouts: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["삼진", "SO", "K"], summaryFallbackIndex: nil),
+            average: battingAverageStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter),
+            plateAppearanceHomeRuns: plateAppearanceTotals?.homeRuns.stringValue,
+            plateAppearanceWalks: plateAppearanceTotals?.walks.stringValue,
+            plateAppearanceStrikeouts: plateAppearanceTotals?.strikeouts.stringValue
+        ) : nil
 
         return GameCenterBattingSection(lines: lines, totals: totals)
+    }
+
+    private func plateAppearanceDerivedStats(
+        table: OfficialGridTable?,
+        row: OfficialGridRow?
+    ) -> PlateAppearanceDerivedStats? {
+        guard table?.battingTableInterpretation == .plateAppearanceResults,
+              let row else {
+            return nil
+        }
+
+        return row.cells.reduce(PlateAppearanceDerivedStats()) { stats, cell in
+            stats.adding(resultText: cell.text)
+        }
+    }
+
+    private func plateAppearanceTotals(table: OfficialGridTable?) -> PlateAppearanceDerivedStats? {
+        guard table?.battingTableInterpretation == .plateAppearanceResults,
+              let rows = table?.rows,
+              rows.isEmpty == false else {
+            return nil
+        }
+
+        return rows
+            .compactMap { plateAppearanceDerivedStats(table: table, row: $0) }
+            .reduce(PlateAppearanceDerivedStats()) { $0 + $1 }
+    }
+
+    private func logPlateAppearanceDiagnosticsIfNeeded(
+        table: OfficialGridTable?,
+        row: OfficialGridRow?,
+        stats: PlateAppearanceDerivedStats?,
+        rowIndex: Int
+    ) {
+        #if DEBUG
+        guard rowIndex == 0,
+              table?.battingTableInterpretation == .plateAppearanceResults,
+              let row,
+              let stats else { return }
+        let sample = row.cells.prefix(4).map(\.text).joined(separator: ",")
+        print("[GameDetailStats] arrHitter.table2 interpretedAs=plateAppearanceResults row0=\(sample) derivedHR=\(stats.homeRuns) BB=\(stats.walks) SO=\(stats.strikeouts)")
+        #endif
+    }
+
+    private func battingIntegerStat(
+        detailTable: OfficialGridTable?,
+        detailRow: OfficialGridRow?,
+        summaryTable: OfficialGridTable?,
+        summaryRow: OfficialGridRow?,
+        labels: [String],
+        summaryFallbackIndex: Int?
+    ) -> String? {
+        if let value = battingStatByLabel(
+            detailTable: detailTable,
+            detailRow: detailRow,
+            summaryTable: summaryTable,
+            summaryRow: summaryRow,
+            labels: labels,
+            requireInteger: true
+        ) {
+            return value
+        }
+
+        guard let summaryFallbackIndex,
+              summaryTable?.battingTableInterpretation == .aggregateBattingStats,
+              let value = summaryRow?.cells[safe: summaryFallbackIndex]?.text.nilIfBlank,
+              value.isIntegerStatValue else {
+            return nil
+        }
+        return value
+    }
+
+    private func battingAverageStat(
+        detailTable: OfficialGridTable?,
+        detailRow: OfficialGridRow?,
+        summaryTable: OfficialGridTable?,
+        summaryRow: OfficialGridRow?
+    ) -> String? {
+        if let value = battingStatByLabel(
+            detailTable: detailTable,
+            detailRow: detailRow,
+            summaryTable: summaryTable,
+            summaryRow: summaryRow,
+            labels: ["타율", "AVG"],
+            requireInteger: false
+        ) {
+            return value
+        }
+
+        guard summaryTable?.battingTableInterpretation == .aggregateBattingStats,
+              let value = summaryRow?.cells[safe: 4]?.text.nilIfBlank,
+              value.isDecimalStatValue else {
+            return nil
+        }
+        return value
+    }
+
+    private func battingStatByLabel(
+        detailTable: OfficialGridTable?,
+        detailRow: OfficialGridRow?,
+        summaryTable: OfficialGridTable?,
+        summaryRow: OfficialGridRow?,
+        labels: [String],
+        requireInteger: Bool
+    ) -> String? {
+        [
+            (detailTable, detailRow),
+            (summaryTable, summaryRow)
+        ].lazy.compactMap { table, row -> String? in
+            guard let index = columnIndex(in: table, labels: labels),
+                  let value = row?.cells[safe: index]?.text.nilIfBlank else {
+                return nil
+            }
+            guard requireInteger == false || value.isIntegerStatValue else {
+                return nil
+            }
+            return value
+        }.first
+    }
+
+    private func battingStat(
+        _ table: OfficialGridTable?,
+        row: OfficialGridRow?,
+        labels: [String],
+        oldFallbackIndex: Int?,
+        wideFallbackIndex: Int?
+    ) -> String? {
+        guard let row else { return nil }
+        if let index = columnIndex(in: table, labels: labels),
+           let value = row.cells[safe: index]?.text.nilIfBlank {
+            return value.isIntegerStatValue ? value : nil
+        }
+        if let oldFallbackIndex {
+            let value = row.cells[safe: oldFallbackIndex]?.text.nilIfBlank
+            return value?.isIntegerStatValue == true ? value : nil
+        }
+        _ = wideFallbackIndex
+        return nil
     }
 
     private func makeLineupBattingSections(from data: Data) -> [GameCenterBattingSection] {
@@ -639,27 +1172,67 @@ struct OfficialKBOGameCenterClient: Sendable {
             return nil
         }
 
+        logPitcherDiagnosticsIfNeeded(table)
+
         let lines = table.rows.compactMap { row -> GameCenterPitchingLine? in
             guard let name = row.cells[safe: 0]?.text.nilIfBlank else {
                 return nil
             }
 
+            // Current official unlabeled pitcher shape: 9 피홈런, 10 피안타, 11 볼넷, 12 사구, 13 삼진.
             return GameCenterPitchingLine(
                 name: name,
                 role: row.cells[safe: 1]?.text.nilIfBlank,
                 result: row.cells[safe: 2]?.text.nilIfBlank,
-                innings: row.cells[safe: 6]?.text.nilIfBlank,
-                pitches: row.cells[safe: 8]?.text.nilIfBlank,
-                hitsAllowed: row.cells[safe: 10]?.text.nilIfBlank,
-                walksAllowed: row.cells[safe: 12]?.text.nilIfBlank,
-                strikeouts: row.cells[safe: 13]?.text.nilIfBlank,
-                runsAllowed: row.cells[safe: 14]?.text.nilIfBlank,
-                earnedRuns: row.cells[safe: 15]?.text.nilIfBlank,
-                earnedRunAverage: row.cells[safe: 16]?.text.nilIfBlank
+                innings: pitchingStat(table, row: row, labels: ["이닝", "IP"], fallbackIndex: 6),
+                pitches: pitchingStat(table, row: row, labels: ["투구수", "투구", "NP", "P"], fallbackIndex: 8),
+                hitsAllowed: pitchingStat(table, row: row, labels: ["피안타", "H"], fallbackIndex: 10),
+                walksAllowed: pitchingStat(table, row: row, labels: ["볼넷", "BB", "4구"], fallbackIndex: 11),
+                hitBatters: pitchingStat(table, row: row, labels: ["사구", "HBP"], fallbackIndex: 12),
+                strikeouts: pitchingStat(table, row: row, labels: ["삼진", "SO", "K"], fallbackIndex: 13),
+                homeRunsAllowed: pitchingStat(table, row: row, labels: ["피홈런", "홈런", "HR"], fallbackIndex: 9),
+                runsAllowed: pitchingStat(table, row: row, labels: ["실점", "R"], fallbackIndex: 14),
+                earnedRuns: pitchingStat(table, row: row, labels: ["자책", "ER"], fallbackIndex: 15),
+                earnedRunAverage: pitchingStat(table, row: row, labels: ["평균자책점", "ERA"], fallbackIndex: 16)
             )
         }
 
         return GameCenterPitchingSection(lines: lines)
+    }
+
+    private func logPitcherDiagnosticsIfNeeded(_ table: OfficialGridTable) {
+        #if DEBUG
+        let labels = table.headers.first?.cells.map { normalizeStatLabel($0.text) }.joined(separator: ",") ?? "<none>"
+        let rowSample = table.rows.first?.cells.prefix(17).map(\.text).joined(separator: ",") ?? "<none>"
+        let hbpColumn = columnIndex(in: table, labels: ["사구", "HBP"]) ?? 12
+        print("[GameDetailStats] arrPitcher labels=\(labels) row0=\(rowSample) hbpColumn=\(hbpColumn)")
+        #endif
+    }
+
+    private func pitchingStat(_ table: OfficialGridTable, row: OfficialGridRow, labels: [String], fallbackIndex: Int?) -> String? {
+        if let index = columnIndex(in: table, labels: labels),
+           let value = row.cells[safe: index]?.text.nilIfBlank {
+            return value
+        }
+        guard let fallbackIndex else { return nil }
+        return row.cells[safe: fallbackIndex]?.text.nilIfBlank
+    }
+
+    private func columnIndex(in table: OfficialGridTable?, labels: [String]) -> Int? {
+        guard let headerCells = table?.headers.first?.cells else { return nil }
+        let normalizedLabels = labels.map(normalizeStatLabel)
+        return headerCells.firstIndex { cell in
+            normalizedLabels.contains(normalizeStatLabel(cell.text))
+        }
+    }
+
+    private func normalizeStatLabel(_ value: String) -> String {
+        let scalars = value.normalizedGridText.unicodeScalars.filter { scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
+            CharacterSet.punctuationCharacters.contains(scalar) == false &&
+            CharacterSet.symbols.contains(scalar) == false
+        }
+        return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
     private func makeMatchupSnapshot(from row: OfficialPreviewRecordRow) -> GameCenterMatchupSnapshot? {
@@ -704,6 +1277,20 @@ struct OfficialKBOGameCenterClient: Sendable {
             row.cells.prefix(3).map(\.text).joined(separator: "/")
         }
         print("\(prefix) sample=\(samples.joined(separator: " | "))")
+        #endif
+    }
+
+    private func logGridDiagnostics(prefix: String, rawTable: String?) {
+        #if DEBUG
+        guard let rawTable, let table = decodeGridTable(from: rawTable) else {
+            print("\(prefix) interpretedAs=unavailable labels=<none> sample=<none>")
+            return
+        }
+
+        let labels = table.headers.first?.cells.map { normalizeStatLabel($0.text) }.joined(separator: ",") ?? "<none>"
+        let rowSample = table.rows.first?.cells.map(\.text).joined(separator: ",") ?? "<none>"
+        let footerSample = table.tfoot.first?.cells.map(\.text).joined(separator: ",") ?? "<none>"
+        print("\(prefix) interpretedAs=\(table.battingTableInterpretation.rawValue) labels=\(labels) row0=\(rowSample) footer0=\(footerSample)")
         #endif
     }
 
@@ -766,9 +1353,12 @@ struct OfficialKBOGameCenterClient: Sendable {
                 position: stringValue(in: row, keys: ["POS", "POSITION", "PITCHER_POS", "DEF_POS", "守備位置"]) ?? "",
                 name: name,
                 atBats: nil,
+                runs: nil,
                 hits: nil,
                 runsBattedIn: nil,
-                runs: nil,
+                homeRuns: nil,
+                walks: nil,
+                strikeouts: nil,
                 average: nil
             )
         }
@@ -858,6 +1448,9 @@ struct OfficialKBOGameCenterClient: Sendable {
                 let table3Rows = gridRowCount(in: hitter["table3"] as? String)
                 print("[BaseRunners] arrHitter[\(index)] keys=\(hitter.keys.sorted().joined(separator: ",")) table1 present=\(hitter["table1"] != nil) rows=\(table1Rows) table2 present=\(hitter["table2"] != nil) rows=\(table2Rows) table3 present=\(hitter["table3"] != nil) rows=\(table3Rows)")
                 logGridSample(prefix: "[BaseRunners] arrHitter[\(index)].table1", rawTable: hitter["table1"] as? String)
+                logGridDiagnostics(prefix: "[GameDetailStats] arrHitter[\(index)].table1", rawTable: hitter["table1"] as? String)
+                logGridDiagnostics(prefix: "[GameDetailStats] arrHitter[\(index)].table2", rawTable: hitter["table2"] as? String)
+                logGridDiagnostics(prefix: "[GameDetailStats] arrHitter[\(index)].table3", rawTable: hitter["table3"] as? String)
             }
         }
 
@@ -1397,11 +1990,56 @@ private struct OfficialGridTable: Sendable {
     let headers: [OfficialGridRow]
     let rows: [OfficialGridRow]
     let tfoot: [OfficialGridRow]
+
+    var battingTableInterpretation: OfficialBattingTableInterpretation {
+        let labels = headers.first?.cells.map { $0.text.normalizedKeyStatLabel } ?? []
+        let aggregateLabels: Set<String> = ["타수", "AB", "득점", "R", "안타", "H", "타점", "RBI", "홈런", "HR", "HRA", "볼넷", "BB", "4구", "삼진", "SO", "K"]
+            .map(\.normalizedKeyStatLabel)
+            .reduce(into: Set<String>()) { $0.insert($1) }
+        if labels.contains(where: aggregateLabels.contains) {
+            return .aggregateBattingStats
+        }
+
+        if rows.contains(where: \.isCurrentKBOBattingAggregateRow) || tfoot.contains(where: \.isCurrentKBOBattingAggregateRow) {
+            return .aggregateBattingStats
+        }
+
+        if let firstRow = rows.first,
+           firstRow.cells.count == 3,
+           firstRow.cells[0].text.battingOrderNumber != nil,
+           firstRow.cells[2].text.nilIfBlank != nil {
+            return .lineup
+        }
+
+        let sampleValues = rows.prefix(3).flatMap { $0.cells.map(\.text) }
+        if sampleValues.contains(where: { $0.nilIfBlank != nil && $0.isIntegerStatValue == false }) {
+            return .plateAppearanceResults
+        }
+
+        return .unknown
+    }
+}
+
+private extension OfficialGridRow {
+    var isCurrentKBOBattingAggregateRow: Bool {
+        guard cells.count >= 5 else { return false }
+        return cells[0].text.isIntegerStatValue &&
+            cells[1].text.isIntegerStatValue &&
+            cells[2].text.isIntegerStatValue &&
+            cells[3].text.isIntegerStatValue &&
+            cells[4].text.isDecimalStatValue
+    }
 }
 
 private extension Collection {
     subscript(safe index: Index) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+private extension Int {
+    var stringValue: String {
+        String(self)
     }
 }
 
@@ -1434,5 +2072,112 @@ private extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var gameCenterStatInt: Int? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return nil }
+        if trimmed.representsNoOfficialEvents { return 0 }
+        guard trimmed.isIntegerStatValue else { return nil }
+        return Int(trimmed)
+    }
+
+    var isIntegerStatValue: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return false }
+        return trimmed.allSatisfy(\.isNumber)
+    }
+
+    var isDecimalStatValue: Bool {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return false }
+        let parts = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count == 1 {
+            return trimmed.isIntegerStatValue
+        }
+        guard parts.count == 2,
+              parts[0].allSatisfy(\.isNumber),
+              parts[1].allSatisfy(\.isNumber) else {
+            return false
+        }
+        return true
+    }
+
+    var normalizedKeyStatLabel: String {
+        let scalars = normalizedGridText.unicodeScalars.filter { scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
+            CharacterSet.punctuationCharacters.contains(scalar) == false &&
+            CharacterSet.symbols.contains(scalar) == false
+        }
+        return String(String.UnicodeScalarView(scalars)).uppercased()
+    }
+
+    var representsNoOfficialEvents: Bool {
+        let normalized = normalizedKeyStatLabel
+        return normalized.isEmpty || ["없음", "무", "NONE", "NO", "NIL", "-"].contains(normalized)
+    }
+
+    var isHomeRunPlateAppearance: Bool {
+        let normalized = normalizedKeyStatLabel
+        return normalized.contains("홈")
+    }
+
+    var isWalkPlateAppearance: Bool {
+        let normalized = normalizedKeyStatLabel
+        return ["4구", "볼넷", "고4", "고의4구", "자동고의4구"].contains(normalized)
+    }
+
+    var isStrikeoutPlateAppearance: Bool {
+        let normalized = normalizedKeyStatLabel
+        return normalized.contains("삼진") || normalized.contains("낫아웃")
+    }
+
+    var plateAppearanceResultTokens: [String] {
+        normalizedGridText
+            .split { character in
+                character == "," ||
+                    character == "，" ||
+                    character == "/" ||
+                    character == "\n" ||
+                    character == "\r"
+            }
+            .map(String.init)
+            .compactMap(\.nilIfBlank)
+    }
+
+    func firstGameCenterRegexCapture(pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: self) else {
+            return nil
+        }
+        return String(self[captureRange])
+    }
+
+    func gameCenterRegexMatchCount(pattern: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        return regex.numberOfMatches(in: self, range: range)
+    }
+}
+
+private extension GameCenterBattingSection {
+    var totalHits: Int? {
+        totals?.hits?.gameCenterStatInt ?? total(\.hits)
+    }
+
+    var totalHomeRuns: Int? {
+        totals?.homeRuns?.gameCenterStatInt ?? total(\.homeRuns)
+    }
+
+    var totalStrikeouts: Int? {
+        totals?.strikeouts?.gameCenterStatInt ?? total(\.strikeouts)
+    }
+
+    func total(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
+        let values = lines.compactMap { $0[keyPath: keyPath]?.gameCenterStatInt }
+        return values.isEmpty ? nil : values.reduce(0, +)
     }
 }

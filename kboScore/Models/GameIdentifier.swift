@@ -62,6 +62,13 @@ enum GameIdentifier {
             return provider.isEmpty ? [] : [providerKey(provider)]
         }
 
+        if trimmed.hasPrefix("public:") {
+            let publicID = String(trimmed.dropFirst("public:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return publicID.isEmpty ? [] : ["public:\(publicID)"]
+        }
+
         if trimmed.hasPrefix("id:") {
             let id = String(trimmed.dropFirst("id:".count))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -75,7 +82,10 @@ enum GameIdentifier {
             return [idKey(uuid)]
         }
 
-        return [providerKey(trimmed)]
+        return [
+            providerKey(trimmed),
+            "public:\(trimmed.lowercased())"
+        ]
     }
 
     nonisolated private static func trimmedProviderGameID(_ providerGameID: String?) -> String? {

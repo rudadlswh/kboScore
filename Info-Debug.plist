@@ -24,6 +24,8 @@
     <string>$(SUPABASE_PUBLISHABLE_KEY)</string>
     <key>NotificationRegistrationURL</key>
     <string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
+    <key>KBOBackendBaseURL</key>
+    <string>$(KBO_BACKEND_BASE_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>

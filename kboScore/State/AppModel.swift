@@ -71,10 +71,12 @@ private struct HomeFavoriteGameRefreshKey: Hashable {
 final class AppModel {
     private static let settingsStorageKey = "kbo_live_app_settings"
     private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
+    private static let notificationHistoryStorageKey = "kbo_live_notification_history"
     private static let attendedGamesStorageKey = "kbo_live_attended_game_keys"
     private static let cancellationNotificationStorageKey = "kbo_live_cancellation_notification_keys"
     private static let onboardingCompletionStorageKey = "kbo_live_onboarding_completed"
     private static let staleThreshold: TimeInterval = 90
+    private static let gameDetailFreshnessThreshold: TimeInterval = 8
     private static let previousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
         "hanwha": 2,
@@ -174,6 +176,7 @@ final class AppModel {
     private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
     private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
     private var inFlightGameDetailRefreshTasks: [String: Task<GameDetail?, Never>] = [:]
+    private var lastGameDetailRefreshAt: [String: Date] = [:]
     private var inFlightHomeFavoriteGameTasks: [HomeFavoriteGameRefreshKey: Task<Void, Never>] = [:]
     private var lastHomeFavoriteGameRefreshAt: [HomeFavoriteGameRefreshKey: Date] = [:]
     private var inFlightTodayLiveRefreshTasks: [String: Task<Void, Never>] = [:]
@@ -215,20 +218,26 @@ final class AppModel {
         let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
         let persistedOnboardingCompletion = usePersistedSettings ? Self.loadPersistedOnboardingCompletion() : nil
         let persistedDeviceToken = usePersistedSettings ? Self.loadPersistedDeviceToken() : nil
+        let persistedNotificationHistory = usePersistedSettings ? Self.loadPersistedNotificationHistory() : []
         let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
         let persistedCancellationNotificationKeys = usePersistedSettings ? Self.loadPersistedCancellationNotificationKeys() : []
         let hasPersistedFavoriteTeam = Self.canonicalTeamIdentifier(persistedSettings?.favoriteTeamID) != nil
+        let initialHasCompletedOnboarding: Bool
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
         if let persistedOnboardingCompletion {
-            self.hasCompletedOnboarding = persistedOnboardingCompletion
+            initialHasCompletedOnboarding = persistedOnboardingCompletion
         } else if usePersistedSettings == false {
-            self.hasCompletedOnboarding = true
+            initialHasCompletedOnboarding = true
         } else {
             // Upgrade compatibility: if an existing user already had a persisted favorite team,
             // treat onboarding as completed even when the explicit flag is absent.
-            self.hasCompletedOnboarding = hasPersistedFavoriteTeam
+            initialHasCompletedOnboarding = hasPersistedFavoriteTeam
         }
+        self.hasCompletedOnboarding = initialHasCompletedOnboarding
         var initialSettings = persistedSettings ?? .default
+        if initialHasCompletedOnboarding == false {
+            initialSettings.favoriteTeamID = nil
+        }
         initialSettings.favoriteTeamID = Self.canonicalTeamIdentifier(initialSettings.favoriteTeamID)
         self.settings = initialSettings
         self.debugActiveDataSource = "목 데이터"
@@ -251,6 +260,7 @@ final class AppModel {
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
         self.isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        self.notifications = persistedNotificationHistory
         FavoriteTeamScheduleWidgetShared.saveFavoriteTeamID(initialSettings.favoriteTeamID)
         if let bootstrap {
             apply(bootstrap, refreshProbabilitySignalsSynchronously: isRunningTests)
@@ -273,6 +283,14 @@ final class AppModel {
         }
         hasLoaded = true
 
+        guard settings.favoriteTeamID != nil else {
+            #if DEBUG
+            print("[AppStartup] skipped team/home refresh reason=noFavoriteTeam")
+            #endif
+            isLoading = false
+            return
+        }
+
         await refreshFavoriteTeamGameForHome(reason: "launch", bypassingCache: true)
         await syncFavoriteTeamLiveActivity()
         await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
@@ -285,7 +303,7 @@ final class AppModel {
     ) {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
-        notifications = bootstrap.notifications.sorted { $0.sentAt > $1.sentAt }
+        notifications = mergedNotifications(with: bootstrap.notifications)
         invalidateScheduleDerivedCaches()
         if refreshProbabilitySignalsSynchronously {
             refreshLocalStandingsProbabilitySignalsSynchronously()
@@ -458,14 +476,36 @@ final class AppModel {
         }
         let localRankCount = await loadLocalTeamRanks(season: season)
         guard localRankCount == 0 else { return }
-        await refreshStandings()
+        await bootstrapStandingsRankIfNeeded(season: season)
     }
 
     func refreshStandings() async {
         let season = currentStandingsSeason()
+        await refreshStandings(season: season, logsBootstrapJoin: false)
+    }
+
+    private func bootstrapStandingsRankIfNeeded(season: Int) async {
         if let task = inFlightStandingsTasks[season] {
             #if DEBUG
-            print("[StandingsCache] season=\(season) source=inFlight reason=awaitExistingFetch")
+            print("[StandingsRank] remote bootstrap skipped reason=inFlight season=\(season)")
+            #endif
+            await task.value
+            return
+        }
+
+        #if DEBUG
+        print("[StandingsRank] local empty bootstrap start season=\(season)")
+        #endif
+        await refreshStandings(season: season, logsBootstrapJoin: true)
+    }
+
+    private func refreshStandings(season: Int, logsBootstrapJoin: Bool) async {
+        if let task = inFlightStandingsTasks[season] {
+            #if DEBUG
+            let inFlightLog = logsBootstrapJoin
+                ? "[StandingsRank] remote bootstrap joined reason=inFlight season=\(season)"
+                : "[StandingsCache] season=\(season) source=inFlight reason=awaitExistingFetch"
+            print(inFlightLog)
             #endif
             await task.value
             return
@@ -505,7 +545,7 @@ final class AppModel {
         standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
         standingsSourceGamesBySeason[season] = nil
         #if DEBUG
-        print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0)")
+        print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
         #endif
         return rows.count
     }
@@ -520,12 +560,12 @@ final class AppModel {
 
         do {
             #if DEBUG
-            print("[StandingsRank] remote fetch start view=team_rank_2026")
+            print("[StandingsRank] remote fetch start view=team_rank_2026 season=\(season)")
             #endif
             let rows = try await teamRankSource.fetchTeamRanks(season: season)
                 .sorted { $0.rank < $1.rank }
             #if DEBUG
-            print("[StandingsRank] remote fetch success count=\(rows.count)")
+            print("[StandingsRank] remote fetch success count=\(rows.count) season=\(season)")
             #endif
 
             guard rows.isEmpty == false else {
@@ -538,15 +578,15 @@ final class AppModel {
             if let localRankCache = repository as? any KBOLocalTeamRankCacheUpserting {
                 let count = await localRankCache.replaceLocalTeamRanks(rows, season: season)
                 #if DEBUG
-                print("[StandingsRank] remote cache write count=\(count)")
+                print("[StandingsRank] remote cache write count=\(count) season=\(season)")
                 #endif
                 _ = await loadLocalTeamRanks(season: season)
             } else {
                 standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
                 standingsSourceGamesBySeason[season] = nil
                 #if DEBUG
-                print("[StandingsRank] remote cache write count=0")
-                print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0)")
+                print("[StandingsRank] remote cache write count=0 season=\(season)")
+                print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
                 #endif
             }
 
@@ -740,6 +780,9 @@ final class AppModel {
     }
 
     func completeFavoriteTeamOnboarding(with teamID: String) {
+        #if DEBUG
+        print("[FavoriteTeamOnboarding] selected favoriteTeamID=\(teamID)")
+        #endif
         settings.favoriteTeamID = teamID
         guard hasCompletedOnboarding == false else { return }
         hasCompletedOnboarding = true
@@ -923,6 +966,7 @@ final class AppModel {
             currentPitcherName: game.currentPitcherName,
             currentBatterName: game.currentBatterName,
             bases: game.bases,
+            baseRunners: game.baseRunners,
             balls: game.balls,
             strikes: game.strikes,
             outs: game.outs
@@ -1489,6 +1533,11 @@ final class AppModel {
             return providerMatch
         }
 
+        let publicKeys = lookupKeys.filter { $0.hasPrefix("public:") }
+        if let publicMatch = preferredGame(matchingAnyOf: publicKeys) {
+            return publicMatch
+        }
+
         let idKeys = lookupKeys.filter { $0.hasPrefix("id:") }
         if let idMatch = preferredGame(matchingAnyOf: idKeys) {
             let resolved = equivalentGames(to: idMatch).reduce(idMatch) { preferred, candidate in
@@ -1527,16 +1576,24 @@ final class AppModel {
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
         guard let selectedGame = game(withIdentity: gameIdentity) else {
             #if DEBUG
-            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) skipped=noSelectedGame")
+            debugLogMissingSelectedGame(gameIdentity)
             #endif
             return nil
         }
-        let stableRefreshKey = selectedGame.canonicalGameIdentityKey
-        if forceRefresh == false, let existingTask = inFlightGameDetailRefreshTasks[stableRefreshKey] {
+        let stableRefreshKey = selectedGame.stableDetailIdentity
+        if let existingTask = inFlightGameDetailRefreshTasks[stableRefreshKey] {
             #if DEBUG
-            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) source=inFlight")
+            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(stableRefreshKey) skipped=inFlight")
             #endif
             return await existingTask.value
+        }
+        if forceRefresh == false,
+           let refreshedAt = lastGameDetailRefreshAt[stableRefreshKey],
+           currentDateProvider().timeIntervalSince(refreshedAt) < Self.gameDetailFreshnessThreshold {
+            #if DEBUG
+            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(stableRefreshKey) skipped=freshEnough")
+            #endif
+            return selectedGame
         }
 
         let task = Task { @MainActor [weak self] in
@@ -1550,6 +1607,7 @@ final class AppModel {
         inFlightGameDetailRefreshTasks[stableRefreshKey] = task
         let result = await task.value
         inFlightGameDetailRefreshTasks[stableRefreshKey] = nil
+        lastGameDetailRefreshAt[stableRefreshKey] = currentDateProvider()
         return result
     }
 
@@ -1566,7 +1624,7 @@ final class AppModel {
         }
 
         #if DEBUG
-        print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) before=\(debugGameIdentifier(for: selectedGame)) status=\(selectedGame.status.rawValue) score=\(scoreDebugText(selectedGame)) inning=\(selectedGame.inningText ?? "<nil>") force=\(forceRefresh)")
+            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(selectedGame.stableDetailIdentity) start before=\(debugGameIdentifier(for: selectedGame)) status=\(selectedGame.status.rawValue) score=\(scoreDebugText(selectedGame)) inning=\(selectedGame.inningText ?? "<nil>") force=\(forceRefresh)")
         #endif
 
         do {
@@ -1593,7 +1651,7 @@ final class AppModel {
                 cacheUpsertResult.inserted > 0 ||
                 cacheUpsertResult.updated > 0
             #if DEBUG
-            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) before=\(selectedGame.status.rawValue) \(scoreDebugText(selectedGame)) incoming=\(incomingGame.status.rawValue) \(scoreDebugText(incomingGame)) after=\(resolved.status.rawValue) \(scoreDebugText(resolved)) sharedUpdated=\(sharedUpdated) dateWideFetch=false")
+            print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(selectedGame.stableDetailIdentity) completed changed=\(resolved != selectedGame) before=\(selectedGame.status.rawValue) \(scoreDebugText(selectedGame)) incoming=\(incomingGame.status.rawValue) \(scoreDebugText(incomingGame)) after=\(resolved.status.rawValue) \(scoreDebugText(resolved)) sharedUpdated=\(sharedUpdated) dateWideFetch=false")
             #endif
             await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
@@ -1684,19 +1742,22 @@ final class AppModel {
 
     func startOrUpdateLiveActivityIfNeeded(for game: GameDetail) async {
         liveActivitySupported = liveActivityController.isSupported
+        let resolvedGame = self.game(withIdentity: game.canonicalGameIdentityValue) ??
+            self.game(withIdentity: game.stableDetailIdentity) ??
+            game
         guard settings.liveActivitiesEnabled,
               liveActivitySupported,
-              shouldAutoStartLiveActivity(for: game),
-              let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: settings.favoriteTeamID) else {
+              shouldAutoStartLiveActivity(for: resolvedGame),
+              let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: resolvedGame, favoriteTeamID: settings.favoriteTeamID) else {
             return
         }
 
         do {
             try await liveActivityController.startOrUpdate(using: snapshot)
-            activeLiveActivityGameID = game.id
+            activeLiveActivityGameID = resolvedGame.id
         } catch {
             #if DEBUG
-            print("[LiveActivityPayload] auto start/update failed gameID=\(game.id.uuidString) error=\(error)")
+            print("[LiveActivityPayload] auto start/update failed gameID=\(resolvedGame.id.uuidString) error=\(error)")
             #endif
         }
     }
@@ -1734,6 +1795,7 @@ final class AppModel {
     func markNotificationRead(_ notificationID: UUID) {
         guard let index = notifications.firstIndex(where: { $0.id == notificationID }) else { return }
         notifications[index].isRead = true
+        persistNotificationHistory()
     }
 
     func connectNotificationDelegate(_ delegate: AppNotificationDelegate) {
@@ -1760,6 +1822,13 @@ final class AppModel {
     }
 
     func syncNotificationRegistrationState() async {
+        guard shouldShowFavoriteTeamOnboarding == false,
+              settings.favoriteTeamID != nil else {
+            #if DEBUG
+            print("[AppStartup] skipped notification registration reason=noFavoriteTeam")
+            #endif
+            return
+        }
         await refreshNotificationAuthorizationStatus()
         if notificationAuthorizationStatus.allowsNotifications {
             #if DEBUG
@@ -2296,7 +2365,7 @@ final class AppModel {
                 }
                 await refreshRepositoryDebugInfo(dataSets: [.games, .notifications])
             } else {
-                notifications = try await repository.fetchNotifications()
+                notifications = mergedNotifications(with: try await repository.fetchNotifications())
                 if repositoryRuntimeState == nil {
                     markRefreshSuccess(for: .notifications, at: Date(), isStale: false)
                 }
@@ -2708,6 +2777,31 @@ final class AppModel {
         APNsDeviceTokenStore.loadOrMigrateLegacyValue(legacyKey: Self.deviceTokenStorageKey)
     }
 
+    private func persistNotificationHistory() {
+        guard usesPersistedSettings else { return }
+        guard let encoded = try? JSONEncoder().encode(notifications) else { return }
+        UserDefaults.standard.set(encoded, forKey: Self.notificationHistoryStorageKey)
+    }
+
+    private static func loadPersistedNotificationHistory() -> [NotificationItem] {
+        guard let data = UserDefaults.standard.data(forKey: Self.notificationHistoryStorageKey),
+              let decoded = try? JSONDecoder().decode([NotificationItem].self, from: data) else {
+            return []
+        }
+        return decoded.sorted { $0.sentAt > $1.sentAt }
+    }
+
+    private func mergedNotifications(with incoming: [NotificationItem]) -> [NotificationItem] {
+        var byID: [UUID: NotificationItem] = [:]
+        for item in notifications {
+            byID[item.id] = item
+        }
+        for item in incoming {
+            byID[item.id] = item
+        }
+        return byID.values.sorted { $0.sentAt > $1.sentAt }
+    }
+
     private func persistAttendedGameKeys() {
         guard usesPersistedSettings else { return }
         guard let encoded = try? JSONEncoder().encode(Array(attendedGameKeys).sorted()) else { return }
@@ -2748,9 +2842,50 @@ final class AppModel {
         return UserDefaults.standard.bool(forKey: Self.onboardingCompletionStorageKey)
     }
 
-    private func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
+    func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
         guard let payload = ScoreNotificationPayloadExtractor.payload(from: userInfo) else { return }
+        recordReceivedNotification(payload)
         routeNotification(payload)
+    }
+
+    private func recordReceivedNotification(_ payload: ScoreNotificationPayload) {
+        let receivedAt = currentDateProvider()
+        let item = NotificationItem(
+            id: UUID(),
+            type: notificationType(from: payload.eventType),
+            title: payload.title,
+            body: payload.body,
+            sentAt: receivedAt,
+            receivedAt: receivedAt,
+            isRead: false,
+            relatedGameID: GameIdentifier.uuid(from: payload.gameID ?? payload.publicGameID),
+            publicGameID: payload.publicGameID,
+            relatedTeamIDs: payload.teamIDs
+        )
+        notifications.insert(item, at: 0)
+        notifications = notifications.sorted { $0.sentAt > $1.sentAt }
+        persistNotificationHistory()
+    }
+
+    private func notificationType(from eventType: ScoreNotificationEventType) -> NotificationType {
+        switch eventType {
+        case .gameStart:
+            .gameStart
+        case .scoreChange:
+            .scoreChange
+        case .onBase:
+            .onBase
+        case .leadChange:
+            .leadChange
+        case .gameEnd:
+            .gameEnd
+        case .inningChange:
+            .inningChange
+        case .rainDelay:
+            .rainDelay
+        case .general:
+            .scoreChange
+        }
     }
 
     private func routeNotification(_ payload: ScoreNotificationPayload) {
@@ -2790,6 +2925,29 @@ final class AppModel {
     private func scheduleNotificationRegistrationSync(force _: Bool) {
         guard let payload = currentNotificationRegistrationPayload else {
             notificationRegistrationSyncStatus = .waitingForToken
+            return
+        }
+        guard let favoriteTeamID = payload.favoriteTeamID,
+              favoriteTeamID.isEmpty == false else {
+            notificationRegistrationSyncStatus = .idle
+            #if DEBUG
+            print("[NotificationPipeline] registration skipped reason=noFavoriteTeam")
+            #endif
+            return
+        }
+        guard payload.alertTypes.isEmpty == false else {
+            notificationRegistrationSyncStatus = .idle
+            #if DEBUG
+            print("[NotificationPipeline] registration skipped reason=notificationsDisabled favoriteTeamID=\(favoriteTeamID)")
+            #endif
+            return
+        }
+        guard notificationAuthorizationStatus == .authorized ||
+                notificationAuthorizationStatus == .provisional else {
+            notificationRegistrationSyncStatus = .idle
+            #if DEBUG
+            print("[NotificationPipeline] registration skipped reason=authorizationNotGranted status=\(notificationAuthorizationStatus.rawValue)")
+            #endif
             return
         }
 
@@ -3245,6 +3403,8 @@ final class AppModel {
             return settings.notificationPreferences.leadChange
         case .gameEnd:
             return settings.notificationPreferences.gameEnd
+        case .inningChange:
+            return settings.notificationPreferences.inningChangeEnabled
         case .rainDelay:
             return settings.notificationPreferences.rainDelay
         case .general:
@@ -3283,6 +3443,9 @@ final class AppModel {
         case .gameEnd:
             title = "경기 종료"
             body = game.finalScoreLine ?? "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName) 경기가 종료되었습니다."
+        case .inningChange:
+            title = "이닝 교체"
+            body = game.inningText ?? "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName)"
         case .general:
             title = "경기 상황 업데이트"
             body = game.inningText ?? "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName)"
@@ -3521,6 +3684,11 @@ final class AppModel {
             seasonClassification: stateSource.seasonClassification == .unknown ? existing.seasonClassification : stateSource.seasonClassification,
             inningText: nonBlank(stateSource.inningText) ?? supplementalSource.inningText,
             bases: stateSource.bases,
+            baseRunners: mergedBaseRunners(
+                primary: stateSource.baseRunners,
+                supplemental: supplementalSource.baseRunners,
+                bases: stateSource.bases
+            ),
             balls: stateSource.balls,
             strikes: stateSource.strikes,
             outs: stateSource.outs,
@@ -3533,6 +3701,23 @@ final class AppModel {
             currentPitcherName: nonBlank(stateSource.currentPitcherName),
             currentBatterName: nonBlank(stateSource.currentBatterName)
         )
+    }
+
+    private func mergedBaseRunners(
+        primary: GameBaseRunners?,
+        supplemental: GameBaseRunners?,
+        bases: RunnerState?
+    ) -> GameBaseRunners? {
+        guard let bases else {
+            return primary ?? supplemental
+        }
+        let first = bases.first ? (nonBlank(primary?.first) ?? nonBlank(supplemental?.first)) : nil
+        let second = bases.second ? (nonBlank(primary?.second) ?? nonBlank(supplemental?.second)) : nil
+        let third = bases.third ? (nonBlank(primary?.third) ?? nonBlank(supplemental?.third)) : nil
+        guard first != nil || second != nil || third != nil else {
+            return nil
+        }
+        return GameBaseRunners(first: first, second: second, third: third)
     }
 
     private func preferredGameStateSource(existing: GameDetail, candidate: GameDetail) -> GameDetail {
@@ -3653,6 +3838,22 @@ final class AppModel {
             preferredKnownScheduleGame(existing: preferred, candidate: candidate)
         }
     }
+
+    #if DEBUG
+    private func debugLogMissingSelectedGame(_ gameIdentity: String) {
+        let rawIdentifier: String
+        if let separator = gameIdentity.firstIndex(of: ":") {
+            rawIdentifier = String(gameIdentity[gameIdentity.index(after: separator)...])
+        } else {
+            rawIdentifier = gameIdentity
+        }
+        let candidates = allKnownGames()
+        let hasPublicIDs = candidates.contains { nonBlank($0.publicGameID) != nil }
+        let hasProviderIDs = candidates.contains { nonBlank($0.providerGameID) != nil }
+        let hasOfficialIDs = candidates.contains { nonBlank($0.officialGameCenterID) != nil }
+        print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) skipped=noSelectedGame candidateCount=\(candidates.count) hasPublicIDs=\(hasPublicIDs) hasProviderIDs=\(hasProviderIDs) hasOfficialIDs=\(hasOfficialIDs)")
+    }
+    #endif
 
     private func equivalentGames(to game: GameDetail) -> [GameDetail] {
         var equivalentAliases = identityAliases(for: game)

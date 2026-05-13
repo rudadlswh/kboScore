@@ -11,3 +11,4 @@ SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
 APS_ENVIRONMENT = production
 KBO_NOTIFICATION_REGISTRATION_URL =
+KBO_BACKEND_BASE_URL =

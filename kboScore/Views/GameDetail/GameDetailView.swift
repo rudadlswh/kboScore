@@ -51,7 +51,12 @@ struct GameDetailView: View {
     var body: some View {
         ScrollView {
             if let game = viewModel.game {
-                let presentation = GameDetailPresentation(game: game, payload: screenModel.detail)
+                let presentation = GameDetailPresentation(
+                    game: game,
+                    payload: screenModel.detail,
+                    boxscore: screenModel.boxscore,
+                    baseRunnerDisplay: viewModel.baseRunnerDisplay
+                )
                 let availableSections = GameDetailSection.availableSections(for: presentation.status)
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -67,9 +72,6 @@ struct GameDetailView: View {
                 }
                 .task(id: presentation.status) {
                     screenModel.syncSelection(for: presentation.status)
-                }
-                .task(id: "\(game.id.uuidString)-\(presentation.status.rawValue)-\(appModel.settings.liveActivitiesEnabled)") {
-                    await appModel.startOrUpdateLiveActivityIfNeeded(for: game)
                 }
             } else {
                 EmptyStateView(
@@ -202,13 +204,16 @@ struct GameDetailView: View {
                     title: "경기 결과",
                     message: presentation.finalSummaryText
                 )
-            } else {
-                DetailMessageCard(
-                    icon: "calendar",
-                    title: "경기 전 안내",
-                    message: "라이브 상황과 라인스코어는 경기 시작 후 자동으로 갱신됩니다."
-                )
             }
+//            else {
+//                DetailMessageCard(
+//                    icon: "calendar",
+//                    title: "경기 전 안내",
+//                    message: "라이브 상황과 라인스코어는 경기 시작 후 자동으로 갱신됩니다."
+//                )
+//            }
+
+            GameDetailRecordsPanel(presentation: presentation, isLoading: screenModel.isLoading)
         }
     }
 
@@ -229,22 +234,7 @@ struct GameDetailView: View {
 
                 GameLineScoreCard(presentation: presentation)
 
-                if let review = presentation.review {
-                    if review.summaryItems.isEmpty == false {
-                        SummaryItemsCard(items: review.summaryItems)
-                    }
-
-                    BattingSectionCard(title: "\(presentation.game.awayTeam.displayName) 타자 기록", section: review.awayBatting)
-                    BattingSectionCard(title: "\(presentation.game.homeTeam.displayName) 타자 기록", section: review.homeBatting)
-                    PitchingSectionCard(title: "\(presentation.game.awayTeam.displayName) 투수 기록", section: review.awayPitching)
-                    PitchingSectionCard(title: "\(presentation.game.homeTeam.displayName) 투수 기록", section: review.homePitching)
-                } else {
-                    EmptyStateView(
-                        systemImage: "doc.text",
-                        title: "리뷰 데이터가 없습니다",
-                        message: "현재 데이터 소스에서 리뷰 또는 박스스코어 정보를 아직 제공하지 않습니다."
-                    )
-                }
+                GameDetailRecordsPanel(presentation: presentation, isLoading: screenModel.isLoading)
             }
         }
     }
@@ -384,7 +374,8 @@ private struct GameDetailPresentation {
     let strikes: Int?
     let outs: Int?
     let bases: RunnerState?
-    let baseRunners: GameCenterBaseRunners?
+    let baseRunners: GameBaseRunners?
+    let baseRunnerDisplay: BaseRunnerDisplayResolution
     let currentBatterName: String?
     let currentPitcherName: String?
     let winningPitcher: String?
@@ -398,7 +389,12 @@ private struct GameDetailPresentation {
     let review: GameCenterReview?
     let preview: GameCenterPreview?
 
-    init(game: GameDetail, payload: GameCenterDetailPayload?) {
+    init(
+        game: GameDetail,
+        payload: GameCenterDetailPayload?,
+        boxscore: GameBoxscoreResponse?,
+        baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
+    ) {
         let summary = payload?.summary
         self.game = game
         status = summary?.status ?? game.status
@@ -415,7 +411,10 @@ private struct GameDetailPresentation {
         strikes = summary?.strikes ?? game.strikes
         outs = summary?.outs ?? game.outs
         bases = summary?.bases ?? game.bases
-        baseRunners = summary?.baseRunners
+        baseRunners = summary?.baseRunners.map {
+            GameBaseRunners(first: $0.first, second: $0.second, third: $0.third)
+        } ?? game.baseRunners
+        self.baseRunnerDisplay = baseRunnerDisplay
         currentBatterName = game.currentBatterName?.nilIfBlank
         currentPitcherName = game.currentPitcherName?.nilIfBlank
         winningPitcher = summary?.winningPitcher?.nilIfBlank
@@ -426,7 +425,7 @@ private struct GameDetailPresentation {
         crowdText = summary?.crowdText?.nilIfBlank
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
         lineScore = payload?.lineScore
-        review = payload?.review
+        review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ?? payload?.review
         preview = payload?.preview
     }
 
@@ -500,6 +499,18 @@ private struct GameDetailPresentation {
         }
     }
 
+    var displayBaseRunners: [BaseRunnerDisplayItem] {
+        [
+            ("1B", bases?.first == true, baseRunners?.first?.nilIfBlank ?? baseRunnerDisplay.runners.first?.nilIfBlank),
+            ("2B", bases?.second == true, baseRunners?.second?.nilIfBlank ?? baseRunnerDisplay.runners.second?.nilIfBlank),
+            ("3B", bases?.third == true, baseRunners?.third?.nilIfBlank ?? baseRunnerDisplay.runners.third?.nilIfBlank)
+        ]
+        .compactMap { item in
+            guard item.1, let name = item.2 else { return nil }
+            return BaseRunnerDisplayItem(base: item.0, name: name)
+        }
+    }
+
     var displayAwayScore: String {
         showsLiveOrFinalScore ? (awayScore.map(String.init) ?? "-") : ""
     }
@@ -514,10 +525,11 @@ private struct GameDetailPresentation {
 
     func logRenderedBaseRunnersIfNeeded() {
         #if DEBUG
-        let rendered = visibleBaseRunners.reduce(into: ["1B": "<hidden>", "2B": "<hidden>", "3B": "<hidden>"]) { result, item in
+        print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
+        let rendered = displayBaseRunners.reduce(into: ["1B": "<hidden>", "2B": "<hidden>", "3B": "<hidden>"]) { result, item in
             result[item.base] = item.name
         }
-        print("[BaseRunners] rendered first=\(rendered["1B"] ?? "<hidden>") second=\(rendered["2B"] ?? "<hidden>") third=\(rendered["3B"] ?? "<hidden>")")
+        print("[BaseRunners] rendered first=\(rendered["1B"] ?? "unknownRunner") second=\(rendered["2B"] ?? "unknownRunner") third=\(rendered["3B"] ?? "unknownRunner") source=\(baseRunnerDisplay.source)")
         #endif
     }
 }
@@ -652,8 +664,8 @@ private struct LiveSituationRow: View {
                 HStack(alignment: .center, spacing: 12) {
                     BasesDiamondView(bases: presentation.bases ?? .empty)
 
-                    if presentation.visibleBaseRunners.isEmpty == false {
-                        BaseRunnerList(runners: presentation.visibleBaseRunners)
+                    if presentation.displayBaseRunners.isEmpty == false {
+                        BaseRunnerList(runners: presentation.displayBaseRunners)
                     }
                 }
                 .onAppear {
@@ -1069,224 +1081,573 @@ private struct SummaryItemsCard: View {
     }
 }
 
-private struct BattingSectionCard: View {
+private enum GameDetailRecordTab: String, CaseIterable, Identifiable {
+    case batting = "실시간 라인업 / 타자 기록"
+    case pitching = "투수 기록"
+    case summary = "주요 기록"
+
+    var id: String { rawValue }
+
+    var shortTitle: String {
+        switch self {
+        case .batting:
+            "타자"
+        case .pitching:
+            "투수"
+        case .summary:
+            "주요"
+        }
+    }
+}
+
+private enum GameDetailRecordTeam: String, CaseIterable, Identifiable {
+    case away = "원정"
+    case home = "홈"
+
+    var id: String { rawValue }
+}
+
+private struct GameDetailRecordsPanel: View {
+    @State private var selectedTab: GameDetailRecordTab = .batting
+    @State private var selectedTeam: GameDetailRecordTeam = .away
+
+    let presentation: GameDetailPresentation
+    let isLoading: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("상세 기록")
+                    .font(.headline.weight(.bold))
+                Spacer()
+                if presentation.status.isLiveLike {
+                    Text("LIVE")
+                        .font(.caption2.weight(.heavy))
+                        .foregroundStyle(KBOLivePalette.live)
+                }
+            }
+
+            recordTabPicker
+
+            if let review = presentation.review {
+                switch selectedTab {
+                case .batting:
+                    TeamRecordSwitcher(
+                        selection: $selectedTeam,
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam
+                    )
+                    BattingSectionTable(
+                        team: selectedTeam == .away ? presentation.game.awayTeam : presentation.game.homeTeam,
+                        section: selectedTeam == .away ? review.awayBatting : review.homeBatting
+                    )
+                case .pitching:
+                    TeamRecordSwitcher(
+                        selection: $selectedTeam,
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam
+                    )
+                    PitchingSectionTable(
+                        team: selectedTeam == .away ? presentation.game.awayTeam : presentation.game.homeTeam,
+                        section: selectedTeam == .away ? review.awayPitching : review.homePitching
+                    )
+                case .summary:
+                    KeyRecordsComparisonView(presentation: presentation, review: review)
+                }
+            } else if isLoading {
+                DetailInlineLoadingView(message: "기록 데이터를 불러오는 중")
+            } else {
+                RecordsEmptyState(status: presentation.status)
+            }
+        }
+        .cardSurface()
+    }
+
+    private var recordTabPicker: some View {
+        Picker("기록 섹션", selection: $selectedTab) {
+            ForEach(GameDetailRecordTab.allCases) { tab in
+                Text(tab.shortTitle).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+private struct TeamRecordSwitcher: View {
+    @Binding var selection: GameDetailRecordTeam
+    let awayTeam: Team
+    let homeTeam: Team
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TeamRecordButton(
+                title: awayTeam.displayName,
+                team: awayTeam,
+                isSelected: selection == .away
+            ) {
+                selection = .away
+            }
+            TeamRecordButton(
+                title: homeTeam.displayName,
+                team: homeTeam,
+                isSelected: selection == .home
+            ) {
+                selection = .home
+            }
+        }
+    }
+}
+
+private struct TeamRecordButton: View {
+    @Environment(AppModel.self) private var appModel
     let title: String
+    let team: Team
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                TeamMarkView(team: team, size: 22)
+                Text(title)
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? team.identity.theme.accent.opacity(0.24) : (appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground)))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(isSelected ? team.identity.theme.accent.opacity(0.75) : Color.clear, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+private struct BattingSectionTable: View {
+    @Environment(AppModel.self) private var appModel
+    let team: Team
     let section: GameCenterBattingSection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(title)
-                    .font(.headline.weight(.bold))
+                Label("실시간 라인업 / 타자 기록", systemImage: "figure.baseball")
+                    .font(.subheadline.weight(.bold))
                 Spacer()
-                if let totals = section.totals {
-                    Text(totalsSummary(totals))
+                if section.lines.isEmpty == false {
+                    Text(team.shortName)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
             }
 
-            ForEach(section.lines) { line in
-                HStack(alignment: .center, spacing: 10) {
-                    Text(line.battingOrder)
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 18)
-                    Text(displayPosition(line.position))
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .frame(width: 34, alignment: .center)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(line.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(statSummary(for: line))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(nil)
-                            .fixedSize(horizontal: false, vertical: true)
+            if section.lines.isEmpty {
+                RecordsEmptyState(status: .live)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        BattingHeaderRow()
+                        ForEach(section.lines) { line in
+                            BattingValueRow(line: line)
+                        }
+                        if let totals = section.totals {
+                            BattingTotalsRow(totals: totals)
+                        } else if let totals = GameCenterBattingTotals.derived(from: section.lines) {
+                            BattingTotalsRow(totals: totals)
+                        }
                     }
-                    Spacer(minLength: 8)
-                }
-                .padding(.vertical, 6)
-            }
-        }
-        .cardSurface()
-    }
-
-    private func statSummary(for line: GameCenterBattingLine) -> String {
-        [
-            line.atBats.map { "타수 \($0)" },
-            line.hits.map { "안타 \($0)" },
-            line.runsBattedIn.map { "타점 \($0)" },
-            line.runs.map { "득점 \($0)" },
-            line.average.map { "타율 \($0)" }
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
-    }
-
-    private func totalsSummary(_ totals: GameCenterBattingTotals) -> String {
-        [
-            totals.atBats.map { "타수 \($0)" },
-            totals.hits.map { "안타 \($0)" },
-            totals.runsBattedIn.map { "타점 \($0)" },
-            totals.runs.map { "득점 \($0)" },
-            totals.average.map { "타율 \($0)" }
-        ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
-    }
-    
-    private func displayPosition(_ position: String) -> String {
-        let raw = position.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard raw.isEmpty == false else { return "-" }
-
-        let compact = raw
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: "－", with: "-")
-            .replacingOccurrences(of: "–", with: "-")
-            .replacingOccurrences(of: "—", with: "-")
-            .replacingOccurrences(of: "ㅡ", with: "-")
-
-        let upper = compact.uppercased()
-
-        let exactMap: [String: String] = [
-            "1루수": "1B", "일루수": "1B", "一": "1B", "1": "1B",
-            "2루수": "2B", "이루수": "2B", "二": "2B", "2": "2B",
-            "3루수": "3B", "삼루수": "3B", "三": "3B", "3": "3B",
-            "포수": "C", "포": "C",
-            "좌익수": "LF", "좌": "LF",
-            "중견수": "CF", "중": "CF",
-            "우익수": "RF", "우": "RF",
-            "지명타자": "DH", "지": "DH",
-            "유격수": "SS", "유": "SS",
-            "투수": "P", "투": "P",
-            "대타": "PH", "타": "PH", "타-": "PH",
-            "대주자": "PR", "주": "PR",
-        ]
-
-        if let mapped = exactMap[compact] ?? exactMap[upper] {
-            return mapped
-        }
-
-        let tokens = compact.split(separator: "/").map(String.init)
-        if tokens.count > 1 {
-            let mapped = tokens.map { token in
-                exactMap[token] ?? exactMap[token.uppercased()] ?? token
-            }
-            return mapped.joined(separator: "/")
-        }
-
-        let mappedParts = compact.compactMap { character -> String? in
-            switch character {
-            case "一":
-                return "1B"
-            case "二":
-                return "2B"
-            case "三":
-                return "3B"
-            case "포":
-                return "c"
-            case "좌":
-                return "LF"
-            case "중":
-                return "CF"
-            case "우":
-                return "RF"
-            case "지":
-                return "DH"
-            case "유":
-                return "SS"
-            case "투":
-                return "P"
-            case "타":
-                return "PH"
-            case "주":
-                return "PR"
-            case "-":
-                return nil
-            default:
-                return nil
-            }
-        }
-
-        if mappedParts.isEmpty == false {
-            var uniqueParts: [String] = []
-
-            for part in mappedParts {
-                if uniqueParts.contains(part) == false {
-                    uniqueParts.append(part)
                 }
             }
-
-            return uniqueParts.joined(separator: "/")
         }
-
-        return raw
     }
 }
 
-private struct PitchingSectionCard: View {
-    @Environment(AppModel.self) private var appModel
-    let title: String
+private struct BattingHeaderRow: View {
+    var body: some View {
+        StatsTableRow(
+            name: "타자명",
+            position: "포지션",
+            values: ["타수", "득점", "안타", "타점", "홈런", "볼넷", "삼진", "도루", "타율"],
+            isHeader: true
+        )
+    }
+}
+
+private struct BattingValueRow: View {
+    let line: GameCenterBattingLine
+
+    var body: some View {
+        StatsTableRow(
+            order: line.battingOrder,
+            name: line.name,
+            position: GameRecordPositionFormatter.display(line.position),
+            values: [
+                line.atBats.displayStat,
+                line.runs.displayStat,
+                line.hits.displayStat,
+                line.runsBattedIn.displayStat,
+                (line.homeRuns ?? line.plateAppearanceHomeRuns).displayStat,
+                (line.walks ?? line.plateAppearanceWalks).displayStat,
+                (line.strikeouts ?? line.plateAppearanceStrikeouts).displayStat,
+                line.stolenBases.displayStolenBaseStat,
+                line.average.displayStat
+            ]
+        )
+    }
+}
+
+private struct BattingTotalsRow: View {
+    let totals: GameCenterBattingTotals
+
+    var body: some View {
+        StatsTableRow(
+            name: "합계",
+            position: "",
+            values: [
+                totals.atBats.displayStat,
+                totals.runs.displayStat,
+                totals.hits.displayStat,
+                totals.runsBattedIn.displayStat,
+                (totals.homeRuns ?? totals.plateAppearanceHomeRuns).displayStat,
+                (totals.walks ?? totals.plateAppearanceWalks).displayStat,
+                (totals.strikeouts ?? totals.plateAppearanceStrikeouts).displayStat,
+                totals.stolenBases.displayStolenBaseStat,
+                totals.average.displayStat
+            ],
+            isTotal: true
+        )
+    }
+}
+
+private struct PitchingSectionTable: View {
+    let team: Team
     let section: GameCenterPitchingSection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline.weight(.bold))
-
-            ForEach(section.lines) { line in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(line.name)
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let result = line.result, result.isEmpty == false {
-                            Text(result)
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground), in: Capsule())
-                        }
-                        Spacer()
-                        Text(line.role ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Text(pitchingSummary(for: line))
-                        .font(.caption)
+            HStack {
+                Label("투수 기록", systemImage: "baseball.diamond.bases")
+                    .font(.subheadline.weight(.bold))
+                Spacer()
+                if section.lines.isEmpty == false {
+                    Text(team.shortName)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.vertical, 6)
+            }
+
+            if section.lines.isEmpty {
+                RecordsEmptyState(status: .live)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        PitchingHeaderRow()
+                        ForEach(section.lines) { line in
+                            PitchingValueRow(line: line)
+                        }
+                        if let totals = GameCenterPitchingTotals.derived(from: section.lines) {
+                            PitchingTotalsRow(totals: totals)
+                        }
+                    }
+                }
             }
         }
-        .cardSurface()
+    }
+}
+
+private struct PitchingHeaderRow: View {
+    var body: some View {
+        StatsTableRow(
+            name: "투수명",
+            position: "",
+            values: ["순서", "등판", "결과", "이닝", "타자", "투구수", "타수", "피안타", "피홈런", "4사구", "삼진", "실점", "자책", "평균자책"],
+            isHeader: true,
+            nameWidth: 118
+        )
+    }
+}
+
+private struct PitchingValueRow: View {
+    let line: GameCenterPitchingLine
+
+    var body: some View {
+        StatsTableRow(
+            name: line.displayName,
+            position: "",
+            values: [
+                line.pitchingOrder.displayStat,
+                line.role.displayStat,
+                line.result.displayStat,
+                line.innings.displayStat,
+                line.battersFaced.displayStat,
+                line.pitches.displayStat,
+                line.atBats.displayStat,
+                line.hitsAllowed.displayStat,
+                line.homeRunsAllowed.displayStat,
+                (line.walksOrHitByPitch ?? line.walksAllowed).displayStat,
+                line.strikeouts.displayStat,
+                line.runsAllowed.displayStat,
+                line.earnedRuns.displayStat,
+                line.earnedRunAverage.displayStat
+            ],
+            nameWidth: 118
+        )
+    }
+}
+
+private struct PitchingTotalsRow: View {
+    let totals: GameCenterPitchingTotals
+
+    var body: some View {
+        StatsTableRow(
+            name: "합계",
+            position: "",
+            values: [
+                "-",
+                "-",
+                "-",
+                totals.innings.displayStat,
+                totals.battersFaced.displayStat,
+                totals.pitches.displayStat,
+                totals.atBats.displayStat,
+                totals.hitsAllowed.displayStat,
+                totals.homeRunsAllowed.displayStat,
+                totals.walksOrHitByPitch.displayStat,
+                totals.strikeouts.displayStat,
+                totals.runsAllowed.displayStat,
+                totals.earnedRuns.displayStat,
+                "-"
+            ],
+            isTotal: true,
+            nameWidth: 118
+        )
+    }
+}
+
+private struct StatsTableRow: View {
+    @Environment(AppModel.self) private var appModel
+    var order: String? = nil
+    let name: String
+    let position: String
+    let values: [String]
+    var isHeader = false
+    var isTotal = false
+    var nameWidth: CGFloat = 132
+    private let valueWidth: CGFloat = 46
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if let order = order?.battingOrderNumber {
+                    Text(order)
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(isHeader ? secondaryColor : primaryColor)
+                        .frame(width: 18, alignment: .leading)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(isHeader ? .caption.weight(.bold) : .subheadline.weight(isTotal ? .heavy : .semibold))
+                        .foregroundStyle(isHeader ? secondaryColor : primaryColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    if position.isEmpty == false {
+                        Text(position)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(secondaryColor)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(width: nameWidth, alignment: .leading)
+            .padding(.horizontal, 8)
+
+            ForEach(values.indices, id: \.self) { index in
+                Text(values[index])
+                    .font(isHeader ? .caption.weight(.bold) : .subheadline.weight(isTotal ? .heavy : .semibold))
+                    .foregroundStyle(isHeader ? secondaryColor : primaryColor)
+                    .monospacedDigit()
+                    .frame(width: valueWidth)
+            }
+        }
+        .frame(minHeight: isHeader ? 38 : 48)
+        .background(rowBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(appModel.favoriteStadiumPalette?.ghostBorder ?? Color.white.opacity(0.08))
+                .frame(height: 0.5)
+        }
     }
 
-    private func pitchingSummary(for line: GameCenterPitchingLine) -> String {
-        [
-            line.innings.map { "이닝 \($0)" },
-            line.pitches.map { "투구수 \($0)" },
-            line.hitsAllowed.map { "피안타 \($0)" },
-            line.walksAllowed.map { "4사구 \($0)" },
-            line.strikeouts.map { "삼진 \($0)" },
-            line.runsAllowed.map { "실점 \($0)" },
-            line.earnedRuns.map { "자책 \($0)" },
-            line.earnedRunAverage.map { "ERA \($0)" }
+    private var primaryColor: Color {
+        appModel.favoriteStadiumPalette?.textPrimary ?? .primary
+    }
+
+    private var secondaryColor: Color {
+        appModel.favoriteStadiumPalette?.textSecondary ?? .secondary
+    }
+
+    private var rowBackground: Color {
+        if isHeader || isTotal {
+            return appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.secondarySystemBackground)
+        }
+        return Color.clear
+    }
+}
+
+private struct KeyRecordsComparisonView: View {
+    let presentation: GameDetailPresentation
+    let review: GameCenterReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(presentation.game.awayTeam.displayName)
+                    .font(.subheadline.weight(.heavy))
+                    .frame(maxWidth: .infinity)
+                Text("VS")
+                    .font(.caption.weight(.heavy))
+                    .foregroundStyle(.secondary)
+                Text(presentation.game.homeTeam.displayName)
+                    .font(.subheadline.weight(.heavy))
+                    .frame(maxWidth: .infinity)
+            }
+
+            ForEach(metrics) { metric in
+                KeyRecordComparisonRow(
+                    title: metric.title,
+                    awayValue: metric.away,
+                    homeValue: metric.home,
+                    awayColor: presentation.game.awayTeam.identity.theme.accent,
+                    homeColor: presentation.game.homeTeam.identity.theme.accent
+                )
+            }
+        }
+    }
+
+    private var metrics: [KeyRecordMetric] {
+        let stats = review.keyStats(
+            awayTeam: presentation.game.awayTeam,
+            homeTeam: presentation.game.homeTeam,
+            lineScore: presentation.lineScore
+        )
+        return [
+            KeyRecordMetric(title: "안타", away: stats.away.hits, home: stats.home.hits),
+            KeyRecordMetric(title: "홈런", away: stats.away.homeRuns, home: stats.home.homeRuns),
+            KeyRecordMetric(title: "도루", away: stats.away.stolenBases, home: stats.home.stolenBases),
+            KeyRecordMetric(title: "삼진", away: stats.away.strikeouts, home: stats.home.strikeouts),
+            KeyRecordMetric(title: "병살", away: stats.away.doublePlays, home: stats.home.doublePlays),
+            KeyRecordMetric(title: "실책", away: stats.away.errors, home: stats.home.errors)
         ]
-        .compactMap { $0 }
-        .joined(separator: " · ")
+    }
+}
+
+private struct KeyRecordMetric: Identifiable {
+    let title: String
+    let away: Int?
+    let home: Int?
+
+    var id: String { title }
+}
+
+private struct KeyRecordComparisonRow: View {
+    let title: String
+    let awayValue: Int?
+    let homeValue: Int?
+    let awayColor: Color
+    let homeColor: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ComparisonBar(value: awayValue, maxValue: maxValue, color: awayColor, alignment: .trailing)
+            Text(awayValue.map(String.init) ?? "-")
+                .comparisonValueStyle()
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44)
+            Text(homeValue.map(String.init) ?? "-")
+                .comparisonValueStyle()
+            ComparisonBar(value: homeValue, maxValue: maxValue, color: homeColor, alignment: .leading)
+        }
+    }
+
+    private var maxValue: Int {
+        max(awayValue ?? 0, homeValue ?? 0)
+    }
+}
+
+private struct ComparisonBar: View {
+    let value: Int?
+    let maxValue: Int
+    let color: Color
+    let alignment: Alignment
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: alignment) {
+                Capsule()
+                    .fill(Color.white.opacity(0.09))
+                if maxValue > 0, let value {
+                    Capsule()
+                        .fill(color.opacity(0.78))
+                        .frame(width: max(4, proxy.size.width * CGFloat(value) / CGFloat(maxValue)))
+                }
+            }
+        }
+        .frame(height: 8)
+    }
+}
+
+private struct RecordsEmptyState: View {
+    let status: GameStatus
+
+    var body: some View {
+        DetailMessageCard(
+            icon: "chart.bar.doc.horizontal",
+            title: emptyTitle,
+            message: emptyMessage
+        )
+    }
+
+    private var emptyTitle: String {
+        switch status {
+        case .upcoming:
+            "기록은 경기 시작 후 제공됩니다"
+        default:
+            "기록 데이터가 없습니다"
+        }
+    }
+
+    private var emptyMessage: String {
+        switch status {
+        case .upcoming:
+            "라인업과 박스스코어가 준비되면 타자, 투수, 주요 기록을 표시합니다."
+        default:
+            "현재 데이터 소스에서 박스스코어 정보를 아직 제공하지 않습니다."
+        }
+    }
+}
+
+private struct DetailInlineLoadingView: View {
+    @Environment(AppModel.self) private var appModel
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
     }
 }
 
@@ -1453,6 +1814,12 @@ private extension Text {
             .monospacedDigit()
             .frame(width: 34)
     }
+
+    func comparisonValueStyle() -> some View {
+        font(.title3.weight(.semibold))
+            .monospacedDigit()
+            .frame(width: 28)
+    }
 }
 
 private extension String {
@@ -1463,6 +1830,218 @@ private extension String {
     var nilIfBlank: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var displayStat: String {
+        nilIfBlank ?? "-"
+    }
+
+    var intValue: Int? {
+        Int(trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber || $0 == "-" })
+    }
+
+    var battingOrderNumber: String? {
+        let digits = trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix { $0.isNumber }
+        return digits.isEmpty ? nil : String(digits)
+    }
+}
+
+extension Optional where Wrapped == String {
+    var displayStolenBaseStat: String {
+        self?.displayStat ?? "0"
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var displayStat: String {
+        self?.displayStat ?? "-"
+    }
+
+    var intValue: Int? {
+        self?.intValue
+    }
+
+    var outsValue: Int? {
+        self?.outsValue
+    }
+}
+
+private extension GameCenterBattingSection {
+    var totalHits: Int? {
+        totals?.hits.intValue ?? lines.sum(\.hits)
+    }
+
+    var totalHomeRuns: Int? {
+        totals?.homeRuns.intValue ?? lines.sum(\.homeRuns)
+    }
+
+    var totalStrikeouts: Int? {
+        totals?.strikeouts.intValue ?? lines.sum(\.strikeouts)
+    }
+}
+
+private extension GameCenterBattingTotals {
+    static func derived(from lines: [GameCenterBattingLine]) -> GameCenterBattingTotals? {
+        let atBats = lines.sum(\.atBats)
+        let runs = lines.sum(\.runs)
+        let hits = lines.sum(\.hits)
+        let runsBattedIn = lines.sum(\.runsBattedIn)
+        let homeRuns = lines.sum(\.homeRuns)
+        let walks = lines.sum(\.walks)
+        let strikeouts = lines.sum(\.strikeouts)
+        let stolenBases = lines.sum(\.stolenBases)
+        let plateAppearanceHomeRuns = lines.sum(\.plateAppearanceHomeRuns)
+        let plateAppearanceWalks = lines.sum(\.plateAppearanceWalks)
+        let plateAppearanceStrikeouts = lines.sum(\.plateAppearanceStrikeouts)
+        guard [atBats, runs, hits, runsBattedIn, homeRuns, walks, strikeouts, stolenBases, plateAppearanceHomeRuns, plateAppearanceWalks, plateAppearanceStrikeouts].contains(where: { $0 != nil }) else {
+            return nil
+        }
+        return GameCenterBattingTotals(
+            atBats: atBats.map(String.init),
+            runs: runs.map(String.init),
+            hits: hits.map(String.init),
+            runsBattedIn: runsBattedIn.map(String.init),
+            homeRuns: homeRuns.map(String.init),
+            walks: walks.map(String.init),
+            strikeouts: strikeouts.map(String.init),
+            stolenBases: stolenBases.map(String.init),
+            average: nil,
+            plateAppearanceHomeRuns: plateAppearanceHomeRuns.map(String.init),
+            plateAppearanceWalks: plateAppearanceWalks.map(String.init),
+            plateAppearanceStrikeouts: plateAppearanceStrikeouts.map(String.init)
+        )
+    }
+}
+
+private struct GameCenterPitchingTotals {
+    let innings: String?
+    let battersFaced: String?
+    let hitsAllowed: String?
+    let runsAllowed: String?
+    let earnedRuns: String?
+    let atBats: String?
+    let walksAllowed: String?
+    let hitBatters: String?
+    let walksOrHitByPitch: String?
+    let strikeouts: String?
+    let homeRunsAllowed: String?
+    let pitches: String?
+
+    static func derived(from lines: [GameCenterPitchingLine]) -> GameCenterPitchingTotals? {
+        let outs = lines.compactMap { $0.innings.outsValue }.reduce(0, +)
+        let battersFaced = lines.sum(\.battersFaced)
+        let hitsAllowed = lines.sum(\.hitsAllowed)
+        let runsAllowed = lines.sum(\.runsAllowed)
+        let earnedRuns = lines.sum(\.earnedRuns)
+        let atBats = lines.sum(\.atBats)
+        let walksAllowed = lines.sum(\.walksAllowed)
+        let hitBatters = lines.sum(\.hitBatters)
+        let walksOrHitByPitch = lines.sum(\.walksOrHitByPitch)
+        let strikeouts = lines.sum(\.strikeouts)
+        let homeRunsAllowed = lines.sum(\.homeRunsAllowed)
+        let pitches = lines.sum(\.pitches)
+        guard outs > 0 || [battersFaced, hitsAllowed, runsAllowed, earnedRuns, atBats, walksAllowed, hitBatters, walksOrHitByPitch, strikeouts, homeRunsAllowed, pitches].contains(where: { $0 != nil }) else {
+            return nil
+        }
+        return GameCenterPitchingTotals(
+            innings: outs > 0 ? Self.inningsText(fromOuts: outs) : nil,
+            battersFaced: battersFaced.map(String.init),
+            hitsAllowed: hitsAllowed.map(String.init),
+            runsAllowed: runsAllowed.map(String.init),
+            earnedRuns: earnedRuns.map(String.init),
+            atBats: atBats.map(String.init),
+            walksAllowed: walksAllowed.map(String.init),
+            hitBatters: hitBatters.map(String.init),
+            walksOrHitByPitch: (walksOrHitByPitch ?? combinedWalksOrHitByPitch(walks: walksAllowed, hitBatters: hitBatters)).map(String.init),
+            strikeouts: strikeouts.map(String.init),
+            homeRunsAllowed: homeRunsAllowed.map(String.init),
+            pitches: pitches.map(String.init)
+        )
+    }
+
+    private static func combinedWalksOrHitByPitch(walks: Int?, hitBatters: Int?) -> Int? {
+        guard walks != nil || hitBatters != nil else { return nil }
+        return (walks ?? 0) + (hitBatters ?? 0)
+    }
+
+    private static func inningsText(fromOuts outs: Int) -> String {
+        let innings = outs / 3
+        let remainder = outs % 3
+        return remainder == 0 ? "\(innings)" : "\(innings) \(remainder)/3"
+    }
+}
+
+private extension GameCenterPitchingLine {
+    var displayName: String {
+        [name, result?.nilIfBlank.map { "(\($0))" }]
+            .compactMap { $0 }
+            .joined(separator: " ")
+    }
+}
+
+private extension GameCenterReview {
+    func teamSummaryValue(titleContains keyword: String, team: Team) -> Int? {
+        summaryItems
+            .first { $0.title.contains(keyword) }?
+            .value
+            .teamValue(for: team)
+    }
+}
+
+private extension String {
+    var outsValue: Int? {
+        let cleaned = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.isEmpty == false else { return nil }
+        let parts = cleaned.split(separator: " ")
+        if parts.count == 2,
+           let innings = Int(parts[0]),
+           let remainder = parts[1].split(separator: "/").first.flatMap({ Int($0) }) {
+            return innings * 3 + remainder
+        }
+        if cleaned.contains("/") {
+            let fraction = cleaned.split(separator: "/")
+            return fraction.first.flatMap { Int($0) }
+        }
+        return Int(cleaned).map { $0 * 3 }
+    }
+
+    func teamValue(for team: Team) -> Int? {
+        let names = [team.displayName, team.shortName, team.name]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+        for name in names {
+            let pattern = "\(NSRegularExpression.escapedPattern(for: name))\\s*[:：]?\\s*(\\d+)"
+            if let value = firstRegexCapture(pattern: pattern) {
+                return Int(value)
+            }
+        }
+        return nil
+    }
+
+    func firstRegexCapture(pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(startIndex..<endIndex, in: self)
+        guard let match = regex.firstMatch(in: self, range: range),
+              match.numberOfRanges > 1,
+              let captureRange = Range(match.range(at: 1), in: self) else {
+            return nil
+        }
+        return String(self[captureRange])
+    }
+}
+
+private extension Array where Element == GameCenterBattingLine {
+    func sum(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath]?.intValue }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+}
+
+private extension Array where Element == GameCenterPitchingLine {
+    func sum(_ keyPath: KeyPath<GameCenterPitchingLine, String?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath]?.intValue }
+        return values.isEmpty ? nil : values.reduce(0, +)
     }
 }
 

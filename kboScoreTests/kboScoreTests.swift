@@ -549,6 +549,367 @@ struct kboScoreTests {
         #expect(row.currentBatterName == "홍길동")
     }
 
+    @Test func supabaseLatestSnapshotDecodesBaseRunnerNames() throws {
+        let gameID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+        let row = try JSONDecoder().decode(
+            SupabaseLatestGameSnapshotRow.self,
+            from: Data(
+                """
+                {
+                  "game_id": "\(gameID.uuidString)",
+                  "runner_on_first": true,
+                  "runner_on_second": true,
+                  "runner_on_third": false,
+                  "first_base_runner_name": "1루주자",
+                  "second_base_runner_name": "2루주자",
+                  "third_base_runner_name": null
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.firstBaseRunnerName == "1루주자")
+        #expect(row.secondBaseRunnerName == "2루주자")
+        #expect(row.thirdBaseRunnerName == nil)
+    }
+
+    @Test func supabaseSnapshotRunnerNameMapsIntoGameDetailWhenBaseIsOccupied() throws {
+        let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let gameRow = try makeSupabaseGameRow(
+            id: gameID,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 4,
+            homeScore: 5,
+            inningState: "Bottom 6"
+        )
+        let snapshot = try JSONDecoder().decode(
+            SupabaseLatestGameSnapshotRow.self,
+            from: Data(
+                """
+                {
+                  "game_id": "\(gameID.uuidString)",
+                  "runner_on_first": true,
+                  "runner_on_second": false,
+                  "runner_on_third": false,
+                  "first_base_runner_name": "홍길동"
+                }
+                """.utf8
+            )
+        )
+
+        let game = SupabaseKBOMapper.mapGames(
+            gameRows: [gameRow],
+            teamRows: [
+                SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+                SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+            ],
+            snapshotRows: [snapshot]
+        )[0]
+
+        #expect(game.bases?.first == true)
+        #expect(game.bases?.second == false)
+        #expect(game.bases?.third == false)
+        #expect(game.baseRunners?.first == "홍길동")
+        #expect(game.baseRunners?.second == nil)
+        #expect(game.baseRunners?.third == nil)
+    }
+
+    @Test func supabaseSnapshotWithOccupiedBaseAndNilRunnerNameKeepsFallbackState() throws {
+        let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let gameID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let gameRow = try makeSupabaseGameRow(
+            id: gameID,
+            publicGameID: "20260428-LOT-KIW",
+            providerGameID: "20260428WOLT0",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 4,
+            homeScore: 5,
+            inningState: "Bottom 6"
+        )
+        let snapshot = try JSONDecoder().decode(
+            SupabaseLatestGameSnapshotRow.self,
+            from: Data(
+                """
+                {
+                  "game_id": "\(gameID.uuidString)",
+                  "runner_on_first": true,
+                  "runner_on_second": false,
+                  "runner_on_third": false
+                }
+                """.utf8
+            )
+        )
+
+        let game = SupabaseKBOMapper.mapGames(
+            gameRows: [gameRow],
+            teamRows: [
+                SupabaseTeamRow(id: awayTeamID, code: "kiwoom", name: "키움 히어로즈", shortName: "키움"),
+                SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+            ],
+            snapshotRows: [snapshot]
+        )[0]
+
+        #expect(game.bases?.first == true)
+        #expect(game.baseRunners?.first == nil)
+        #expect(game.summary(isMyTeamGame: false).baseRunners?.first == nil)
+    }
+
+    @Test func baseRunnerDisplayUsesSnapshotNameWhenFirstBaseOccupied() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "홍길동", second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == "홍길동")
+        #expect(display.source == "snapshot")
+    }
+
+    @Test func baseRunnerDisplayFallsBackForOccupiedFirstBaseWithNilName() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == "주자")
+        #expect(display.runners.second == nil)
+        #expect(display.source == "fallback")
+    }
+
+    @Test func baseRunnerDisplayCarriesForwardSameBaseName() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let firstSnapshot = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "전민재", second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: firstSnapshot.stableDetailIdentity, game: firstSnapshot)
+        let nextSnapshot = try makeBaseRunnerDisplayGame(
+            id: firstSnapshot.id,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: firstSnapshot.stableDetailIdentity, game: nextSnapshot)
+
+        #expect(display.runners.first == "전민재")
+        #expect(display.source == "carryForward")
+    }
+
+    @Test func baseRunnerDisplayClearsNameWhenBaseEmpties() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let occupied = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "전민재", second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: occupied)
+        let empty = try makeBaseRunnerDisplayGame(
+            id: occupied.id,
+            bases: .empty,
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: empty)
+
+        #expect(display.runners.first == nil)
+        #expect(display.source == "empty")
+    }
+
+    @Test func baseRunnerDisplayStateIsKeyedByGameIdentity() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let firstGame = try makeBaseRunnerDisplayGame(
+            id: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+            providerGameID: "20260506WOLT0",
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "전민재", second: nil, third: nil)
+        )
+        let secondGame = try makeBaseRunnerDisplayGame(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!,
+            providerGameID: "20260506HTSS0",
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: firstGame.stableDetailIdentity, game: firstGame)
+
+        let display = resolver.resolve(gameIdentity: secondGame.stableDetailIdentity, game: secondGame)
+
+        #expect(display.runners.first == "주자")
+    }
+
+    @Test func baseRunnerDisplaySnapshotNameOverridesPriorFallback() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let unknown = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: unknown.stableDetailIdentity, game: unknown)
+        let named = try makeBaseRunnerDisplayGame(
+            id: unknown.id,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "전민재", second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: unknown.stableDetailIdentity, game: named)
+
+        #expect(display.runners.first == "전민재")
+        #expect(display.source == "snapshot")
+    }
+
+    @Test func baseRunnerDisplayResolvesMultipleBasesIndependently() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let previous = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: false, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: "2루주자", third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: previous.stableDetailIdentity, game: previous)
+        let current = try makeBaseRunnerDisplayGame(
+            id: previous.id,
+            bases: RunnerState(first: true, second: true, third: true),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: "3루주자")
+        )
+
+        let display = resolver.resolve(gameIdentity: previous.stableDetailIdentity, game: current)
+
+        #expect(display.runners.first == "주자")
+        #expect(display.runners.second == "2루주자")
+        #expect(display.runners.third == "3루주자")
+        #expect(display.source == "snapshot+carryForward+fallback")
+    }
+
+    @Test func baseRunnerDisplayDoesNotCopyFirstRunnerNameToUnknownThirdBase() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: true),
+            baseRunners: GameBaseRunners(first: "송찬의", second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == "송찬의")
+        #expect(display.runners.second == nil)
+        #expect(display.runners.third == "주자")
+    }
+
+    @Test func baseRunnerDisplayKeepsEmptyBasesHidden() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: false, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == nil)
+        #expect(display.runners.second == nil)
+        #expect(display.runners.third == nil)
+        #expect(display.source == "empty")
+    }
+
+    @Test func baseRunnerDisplayShowsAllThreeOccupiedBaseNames() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: true, third: true),
+            baseRunners: GameBaseRunners(first: "1루주자", second: "2루주자", third: "3루주자")
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == "1루주자")
+        #expect(display.runners.second == "2루주자")
+        #expect(display.runners.third == "3루주자")
+    }
+
+    @MainActor
+    @Test func gameDetailRefreshDoesNotEraseExistingRunnerNameWhenBaseStaysOccupied() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-06T18:30:00+09:00"))
+        let existing = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "전민재", second: nil, third: nil)
+        )
+        let incoming = try makeBaseRunnerDisplayGame(
+            id: existing.id,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: base.teams, games: [existing], notifications: [], settings: base.settings)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in incoming }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: base.teams, games: [existing], notifications: [], settings: base.settings),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true)
+
+        #expect(refreshed?.baseRunners?.first == "전민재")
+    }
+
+    @Test func gameLookupResolvesProviderStableIdentityAndPublicRawID() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let lotte = try #require(teams.first(where: { $0.id == "lotte" }))
+        let kia = try #require(teams.first(where: { $0.id == "kia" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "09090909-0909-0909-0909-090909090909")!,
+            scheduledStart: isoDate("2026-05-09T17:00:00+09:00"),
+            venue: "광주",
+            awayTeam: lotte,
+            homeTeam: kia,
+            awayScore: 7,
+            homeScore: 3,
+            status: .final,
+            note: "public_game_id=20260509-LOT-KIA provider_game_id=20260509HTLT0",
+            providerGameID: "20260509HTLT0"
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: "provider:20260509HTLT0")?.publicGameID == "20260509-LOT-KIA")
+        #expect(model.game(withIdentity: "20260509-LOT-KIA")?.providerGameID == "20260509HTLT0")
+        #expect(model.game(withIdentity: "public:20260509-LOT-KIA")?.providerGameID == "20260509HTLT0")
+    }
+
+    @Test func gameCenterReviewReportsDisplayableRecordsWhenBattingLinesExist() throws {
+        let line = GameCenterBattingLine(
+            battingOrder: "1",
+            position: "중",
+            name: "홍길동",
+            atBats: "3",
+            runs: "1",
+            hits: "2",
+            runsBattedIn: "1",
+            homeRuns: "0",
+            walks: "1",
+            strikeouts: "0",
+            average: ".300"
+        )
+        let review = GameCenterReview(
+            summaryItems: [],
+            awayBatting: GameCenterBattingSection(lines: [line], totals: nil),
+            homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+            awayPitching: GameCenterPitchingSection(lines: []),
+            homePitching: GameCenterPitchingSection(lines: [])
+        )
+
+        #expect(review.hasDisplayableRecords)
+    }
+
     @Test func supabaseLatestSnapshotMapsKnownPlayerAliases() throws {
         let gameID = UUID(uuidString: "22222222-3333-4444-5555-666666666666")!
         let row = try JSONDecoder().decode(
@@ -2611,6 +2972,91 @@ struct kboScoreTests {
         #expect(payload?.teamIDs == ["lotte", "ssg"])
     }
 
+    @Test func scoreNotificationPayloadExtractorBuildsPayloadFromBackendAPNsData() async throws {
+        let payload = ScoreNotificationPayloadExtractor.payload(
+            from: [
+                "aps": [
+                    "alert": [
+                        "title": "출루",
+                        "body": "롯데: 윤동희 출루 (볼넷)"
+                    ]
+                ],
+                "data": [
+                    "gameId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "publicGameId": "20260409LTHT0",
+                    "eventType": "ON_BASE",
+                    "awayTeamId": "lotte",
+                    "homeTeamId": "hanwha",
+                    "eventTeamId": "lotte"
+                ]
+            ]
+        )
+
+        #expect(payload?.title == "출루")
+        #expect(payload?.body == "롯데: 윤동희 출루 (볼넷)")
+        #expect(payload?.eventType == .onBase)
+        #expect(payload?.publicGameID == "20260409LTHT0")
+        #expect(payload?.teamIDs == ["lotte", "hanwha"])
+    }
+
+    @Test func notificationHistoryDecodesOldRecordsSafely() throws {
+        let id = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
+        let data = """
+        {
+          "id": "\(id.uuidString)",
+          "type": "scoreChange",
+          "title": "득점",
+          "body": "LG가 득점했습니다.",
+          "sentAt": 1775727060,
+          "isRead": false,
+          "relatedTeamIDs": ["lg"]
+        }
+        """.data(using: .utf8)!
+
+        let item = try JSONDecoder().decode(NotificationItem.self, from: data)
+
+        #expect(item.id == id)
+        #expect(item.title == "득점")
+        #expect(item.body == "LG가 득점했습니다.")
+        #expect(item.receivedAt == nil)
+        #expect(item.publicGameID == nil)
+    }
+
+    @MainActor
+    @Test func receivedNotificationAppearsInNotificationListModel() async throws {
+        let receivedAt = isoDate("2026-04-09T18:31:00+09:00")
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { receivedAt }
+        )
+
+        model.handleNotificationUserInfo([
+            "aps": [
+                "alert": [
+                    "title": "이닝 교체",
+                    "body": "3회 말로 전환되었습니다."
+                ]
+            ],
+            "data": [
+                "gameId": "20260409LTHT0",
+                "publicGameId": "20260409LTHT0",
+                "eventType": "INNING_CHANGED",
+                "awayTeamId": "lotte",
+                "homeTeamId": "hanwha"
+            ]
+        ])
+
+        let item = try #require(model.filteredNotifications.first)
+        #expect(item.title == "이닝 교체")
+        #expect(item.body == "3회 말로 전환되었습니다.")
+        #expect(item.type == .inningChange)
+        #expect(item.sentAt == receivedAt)
+        #expect(item.receivedAt == receivedAt)
+        #expect(item.publicGameID == "20260409LTHT0")
+        #expect(item.relatedTeamIDs == ["lotte", "hanwha"])
+    }
+
     @Test func scoreNotificationRouteResolvesOfficialGameIdentifierToStableUUID() async throws {
         let payload = ScoreNotificationPayload(
             gameID: "20260323WOLG0",
@@ -2873,6 +3319,91 @@ struct kboScoreTests {
         #expect(state.start(key) == .start(keyChanged: false))
     }
 
+    @Test func backendDeviceRegistrationSkipsWhenNotificationsDisabled() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: disabledNotificationPreferences()
+        )
+
+        #expect(await client.requestCount() == 0)
+        #expect(model.notificationRegistrationSyncStatus == .idle)
+    }
+
+    @Test func backendDeviceRegistrationSkipsWhenAuthorizationIsNotGranted() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .denied
+
+        model.settings = notificationRegistrationSettings(favoriteTeamID: "lotte")
+
+        #expect(await client.requestCount() == 0)
+        #expect(model.notificationRegistrationSyncStatus == .idle)
+    }
+
+    @Test func backendDeviceRegistrationSkipsWhenFavoriteTeamIsMissing() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(favoriteTeamID: nil)
+
+        #expect(await client.requestCount() == 0)
+        #expect(model.notificationRegistrationSyncStatus == .idle)
+    }
+
+    @Test func backendDeviceRegistrationRunsWhenEligible() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(favoriteTeamID: "lotte")
+
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        #expect(didRegister)
+        #expect(await client.favoriteTeamIDs() == ["lotte"])
+        #expect(model.notificationRegistrationSyncStatus == .synced)
+    }
+
+    @Test func backendDeviceRegistrationRunsWhenAuthorizationIsProvisional() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .provisional
+
+        model.settings = notificationRegistrationSettings(favoriteTeamID: "hanwha")
+
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        #expect(didRegister)
+        #expect(await client.favoriteTeamIDs() == ["hanwha"])
+    }
+
     @Test func remoteNotificationRegistrationClientPostsJSONPayload() async throws {
         let session = makeStubSession()
         let client = RemoteNotificationRegistrationClient(
@@ -2950,6 +3481,111 @@ struct kboScoreTests {
         #expect(model.currentTheme.id == .neutral)
     }
 
+    @Test func favoriteTeamOnboardingCatalogContainsAllTenTeamsOffline() throws {
+        let teams = FavoriteTeamCatalog.teams
+        let expectedIDs = Set(["kia", "samsung", "lg", "doosan", "kt", "ssg", "lotte", "hanwha", "nc", "kiwoom"])
+
+        #expect(teams.count == 10)
+        #expect(Set(teams.map(\.id)) == expectedIDs)
+        #expect(teams.map(\.id) == FavoriteTeamCatalog.orderedTeamIDs)
+    }
+
+    @Test func favoriteTeamOnboardingCatalogUsesUniqueIDs() throws {
+        let teams = FavoriteTeamCatalog.teams
+
+        #expect(Set(teams.map(\.id)).count == teams.count)
+    }
+
+    @Test func favoriteTeamOnboardingDoesNotDependOnRepositoryTeamsWhenSupabaseUnavailable() async throws {
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                throw TestRepositoryError.supabaseUnavailable
+            },
+            fetchGames: {
+                throw TestRepositoryError.supabaseUnavailable
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: [], games: [], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.teams.isEmpty)
+        #expect(FavoriteTeamCatalog.teams.count == 10)
+        #expect(FavoriteTeamCatalog.teams.contains { $0.id == "lotte" })
+        #expect(FavoriteTeamCatalog.teams.contains { $0.id == "hanwha" })
+    }
+
+    @Test func firstInstallPickerOpeningDoesNotCallFavoriteTeamRemoteRefresh() async throws {
+        let recorder = FavoriteScheduleCallRecorder()
+        let repository = FavoriteScheduleCountingRepository(recorder: recorder)
+        let model = AppModel(repository: repository, usePersistedSettings: false)
+        model.settings.favoriteTeamID = nil
+
+        await model.loadIfNeeded()
+
+        #expect(FavoriteTeamCatalog.teams.count == 10)
+        #expect(await recorder.callCount() == 0)
+    }
+
+    @Test func appStartupWithNoFavoriteTeamDoesNotCallHomeFavoriteGameRefresh() async throws {
+        let recorder = FavoriteScheduleCallRecorder()
+        let repository = FavoriteScheduleCountingRepository(recorder: recorder)
+        let model = AppModel(repository: repository, usePersistedSettings: false)
+        model.settings.favoriteTeamID = nil
+
+        await model.loadIfNeeded()
+        await model.refreshTodayOnForeground()
+
+        #expect(await recorder.callCount() == 0)
+    }
+
+    @Test func favoriteTeamOnboardingSelectingLottePersistsExistingID() throws {
+        let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
+
+        model.completeFavoriteTeamOnboarding(with: "lotte")
+
+        #expect(model.settings.favoriteTeamID == "lotte")
+    }
+
+    @Test func favoriteTeamOnboardingSelectingHanwhaPersistsExistingID() throws {
+        let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
+
+        model.completeFavoriteTeamOnboarding(with: "hanwha")
+
+        #expect(model.settings.favoriteTeamID == "hanwha")
+    }
+
+    @Test func favoriteTeamDependentFlowsReadSelectedFavoriteTeamID() throws {
+        let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
+
+        model.completeFavoriteTeamOnboarding(with: "hanwha")
+
+        #expect(model.settings.favoriteTeamID == "hanwha")
+        #expect(model.currentTheme.id == .hanwha)
+        #expect(model.favoriteTeam?.id == "hanwha")
+    }
+
+    @Test func favoriteTeamSelectionStartsPostOnboardingFavoriteRefresh() async throws {
+        let recorder = FavoriteScheduleCallRecorder()
+        let repository = FavoriteScheduleCountingRepository(recorder: recorder)
+        let model = AppModel(repository: repository, usePersistedSettings: false)
+        model.settings.favoriteTeamID = nil
+        model.hasCompletedOnboarding = false
+
+        await model.loadIfNeeded()
+        #expect(await recorder.callCount() == 0)
+
+        model.completeFavoriteTeamOnboarding(with: "lotte")
+
+        let didRefresh = await eventually(timeout: 1.0) {
+            await recorder.callCount() == 1
+        }
+        #expect(didRefresh)
+        #expect(await recorder.favoriteTeamIDs() == ["lotte"])
+    }
+
     @Test func favoriteTeamLiveGameFindsCurrentLiveMatch() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
         model.settings.favoriteTeamID = "lg"
@@ -3024,6 +3660,63 @@ struct kboScoreTests {
         #endif
     }
 
+    @Test func liveActivitySnapshotKeepsZeroZeroLiveScoreVisible() async throws {
+        let bootstrap = MockKBOData.makeBootstrap()
+        let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: Date().addingTimeInterval(3600),
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: baseGame.seasonClassification,
+            inningText: "Top 1"
+        )
+
+        let snapshot = try #require(FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: "lg"))
+
+        #expect(snapshot.favoriteScoreText == "0")
+        #expect(snapshot.opponentScoreText == "0")
+        #expect(snapshot.inningText == "1회 초")
+    }
+
+    @Test func liveActivitySnapshotUsesLatestSnapshotCountAndPlayers() async throws {
+        let bootstrap = MockKBOData.makeBootstrap()
+        let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: baseGame.seasonClassification,
+            inningText: "Bottom 2",
+            bases: RunnerState(first: true, second: false, third: true),
+            balls: 3,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: "최신투수",
+            currentBatterName: "최신타자"
+        )
+
+        let snapshot = try #require(FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: "lg"))
+
+        #expect(snapshot.balls == 3)
+        #expect(snapshot.strikes == 2)
+        #expect(snapshot.outs == 1)
+        #expect(snapshot.runnerOnFirst == true)
+        #expect(snapshot.runnerOnSecond == false)
+        #expect(snapshot.runnerOnThird == true)
+        #expect(snapshot.currentPitcherName == "최신투수")
+        #expect(snapshot.currentBatterName == "최신타자")
+    }
+
     @Test func liveActivityPregameStateShowsStartingPitchersOnly() async throws {
         #if canImport(ActivityKit)
         let bootstrap = MockKBOData.makeBootstrap()
@@ -3061,6 +3754,33 @@ struct kboScoreTests {
         #endif
     }
 
+    @Test func liveActivityPregameSnapshotShowsProbableStartersWithoutLiveState() async throws {
+        let bootstrap = MockKBOData.makeBootstrap()
+        let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: Date().addingTimeInterval(3600),
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: baseGame.seasonClassification,
+            inningText: nil,
+            awayStartingPitcherName: "원정선발",
+            homeStartingPitcherName: "홈선발"
+        )
+
+        let snapshot = try #require(FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: "lg"))
+
+        #expect(snapshot.isPreGame)
+        #expect(snapshot.favoriteStartingPitcherName == "홈선발")
+        #expect(snapshot.opponentStartingPitcherName == "원정선발")
+        #expect(snapshot.balls == nil)
+        #expect(snapshot.currentBatterName == nil)
+    }
+
     @Test func liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -3094,6 +3814,74 @@ struct kboScoreTests {
 
         #expect(model.isLiveActivityOn(for: game.id) == false)
         #expect(controller.activeGameID == nil)
+    }
+
+    @Test func liveActivityUpdateUsesMergedDetailAfterRefresh() async throws {
+        let controller = TestLiveActivityController(isSupported: true)
+        let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "abababab-abab-abab-abab-abababababab")!,
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260428WOLG0",
+            awayStartingPitcherName: "원정선발",
+            homeStartingPitcherName: "홈선발"
+        )
+        let latest = makeGameDetail(
+            id: UUID(uuidString: "bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc")!,
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Top 1",
+            note: "provider_game_id=20260428WOLG0 updated_at=2026-04-28T18:35:00+09:00",
+            bases: RunnerState(first: true, second: false, third: false),
+            balls: 2,
+            strikes: 1,
+            outs: 0,
+            currentPitcherName: "최신투수",
+            currentBatterName: "최신타자"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in latest }
+        )
+        let model = AppModel(
+            repository: repository,
+            liveActivityController: controller,
+            bootstrap: KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        model.settings.favoriteTeamID = "lg"
+
+        let refreshed = try #require(await model.refreshGameDetail(for: selected.canonicalGameIdentityValue, forceRefresh: true))
+        await model.startOrUpdateLiveActivityIfNeeded(for: refreshed)
+
+        let snapshot = try #require(controller.snapshots.last)
+        #expect(snapshot.favoriteScoreText == "0")
+        #expect(snapshot.opponentScoreText == "0")
+        #expect(snapshot.inningText == "1회 초")
+        #expect(snapshot.balls == 2)
+        #expect(snapshot.strikes == 1)
+        #expect(snapshot.outs == 0)
+        #expect(snapshot.currentPitcherName == "최신투수")
+        #expect(snapshot.currentBatterName == "최신타자")
     }
 
     @Test func preseasonBootstrapFixtureDecodes() async throws {
@@ -3720,6 +4508,570 @@ struct kboScoreTests {
         #expect(detail?.summary.baseRunners?.third == "홍창기")
     }
 
+    @Test func officialGameCenterClientMapsLiveBoxScoreRecordSections() async throws {
+        let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
+        let awayOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "중견수" }, { "Text": "장두성" }] },
+            { "row": [{ "Text": "2" }, { "Text": "좌익수" }, { "Text": "레이예스" }] },
+            { "row": [{ "Text": "3" }, { "Text": "1루수" }, { "Text": "정훈" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let homeOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "유격수" }, { "Text": "김혜성" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let awayBattingDetailTable = #"""
+        {
+          "headers": [
+            { "row": [
+              { "Text": "타수" }, { "Text": "득점" }, { "Text": "안타" },
+              { "Text": "타점" }, { "Text": "홈런" }, { "Text": "볼넷" }, { "Text": "삼진" }
+            ] }
+          ],
+          "rows": [
+            { "row": [{ "Text": "3" }, { "Text": "0" }, { "Text": "2" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0" }, { "Text": "1" }] },
+            { "row": [{ "Text": "3" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }, { "Text": "0" }] },
+            { "row": [{ "Text": "1" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "7" }, { "Text": "1" }, { "Text": "3" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }] }
+          ]
+        }
+        """#
+        let awayBattingSummaryTable = #"""
+        {
+          "headers": [
+            { "row": [{ "Text": "타수" }, { "Text": "안타" }, { "Text": "타점" }, { "Text": "득점" }, { "Text": "타율" }] }
+          ],
+          "rows": [
+            { "row": [{ "Text": "3" }, { "Text": "2" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0.667" }] },
+            { "row": [{ "Text": "3" }, { "Text": "1" }, { "Text": "1" }, { "Text": "1" }, { "Text": "0.333" }] },
+            { "row": [{ "Text": "1" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0.000" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "7" }, { "Text": "3" }, { "Text": "1" }, { "Text": "1" }, { "Text": "0.429" }] }
+          ]
+        }
+        """#
+        let homeBattingDetailTable = #"""
+        {
+          "headers": [
+            { "row": [
+              { "Text": "AB" }, { "Text": "R" }, { "Text": "H" },
+              { "Text": "RBI" }, { "Text": "HRA" }, { "Text": "BB" }, { "Text": "K" }
+            ] }
+          ],
+          "rows": [
+            { "row": [{ "Text": "4" }, { "Text": "2" }, { "Text": "2" }, { "Text": "2" }, { "Text": "0" }, { "Text": "0" }, { "Text": "1" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "4" }, { "Text": "2" }, { "Text": "2" }, { "Text": "2" }, { "Text": "0" }, { "Text": "0" }, { "Text": "1" }] }
+          ]
+        }
+        """#
+        let awayPitchingTable = #"""
+        {
+          "headers": [
+            { "row": [
+              { "Text": "투수명" }, { "Text": "등판" }, { "Text": "결과" }, { "Text": "승" }, { "Text": "패" }, { "Text": "세" },
+              { "Text": "이닝" }, { "Text": "타자" }, { "Text": "투구수" }, { "Text": "피홈런" },
+              { "Text": "피안타" }, { "Text": "볼넷" }, { "Text": "사구" }, { "Text": "삼진" },
+              { "Text": "실점" }, { "Text": "자책" }, { "Text": "평균자책점" }
+            ] }
+          ],
+          "rows": [
+            { "row": [
+              { "Text": "로드리게스" }, { "Text": "선발" }, { "Text": "" }, { "Text": "" }, { "Text": "" }, { "Text": "" },
+              { "Text": "6 1/3" }, { "Text": "25" }, { "Text": "91" }, { "Text": "1" },
+              { "Text": "4" }, { "Text": "2" }, { "Text": "0" }, { "Text": "6" },
+              { "Text": "3" }, { "Text": "3" }, { "Text": "3.21" }
+            ] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let homePitchingTable = #"""
+        {
+          "headers": [
+            { "row": [
+              { "Text": "투수명" }, { "Text": "등판" }, { "Text": "결과" }, { "Text": "승" }, { "Text": "패" }, { "Text": "세" },
+              { "Text": "이닝" }, { "Text": "타자" }, { "Text": "투구수" }, { "Text": "피홈런" },
+              { "Text": "피안타" }, { "Text": "볼넷" }, { "Text": "사구" }, { "Text": "삼진" },
+              { "Text": "실점" }, { "Text": "자책" }, { "Text": "평균자책점" }
+            ] }
+          ],
+          "rows": [
+            { "row": [
+              { "Text": "김선발" }, { "Text": "선발" }, { "Text": "승" }, { "Text": "" }, { "Text": "" }, { "Text": "" },
+              { "Text": "7" }, { "Text": "27" }, { "Text": "95" }, { "Text": "0" },
+              { "Text": "5" }, { "Text": "1" }, { "Text": "1" }, { "Text": "5" },
+              { "Text": "1" }, { "Text": "1" }, { "Text": "2.10" }
+            ] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328KTLG0",
+              "G_TM": "14:00",
+              "S_NM": "잠실",
+              "AWAY_ID": "KT",
+              "HOME_ID": "LG",
+              "AWAY_NM": "KT",
+              "HOME_NM": "LG",
+              "GAME_STATE_SC": "2",
+              "CANCEL_SC_NM": "정상경기",
+              "GAME_INN_NO": 7,
+              "GAME_TB_SC_NM": "초",
+              "T_SCORE_CN": "3",
+              "B_SCORE_CN": "2"
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let scoreboardPayload = """
+        {
+          "S_NM": "잠실",
+          "START_TM": "14:00",
+          "table2": \(try jsonStringLiteral(emptyGridTable)),
+          "table3": \(try jsonStringLiteral(emptyGridTable))
+        }
+        """.data(using: .utf8)!
+        let boxScorePayload = """
+        {
+          "arrHitter": [
+            {
+              "table1": \(try jsonStringLiteral(awayOrderTable)),
+              "table2": \(try jsonStringLiteral(awayBattingDetailTable)),
+              "table3": \(try jsonStringLiteral(awayBattingSummaryTable))
+            },
+            {
+              "table1": \(try jsonStringLiteral(homeOrderTable)),
+              "table2": \(try jsonStringLiteral(homeBattingDetailTable))
+            }
+          ],
+          "arrPitcher": [
+            { "table": \(try jsonStringLiteral(awayPitchingTable)) },
+            { "table": \(try jsonStringLiteral(homePitchingTable)) }
+          ]
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetScoreBoardScroll": StubResponse(statusCode: 200, data: scoreboardPayload),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll": StubResponse(statusCode: 200, data: boxScorePayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "abababab-abab-abab-abab-abababababab")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            homeTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260328KTLG0"
+        )
+
+        let detail = try await client.fetchDetail(for: game)
+
+        #expect(detail?.review?.awayBatting.lines.first?.name == "장두성")
+        #expect(detail?.review?.awayBatting.lines.first?.runs == "0")
+        #expect(detail?.review?.awayBatting.lines.first?.hits == "2")
+        #expect(detail?.review?.awayBatting.lines.first?.homeRuns == "0")
+        #expect(detail?.review?.awayBatting.lines.first?.walks == "0")
+        #expect(detail?.review?.awayBatting.lines.first?.strikeouts == "1")
+        let missingExtendedStatsLine = detail?.review?.awayBatting.lines.dropFirst(2).first
+        #expect(missingExtendedStatsLine?.homeRuns == nil)
+        #expect(missingExtendedStatsLine?.walks == nil)
+        #expect(missingExtendedStatsLine?.strikeouts == nil)
+        #expect(detail?.review?.awayBatting.totals?.homeRuns == "1")
+        #expect(detail?.review?.awayBatting.totals?.walks == "1")
+        #expect(detail?.review?.awayBatting.totals?.strikeouts == "1")
+        #expect(detail?.review?.homeBatting.lines.first?.homeRuns == "0")
+        #expect(detail?.review?.homeBatting.lines.first?.walks == "0")
+        #expect(detail?.review?.homeBatting.lines.first?.strikeouts == "1")
+        #expect(detail?.review?.awayPitching.lines.first?.innings == "6 1/3")
+        #expect(detail?.review?.awayPitching.lines.first?.hitsAllowed == "4")
+        #expect(detail?.review?.awayPitching.lines.first?.hitBatters == "0")
+        #expect(detail?.review?.awayPitching.lines.first?.homeRunsAllowed == "1")
+        #expect(detail?.review?.awayPitching.lines.first?.pitches == "91")
+        #expect(detail?.review?.homePitching.lines.first?.hitBatters == "1")
+    }
+
+    @Test func officialGameCenterClientRejectsPlayResultsFromBattingAggregateStats() async throws {
+        let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
+        let awayOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "중견수" }, { "Text": "장두성" }] },
+            { "row": [{ "Text": "2" }, { "Text": "좌익수" }, { "Text": "레이예스" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let homeOrderTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "1" }, { "Text": "유격수" }, { "Text": "김혜성" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let awayPlayResultsTable = #"""
+        {
+          "headers": [
+            { "row": [{ "Text": "1회" }, { "Text": "2회" }, { "Text": "3회" }, { "Text": "4회" }, { "Text": "5회" }, { "Text": "6회" }, { "Text": "7회" }] }
+          ],
+          "rows": [
+            { "row": [{ "Text": "우홈,,중비,,우안,,우중홈,4구," }] },
+            { "row": [{ "Text": "좌비" }, { "Text": "2땅" }, { "Text": "중비" }, { "Text": "우안" }, { "Text": "중안" }, { "Text": "3땅" }, { "Text": "좌안" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "우홈,,중비,,우안,,우중홈,4구," }] }
+          ]
+        }
+        """#
+        let awayAggregateStatsTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "4" }, { "Text": "3" }, { "Text": "2" }, { "Text": "3" }, { "Text": "0.324" }] },
+            { "row": [{ "Text": "5" }, { "Text": "1" }, { "Text": "2" }, { "Text": "0" }, { "Text": "0.253" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "42" }, { "Text": "16" }, { "Text": "8" }, { "Text": "8" }, { "Text": "0.253" }] }
+          ]
+        }
+        """#
+        let homeAggregateStatsTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "4" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0.000" }] }
+          ],
+          "tfoot": [
+            { "row": [{ "Text": "4" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0" }, { "Text": "0.000" }] }
+          ]
+        }
+        """#
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328KTLG0",
+              "G_TM": "14:00",
+              "S_NM": "잠실",
+              "AWAY_ID": "KT",
+              "HOME_ID": "LG",
+              "AWAY_NM": "KT",
+              "HOME_NM": "LG",
+              "GAME_STATE_SC": "2",
+              "CANCEL_SC_NM": "정상경기",
+              "GAME_INN_NO": 7,
+              "GAME_TB_SC_NM": "초",
+              "T_SCORE_CN": "3",
+              "B_SCORE_CN": "2"
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let scoreboardPayload = """
+        {
+          "S_NM": "잠실",
+          "START_TM": "14:00",
+          "table2": \(try jsonStringLiteral(emptyGridTable)),
+          "table3": \(try jsonStringLiteral(emptyGridTable))
+        }
+        """.data(using: .utf8)!
+        let boxScorePayload = """
+        {
+          "arrHitter": [
+            {
+              "table1": \(try jsonStringLiteral(awayOrderTable)),
+              "table2": \(try jsonStringLiteral(awayPlayResultsTable)),
+              "table3": \(try jsonStringLiteral(awayAggregateStatsTable))
+            },
+            {
+              "table1": \(try jsonStringLiteral(homeOrderTable)),
+              "table3": \(try jsonStringLiteral(homeAggregateStatsTable))
+            }
+          ],
+          "arrPitcher": [
+            { "table": \(try jsonStringLiteral(emptyGridTable)) },
+            { "table": \(try jsonStringLiteral(emptyGridTable)) }
+          ]
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetScoreBoardScroll": StubResponse(statusCode: 200, data: scoreboardPayload),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetBoxScoreScroll": StubResponse(statusCode: 200, data: boxScorePayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            homeTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260328KTLG0"
+        )
+
+        let detail = try await client.fetchDetail(for: game)
+        let awayFirstLine = try #require(detail?.review?.awayBatting.lines.first)
+        let awayAggregateValues = [
+            awayFirstLine.atBats,
+            awayFirstLine.runs,
+            awayFirstLine.hits,
+            awayFirstLine.runsBattedIn,
+            awayFirstLine.homeRuns,
+            awayFirstLine.walks,
+            awayFirstLine.strikeouts
+        ]
+        let rejectedPlayResults = ["2땅", "좌안", "삼진", "좌비", "3안", "중안", "유땅"]
+
+        #expect(awayFirstLine.atBats == "4")
+        #expect(awayFirstLine.runs == "3")
+        #expect(awayFirstLine.hits == "3")
+        #expect(awayFirstLine.runsBattedIn == "2")
+        #expect(awayFirstLine.average == "0.324")
+        #expect(awayFirstLine.homeRuns == nil)
+        #expect(awayFirstLine.walks == nil)
+        #expect(awayFirstLine.strikeouts == nil)
+        #expect(awayFirstLine.plateAppearanceHomeRuns == "2")
+        #expect(awayFirstLine.plateAppearanceWalks == "1")
+        #expect(awayFirstLine.plateAppearanceStrikeouts == "0")
+        #expect(detail?.review?.awayBatting.lines.dropFirst().first?.plateAppearanceHomeRuns == "0")
+        #expect(detail?.review?.awayBatting.lines.dropFirst().first?.plateAppearanceWalks == "0")
+        #expect(detail?.review?.awayBatting.lines.dropFirst().first?.plateAppearanceStrikeouts == "0")
+        #expect(awayAggregateValues.compactMap { $0 }.contains { rejectedPlayResults.contains($0) } == false)
+        #expect(detail?.review?.awayBatting.totals?.atBats == "42")
+        #expect(detail?.review?.awayBatting.totals?.runs == "8")
+        #expect(detail?.review?.awayBatting.totals?.hits == "16")
+        #expect(detail?.review?.awayBatting.totals?.runsBattedIn == "8")
+        #expect(detail?.review?.awayBatting.totals?.homeRuns == nil)
+        #expect(detail?.review?.awayBatting.totals?.plateAppearanceHomeRuns == "2")
+        #expect(detail?.review?.awayBatting.totals?.plateAppearanceWalks == "1")
+        #expect(detail?.review?.awayBatting.totals?.plateAppearanceStrikeouts == "0")
+        #expect(detail?.review?.homeBatting.lines.first?.homeRuns == nil)
+        #expect(detail?.review?.homeBatting.lines.first?.walks == nil)
+        #expect(detail?.review?.homeBatting.lines.first?.strikeouts == nil)
+        #expect(detail?.review?.homeBatting.lines.first?.plateAppearanceHomeRuns == nil)
+        #expect(detail?.review?.homeBatting.lines.first?.plateAppearanceWalks == nil)
+        #expect(detail?.review?.homeBatting.lines.first?.plateAppearanceStrikeouts == nil)
+    }
+
+    @Test func gameCenterKeyStatsDerivesHomeRunsAndStrikeoutsFromHitterRows() throws {
+        let review = makeKeyStatsReview(
+            awayLines: [
+                makeKeyStatsBattingLine(name: "강백호", hits: "1", homeRuns: "2", strikeouts: "1"),
+                makeKeyStatsBattingLine(name: "박병호", hits: "2", homeRuns: "0", strikeouts: "3")
+            ],
+            homeLines: [
+                makeKeyStatsBattingLine(name: "홍창기", hits: "3", homeRuns: "1", strikeouts: "2")
+            ]
+        )
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: nil)
+
+        #expect(stats.away.homeRuns == 2)
+        #expect(stats.home.homeRuns == 1)
+        #expect(stats.away.strikeouts == 4)
+        #expect(stats.home.strikeouts == 2)
+    }
+
+    @Test func gameCenterKeyStatsParsesStolenBasesAndDoublePlaysFromTableEtc() throws {
+        let review = makeKeyStatsReview(
+            summaryItems: [
+                GameCenterSummaryItem(title: "도루", value: "강백호(2회), 박병호(4회), 홍창기(5회)"),
+                GameCenterSummaryItem(title: "병살타", value: "강백호(1회), 오지환(3회), 오지환(7회)")
+            ],
+            awayLines: [
+                makeKeyStatsBattingLine(name: "강백호"),
+                makeKeyStatsBattingLine(name: "박병호")
+            ],
+            homeLines: [
+                makeKeyStatsBattingLine(name: "홍창기"),
+                makeKeyStatsBattingLine(name: "오지환")
+            ]
+        )
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: nil)
+
+        #expect(stats.away.stolenBases == 2)
+        #expect(stats.home.stolenBases == 1)
+        #expect(stats.away.doublePlays == 1)
+        #expect(stats.home.doublePlays == 2)
+    }
+
+    @Test func gameCenterKeyStatsSupportsMixedKoreanAndEnglishExtraLabels() throws {
+        let review = makeKeyStatsReview(
+            summaryItems: [
+                GameCenterSummaryItem(title: "SB", value: "unused", values: ["1", "0"]),
+                GameCenterSummaryItem(title: "GIDP", value: "unused", values: ["2", "1"]),
+                GameCenterSummaryItem(title: "홈런", value: "홍창기(3회)")
+            ],
+            awayLines: [
+                makeKeyStatsBattingLine(name: "강백호", homeRuns: "3")
+            ],
+            homeLines: [
+                makeKeyStatsBattingLine(name: "홍창기", homeRuns: "0")
+            ]
+        )
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: nil)
+
+        #expect(stats.away.stolenBases == 1)
+        #expect(stats.home.stolenBases == 0)
+        #expect(stats.away.doublePlays == 2)
+        #expect(stats.home.doublePlays == 1)
+        #expect(stats.away.homeRuns == 3)
+        #expect(stats.home.homeRuns == 1)
+    }
+
+    @Test func gameCenterKeyStatsDefaultsMissingFieldsSafelyToZero() throws {
+        let review = makeKeyStatsReview()
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: nil)
+
+        #expect(stats.away == GameCenterTeamKeyStats(hits: 0, homeRuns: 0, stolenBases: 0, strikeouts: 0, doublePlays: 0, errors: 0))
+        #expect(stats.home == GameCenterTeamKeyStats(hits: 0, homeRuns: 0, stolenBases: 0, strikeouts: 0, doublePlays: 0, errors: 0))
+    }
+
+    @Test func gameCenterKeyStatsKeepsAwayHomeValuesInOrder() throws {
+        let review = makeKeyStatsReview(
+            summaryItems: [
+                GameCenterSummaryItem(title: "SB", value: "KT: 3 · LG: 1"),
+                GameCenterSummaryItem(title: "GDP", value: "KT: 0 · LG: 2")
+            ]
+        )
+        let lineScore = GameCenterLineScore(
+            inningLabels: [],
+            awayInnings: [],
+            homeInnings: [],
+            awayTotals: GameCenterTeamLineTotals(runs: "4", hits: "7", errors: "1", walks: nil),
+            homeTotals: GameCenterTeamLineTotals(runs: "2", hits: "5", errors: "0", walks: nil)
+        )
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: lineScore)
+
+        #expect(stats.away.hits == 7)
+        #expect(stats.home.hits == 5)
+        #expect(stats.away.errors == 1)
+        #expect(stats.home.errors == 0)
+        #expect(stats.away.stolenBases == 3)
+        #expect(stats.home.stolenBases == 1)
+        #expect(stats.away.doublePlays == 0)
+        #expect(stats.home.doublePlays == 2)
+    }
+
+    private var keyStatsAwayTeam: Team {
+        Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT")
+    }
+
+    private var keyStatsHomeTeam: Team {
+        Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
+    }
+
+    private func makeKeyStatsReview(
+        summaryItems: [GameCenterSummaryItem] = [],
+        awayLines: [GameCenterBattingLine] = [],
+        homeLines: [GameCenterBattingLine] = []
+    ) -> GameCenterReview {
+        GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: GameCenterBattingSection(lines: awayLines, totals: nil),
+            homeBatting: GameCenterBattingSection(lines: homeLines, totals: nil),
+            awayPitching: GameCenterPitchingSection(lines: []),
+            homePitching: GameCenterPitchingSection(lines: [])
+        )
+    }
+
+    private func makeKeyStatsBattingLine(
+        name: String,
+        hits: String? = nil,
+        homeRuns: String? = nil,
+        strikeouts: String? = nil
+    ) -> GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: "1",
+            position: "타자",
+            name: name,
+            atBats: nil,
+            runs: nil,
+            hits: hits,
+            runsBattedIn: nil,
+            homeRuns: homeRuns,
+            walks: nil,
+            strikeouts: strikeouts,
+            average: nil
+        )
+    }
+
+    private func makePositionBattingLine(name: String, position: String) -> GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: "1",
+            position: position,
+            name: name,
+            atBats: nil,
+            runs: nil,
+            hits: nil,
+            runsBattedIn: nil,
+            homeRuns: nil,
+            walks: nil,
+            strikeouts: nil,
+            average: nil
+        )
+    }
+
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
@@ -4260,6 +5612,252 @@ struct kboScoreTests {
         #expect(request.url?.absoluteString == "http://localhost:8080/v1/games")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+    }
+
+    @Test func gameBoxscoreResponseDecodesFullBatterAndPitcherRecords() throws {
+        let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
+
+        #expect(response.gameId == "20260510-DOO-SSG")
+        #expect(response.awayBatters.count == 2)
+        #expect(response.homeBatters.count == 1)
+        #expect(response.awayPitchers.count == 1)
+        #expect(response.homePitchers.count == 1)
+        #expect(response.updatedAt == "2026-05-11T02:04:00+09:00")
+        #expect(response.isStale == false)
+        #expect(response.awayBatters[0].playerName == "정수빈")
+        #expect(response.awayBatters[0].atBats == 4)
+        #expect(response.awayBatters[0].runs == 1)
+        #expect(response.awayBatters[0].hits == 2)
+        #expect(response.awayBatters[0].rbi == 1)
+        #expect(response.awayBatters[0].battingAverage == "0.300")
+        #expect(response.awayPitchers[0].playerName == "잭로그")
+        #expect(response.awayPitchers[0].appearance == "선발")
+        #expect(response.awayPitchers[0].decisionResult == "승")
+        #expect(response.awayPitchers[0].inningsPitched == "6 1/3")
+        #expect(response.awayPitchers[0].battersFaced == 24)
+        #expect(response.awayPitchers[0].pitchCount == 88)
+        #expect(response.awayPitchers[0].walksOrHitByPitch == 1)
+        #expect(response.awayPitchers[0].era == "3.19")
+    }
+
+    @Test func gameBoxscoreResponseKeepsNullableBatterFieldsNil() throws {
+        let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
+        let batter = try #require(response.awayBatters.first)
+
+        #expect(batter.homeRuns == nil)
+        #expect(batter.walks == nil)
+        #expect(batter.strikeouts == nil)
+        #expect(batter.stolenBases == nil)
+    }
+
+    @Test func gameDetailBatterStolenBaseDisplayDefaultsOnlyThatColumnToZero() throws {
+        let missingStat: String? = nil
+
+        #expect(missingStat.displayStolenBaseStat == "0")
+        #expect((missingStat ?? "-") == "-")
+    }
+
+    @Test func gameRecordPositionFormatterDisplaysReadableBatterPositions() throws {
+        #expect(GameRecordPositionFormatter.display(nil) == "-")
+        #expect(GameRecordPositionFormatter.display("") == "-")
+        #expect(GameRecordPositionFormatter.display("--") == "-")
+        #expect(GameRecordPositionFormatter.display("포") == "C")
+        #expect(GameRecordPositionFormatter.display("유") == "SS")
+        #expect(GameRecordPositionFormatter.display("二") == "2B")
+        #expect(GameRecordPositionFormatter.display("三") == "3B")
+        #expect(GameRecordPositionFormatter.display("주우") == "PR·RF")
+        #expect(GameRecordPositionFormatter.display("주二") == "PR·2B")
+        #expect(GameRecordPositionFormatter.display("타유") == "PH·SS")
+        #expect(GameRecordPositionFormatter.display("유三") == "SS·3B")
+        #expect(GameRecordPositionFormatter.display("二유") == "2B·SS")
+        #expect(GameRecordPositionFormatter.display("중우") == "CF·RF")
+        #expect(GameRecordPositionFormatter.display("알수없음") == "알수없음")
+    }
+
+    @Test func gameRecordPositionFormatterCoversObservedDetailedBatterRows() throws {
+        #expect(GameRecordPositionFormatter.display("주우") == "PR·RF")
+        #expect(GameRecordPositionFormatter.display("주二") == "PR·2B")
+        #expect(GameRecordPositionFormatter.display("유三") == "SS·3B")
+        #expect(GameRecordPositionFormatter.display("二유") == "2B·SS")
+    }
+
+    @Test func gameRecordPositionEnrichmentUsesUnambiguousRicherSameTeamSource() throws {
+        let current = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(name: "정현창", position: "--"),
+                makePositionBattingLine(name: "박민", position: "유"),
+                makePositionBattingLine(name: "김규성", position: "주")
+            ],
+            totals: nil
+        )
+        let source = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(name: "정현창", position: "二유"),
+                makePositionBattingLine(name: "박민", position: "유三"),
+                makePositionBattingLine(name: "김규성", position: "주二")
+            ],
+            totals: nil
+        )
+
+        let enriched = current.enrichingPositions(from: source, sideLabel: "away")
+
+        #expect(GameRecordPositionFormatter.display(enriched.lines[0].position) == "2B·SS")
+        #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "SS·3B")
+        #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "PR·2B")
+    }
+
+    @Test func gameBoxscoreResponseSortsRecordsBySourceOrder() throws {
+        let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
+
+        #expect(response.awayBatters.map(\.sourceOrder) == [0, 1])
+        #expect(response.awayBatters.map(\.playerName) == ["정수빈", "허경민"])
+    }
+
+    @Test func backendGameBoxscoreClientFetchesExpectedEndpoint() async throws {
+        let session = makeBoxscoreStubSession()
+        let client = BackendGameBoxscoreClient(baseURL: URL(string: "http://localhost:8088")!, session: session)
+
+        BoxscoreURLProtocolStub.testResponses = [
+            "http://localhost:8088/api/v1/games/20260510-DOO-SSG/boxscore": StubResponse(statusCode: 200, data: sampleGameBoxscoreJSON())
+        ]
+        BoxscoreURLProtocolStub.lastRequest = nil
+        defer {
+            BoxscoreURLProtocolStub.testResponses = [:]
+            BoxscoreURLProtocolStub.lastRequest = nil
+        }
+
+        let response = try await client.fetchGameBoxscore(gameId: "20260510-DOO-SSG")
+        let request = try #require(BoxscoreURLProtocolStub.lastRequest)
+
+        #expect(request.url?.absoluteString == "http://localhost:8088/api/v1/games/20260510-DOO-SSG/boxscore")
+        #expect(request.httpMethod == "GET")
+        #expect(request.timeoutInterval == 2.5)
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+        #expect(response.awayBatters.count == 2)
+    }
+
+    @Test func gameDetailScreenModelMergesBoxscoreWithoutClearingDetailState() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+        let game = try makeBoxscoreDetailGame()
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(model.detail?.summary.officialGameID == "20260510SKOB0")
+        #expect(model.boxscore?.awayBatters.count == 2)
+        #expect(model.boxscore?.awayPitchers.first?.walksOrHitByPitch == 1)
+        #expect(await state.fetchCount == 1)
+        #expect(await state.requestedGameIDs == ["20260510-DOO-SSG"])
+    }
+
+    @Test func gameDetailScreenModelAcceptsEmptyBoxscoreArrays() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
+        let state = RecordingBoxscoreState(result: .success(empty))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+
+        await model.load(for: try makeBoxscoreDetailGame())
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(model.boxscore?.awayBatters.isEmpty == true)
+        #expect(model.boxscore?.homePitchers.isEmpty == true)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func failedBoxscoreFetchDoesNotFailDetailLoad() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+
+        await model.load(for: try makeBoxscoreDetailGame())
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(model.detail?.summary.officialGameID == "20260510SKOB0")
+        #expect(model.boxscore == nil)
+        #expect(model.errorMessage == nil)
+        #expect(model.boxscoreErrorMessage != nil)
+    }
+
+    @Test func slowBoxscoreFetchDoesNotBlockDetailPayloadRendering() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state, delayNanoseconds: 300_000_000),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+
+        await model.load(for: try makeBoxscoreDetailGame())
+
+        #expect(model.detail?.summary.officialGameID == "20260510SKOB0")
+        #expect(model.boxscore == nil)
+
+        await model.waitForBoxscoreLoadForTesting()
+        #expect(model.boxscore?.awayBatters.count == 2)
+    }
+
+    @Test func gameDetailScreenModelDoesNotRepeatBoxscoreFetchForSameGame() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+        let game = try makeBoxscoreDetailGame()
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(await state.fetchCount == 1)
+    }
+
+    @Test func gameDetailScreenModelSkipsRepeatedFailedBoxscoreFetchDuringCooldown() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let firstModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+        let secondModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            }
+        )
+        let game = try makeBoxscoreDetailGame()
+
+        await firstModel.load(for: game)
+        await firstModel.waitForBoxscoreLoadForTesting()
+        await secondModel.load(for: game)
+        await secondModel.waitForBoxscoreLoadForTesting()
+
+        #expect(await state.fetchCount == 1)
+        #expect(secondModel.detail?.summary.officialGameID == "20260510SKOB0")
+        #expect(secondModel.boxscoreErrorMessage != nil)
     }
 
     @Test func bootstrapRefreshRepositoryWritesDocumentsJSONAndStoresETagOn200() async throws {
@@ -5998,6 +7596,38 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
     }
 
+    @Test func simultaneousStandingsBootstrapCoalescesTeamRankRemoteFetch() async throws {
+        let gate = RankFetchGate()
+        let state = TeamRankFlowState(
+            localRanks: [],
+            remoteRanks: sampleTeamRankRows(),
+            gate: gate
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-05-06T12:00:00+09:00")),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        let firstLoad = Task { await model.loadStandingsIfNeeded() }
+        await gate.waitUntilStarted()
+        #expect(await state.remoteFetchCount == 1)
+
+        let secondLoad = Task { await model.loadStandingsIfNeeded() }
+        #expect(await state.remoteFetchCount == 1)
+
+        await gate.release()
+        await firstLoad.value
+        await secondLoad.value
+
+        #expect(await state.remoteFetchCount == 1)
+        #expect(await state.localReplaceCount == 1)
+        #expect(await state.cachedRanksCount == 2)
+        #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
+    }
+
     @Test func manualStandingsRefreshFetchesTeamRankViewAndUpdatesLocalCache() async throws {
         let state = TeamRankFlowState(
             localRanks: [sampleTeamRankRows()[1]],
@@ -6071,6 +7701,42 @@ struct kboScoreTests {
 
         await model.loadStandingsIfNeeded()
 
+        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(model.standingsSnapshots.first?.team.id == "lg")
+        #expect(model.standingsSnapshots.first?.wins == 1)
+    }
+
+    @Test func teamRankFetchFailureWithEmptyLocalCacheFallsBackToGamesBasedStandingsCalculation() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let lg = try #require(teams.first { $0.id == "lg" })
+        let kia = try #require(teams.first { $0.id == "kia" })
+        let completedGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: isoDate("2026-04-10T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: kia,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let state = TeamRankFlowState(
+            localRanks: [],
+            remoteError: TestRepositoryError.supabaseUnavailable,
+            standingsGames: [completedGame]
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-06T12:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        #expect(await state.remoteFetchCount == 1)
         #expect(await state.standingsSourceFetchCount == 1)
         #expect(model.standingsSnapshots.first?.team.id == "lg")
         #expect(model.standingsSnapshots.first?.wins == 1)
@@ -6232,6 +7898,7 @@ private actor TeamRankFlowState {
     private let gate: RankFetchGate?
     private let standingsGames: [GameDetail]
     private(set) var remoteFetchCount = 0
+    private(set) var localReplaceCount = 0
     private(set) var standingsSourceFetchCount = 0
 
     init(
@@ -6259,6 +7926,7 @@ private actor TeamRankFlowState {
     func replaceLocalRanks(_ ranks: [TeamRankRow], season: Int) -> Int {
         localRanks.removeAll { $0.season == season }
         localRanks.append(contentsOf: ranks)
+        localReplaceCount += 1
         return ranks.count
     }
 
@@ -6672,6 +8340,364 @@ private enum TestRepositoryError: Error, Sendable {
     case supabaseUnavailable
 }
 
+private actor RecordingBoxscoreState {
+    private let result: Result<GameBoxscoreResponse, Error>
+    private(set) var fetchCount = 0
+    private(set) var requestedGameIDs: [String] = []
+
+    init(result: Result<GameBoxscoreResponse, Error>) {
+        self.result = result
+    }
+
+    func fetch(gameId: String) throws -> GameBoxscoreResponse {
+        fetchCount += 1
+        requestedGameIDs.append(gameId)
+        return try result.get()
+    }
+}
+
+private struct RecordingBoxscoreClient: GameBoxscoreFetching {
+    let state: RecordingBoxscoreState
+    var delayNanoseconds: UInt64 = 0
+    var cacheIdentity: String = "recording"
+
+    nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse {
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return try await state.fetch(gameId: gameId)
+    }
+}
+
+private final class BoxscoreURLProtocolStub: URLProtocol, @unchecked Sendable {
+    static var testResponses: [String: StubResponse] = [:]
+    static var lastRequest: URLRequest?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.port == 8088 && request.url?.path.hasSuffix("/boxscore") == true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        Self.lastRequest = request
+        guard let url = request.url, let response = Self.testResponses[url.absoluteString] else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        let httpResponse = HTTPURLResponse(
+            url: url,
+            statusCode: response.statusCode,
+            httpVersion: nil,
+            headerFields: response.headers.merging(["Content-Type": "application/json"]) { current, _ in current }
+        )!
+
+        client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: response.data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private func makeBoxscoreStubSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [BoxscoreURLProtocolStub.self]
+    return URLSession(configuration: configuration)
+}
+
+private func sampleGameBoxscoreJSON() -> Data {
+    Data(
+        """
+        {
+          "gameId": "20260510-DOO-SSG",
+          "awayBatters": [
+            {
+              "sourceOrder": 1,
+              "battingOrder": 2,
+              "position": "삼",
+              "playerName": "허경민",
+              "atBats": 3,
+              "runs": 0,
+              "hits": 1,
+              "rbi": 0,
+              "homeRuns": 0,
+              "walks": 1,
+              "strikeouts": 0,
+              "stolenBases": 1,
+              "battingAverage": "0.280"
+            },
+            {
+              "sourceOrder": 0,
+              "battingOrder": 1,
+              "position": "중",
+              "playerName": "정수빈",
+              "atBats": 4,
+              "runs": 1,
+              "hits": 2,
+              "rbi": 1,
+              "homeRuns": null,
+              "walks": null,
+              "strikeouts": null,
+              "stolenBases": null,
+              "battingAverage": "0.300"
+            }
+          ],
+          "homeBatters": [
+            {
+              "sourceOrder": 0,
+              "battingOrder": 1,
+              "position": "유",
+              "playerName": "안상현",
+              "atBats": 3,
+              "runs": 1,
+              "hits": 0,
+              "rbi": 0,
+              "homeRuns": null,
+              "walks": null,
+              "strikeouts": null,
+              "stolenBases": null,
+              "battingAverage": "0.300"
+            }
+          ],
+          "awayPitchers": [
+            {
+              "sourceOrder": 0,
+              "pitchingOrder": 1,
+              "playerName": "잭로그",
+              "appearance": "선발",
+              "decisionResult": "승",
+              "wins": 1,
+              "losses": 0,
+              "saves": 0,
+              "inningsPitched": "6 1/3",
+              "battersFaced": 24,
+              "pitchCount": 88,
+              "atBats": 22,
+              "hits": 5,
+              "homeRuns": 0,
+              "walksOrHitByPitch": 1,
+              "strikeouts": 6,
+              "runs": 1,
+              "earnedRuns": 1,
+              "era": "3.19"
+            }
+          ],
+          "homePitchers": [
+            {
+              "sourceOrder": 0,
+              "pitchingOrder": 1,
+              "playerName": "최민준",
+              "appearance": "선발",
+              "decisionResult": "패",
+              "wins": 0,
+              "losses": 1,
+              "saves": 0,
+              "inningsPitched": "2",
+              "battersFaced": 12,
+              "pitchCount": 46,
+              "atBats": 8,
+              "hits": 3,
+              "homeRuns": 1,
+              "walksOrHitByPitch": 3,
+              "strikeouts": 0,
+              "runs": 3,
+              "earnedRuns": 2,
+              "era": "3.23"
+            }
+          ],
+          "updatedAt": "2026-05-11T02:04:00+09:00",
+          "isStale": false
+        }
+        """.utf8
+    )
+}
+
+private func makeBoxscoreDetailGame() throws -> GameDetail {
+    let teams = MockKBOData.makeBootstrap().teams
+    let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
+    let ssg = try #require(teams.first(where: { $0.id == "ssg" }))
+    return makeGameDetail(
+        id: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
+        scheduledStart: isoDate("2026-05-10T14:00:00+09:00"),
+        venue: "잠실",
+        awayTeam: doosan,
+        homeTeam: ssg,
+        awayScore: 3,
+        homeScore: 1,
+        status: .final,
+        note: "public_game_id=20260510-DOO-SSG provider_game_id=20260510SKOB0",
+        providerGameID: "20260510SKOB0"
+    )
+}
+
+private func sampleGameCenterDetailPayload(game: GameDetail) -> GameCenterDetailPayload {
+    GameCenterDetailPayload(
+        summary: GameCenterSummary(
+            officialGameID: game.officialGameCenterID ?? "20260510SKOB0",
+            dateText: "2026-05-10",
+            stadium: game.venue,
+            startTime: "14:00",
+            endTime: nil,
+            durationText: nil,
+            crowdText: nil,
+            status: game.status,
+            inningText: game.inningText,
+            awayScore: game.awayScore,
+            homeScore: game.homeScore,
+            balls: game.balls,
+            strikes: game.strikes,
+            outs: game.outs,
+            bases: game.bases,
+            baseRunners: nil,
+            probableStarters: nil,
+            winningPitcher: nil,
+            losingPitcher: nil,
+            savePitcher: nil
+        ),
+        lineScore: nil,
+        review: nil,
+        preview: nil
+    )
+}
+
+private actor RecordingNotificationRegistrationClient: NotificationRegistrationClient {
+    private var payloads: [NotificationRegistrationPayload] = []
+
+    nonisolated var debugEndpointDescription: String? {
+        "https://example.com/devices/register"
+    }
+
+    nonisolated func syncRegistration(_ payload: NotificationRegistrationPayload) async throws -> NotificationRegistrationSyncStatus {
+        await record(payload)
+        return .synced
+    }
+
+    private func record(_ payload: NotificationRegistrationPayload) {
+        payloads.append(payload)
+    }
+
+    func requestCount() -> Int {
+        payloads.count
+    }
+
+    func favoriteTeamIDs() -> [String?] {
+        payloads.map(\.favoriteTeamID)
+    }
+}
+
+private func notificationRegistrationSettings(
+    favoriteTeamID: String?,
+    preferences: NotificationPreferences = NotificationPreferences()
+) -> AppSettings {
+    AppSettings(
+        favoriteTeamID: favoriteTeamID,
+        notificationPreferences: preferences,
+        quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
+        liveActivitiesEnabled: true,
+        appearance: .system,
+        teamThemeMode: .favoriteTeam
+    )
+}
+
+private func disabledNotificationPreferences() -> NotificationPreferences {
+    NotificationPreferences(
+        gameStart: false,
+        scoreChange: false,
+        leadChange: false,
+        gameEnd: false,
+        rainDelay: false,
+        onBaseEnabled: false,
+        inningChangeEnabled: false,
+        favoriteTeamOnlyEnabled: false,
+        muteWhenLosingEnabled: false
+    )
+}
+
+private actor FavoriteScheduleCallRecorder {
+    private var recordedFavoriteTeamIDs: [String] = []
+
+    func record(favoriteTeamID: String) {
+        recordedFavoriteTeamIDs.append(favoriteTeamID)
+    }
+
+    func callCount() -> Int {
+        recordedFavoriteTeamIDs.count
+    }
+
+    func favoriteTeamIDs() -> [String] {
+        recordedFavoriteTeamIDs
+    }
+}
+
+private struct FavoriteScheduleCountingRepository: KBORepository, KBOFavoriteTeamScheduleDataSource {
+    let recorder: FavoriteScheduleCallRecorder
+    let base: StubRepository
+
+    init(
+        recorder: FavoriteScheduleCallRecorder,
+        base: StubRepository = StubRepository()
+    ) {
+        self.recorder = recorder
+        self.base = base
+    }
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        try await base.fetchBootstrapData()
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await base.fetchGames()
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await base.fetchNotifications()
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        try await base.fetchMonthlySchedule(for: month)
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
+    }
+
+    nonisolated func fetchFavoriteTeamSchedule(
+        date _: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache _: Bool
+    ) async throws -> [GameDetail] {
+        await recorder.record(favoriteTeamID: favoriteTeamId)
+        return []
+    }
+}
+
+private func eventually(
+    timeout: TimeInterval,
+    interval: UInt64 = 50_000_000,
+    condition: @escaping () async -> Bool
+) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: interval)
+    }
+    return await condition()
+}
+
 private struct StubResponse {
     let statusCode: Int
     let data: Data
@@ -6730,7 +8756,7 @@ private func makeStubSession() -> URLSession {
 }
 
 private func jsonStringLiteral(_ value: String) throws -> String {
-    let data = try JSONSerialization.data(withJSONObject: value, options: [])
+    let data = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
     return String(data: data, encoding: .utf8) ?? "\"\""
 }
 
@@ -6894,6 +8920,7 @@ private final class TestLiveActivityController: FavoriteTeamLiveActivityControll
     let isSupported: Bool
 
     private(set) var activeGameID: UUID?
+    private(set) var snapshots: [FavoriteTeamLiveActivitySnapshot] = []
 
     init(isSupported: Bool) {
         self.isSupported = isSupported
@@ -6901,6 +8928,7 @@ private final class TestLiveActivityController: FavoriteTeamLiveActivityControll
 
     func startOrUpdate(using snapshot: FavoriteTeamLiveActivitySnapshot) async throws {
         activeGameID = snapshot.gameID
+        snapshots.append(snapshot)
     }
 
     func endCurrent() async {
@@ -7081,6 +9109,7 @@ private func makeGameDetail(
     awayStartingPitcherName: String? = nil,
     homeStartingPitcherName: String? = nil,
     bases: RunnerState? = nil,
+    baseRunners: GameBaseRunners? = nil,
     balls: Int? = nil,
     strikes: Int? = nil,
     outs: Int? = nil,
@@ -7100,6 +9129,7 @@ private func makeGameDetail(
         seasonClassification: seasonClassification,
         inningText: inningText ?? status.title,
         bases: bases,
+        baseRunners: baseRunners,
         balls: balls,
         strikes: strikes,
         outs: outs,
@@ -7111,6 +9141,36 @@ private func makeGameDetail(
         homeStartingPitcherName: homeStartingPitcherName,
         currentPitcherName: currentPitcherName,
         currentBatterName: currentBatterName
+    )
+}
+
+private func makeBaseRunnerDisplayGame(
+    id: UUID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
+    providerGameID: String = "20260506WOLT0",
+    bases: RunnerState,
+    baseRunners: GameBaseRunners?
+) throws -> GameDetail {
+    let teams = MockKBOData.makeBootstrap().teams
+    let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+    let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+    return makeGameDetail(
+        id: id,
+        scheduledStart: isoDate("2026-05-06T18:30:00+09:00"),
+        venue: "사직",
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: 0,
+        homeScore: 1,
+        status: .live,
+        inningText: "3회 초",
+        providerGameID: providerGameID,
+        bases: bases,
+        baseRunners: baseRunners,
+        balls: 0,
+        strikes: 0,
+        outs: 0,
+        currentPitcherName: "보쉴리",
+        currentBatterName: "손성빈"
     )
 }
 

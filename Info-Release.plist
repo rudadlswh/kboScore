@@ -24,6 +24,8 @@
 	<true/>
 	<key>NotificationRegistrationURL</key>
 	<string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
+	<key>KBOBackendBaseURL</key>
+	<string>$(KBO_BACKEND_BASE_URL)</string>
 	<key>SupabasePublishableKey</key>
 	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>SupabaseURL</key>
