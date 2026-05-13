@@ -29,36 +29,6 @@ private struct GameCenterBoxScorePayload: Sendable {
     }
 }
 
-private struct PlateAppearanceDerivedStats: Sendable, Equatable {
-    let homeRuns: Int
-    let walks: Int
-    let strikeouts: Int
-
-    init(homeRuns: Int = 0, walks: Int = 0, strikeouts: Int = 0) {
-        self.homeRuns = homeRuns
-        self.walks = walks
-        self.strikeouts = strikeouts
-    }
-
-    func adding(resultText: String) -> PlateAppearanceDerivedStats {
-        resultText.plateAppearanceResultTokens.reduce(self) { stats, result in
-            PlateAppearanceDerivedStats(
-                homeRuns: stats.homeRuns + (result.isHomeRunPlateAppearance ? 1 : 0),
-                walks: stats.walks + (result.isWalkPlateAppearance ? 1 : 0),
-                strikeouts: stats.strikeouts + (result.isStrikeoutPlateAppearance ? 1 : 0)
-            )
-        }
-    }
-
-    static func + (lhs: PlateAppearanceDerivedStats, rhs: PlateAppearanceDerivedStats) -> PlateAppearanceDerivedStats {
-        PlateAppearanceDerivedStats(
-            homeRuns: lhs.homeRuns + rhs.homeRuns,
-            walks: lhs.walks + rhs.walks,
-            strikeouts: lhs.strikeouts + rhs.strikeouts
-        )
-    }
-}
-
 extension GameCenterReview {
     func keyStats(
         awayTeam: Team,
@@ -588,32 +558,6 @@ struct OfficialKBOGameCenterClient: Sendable {
         ) : nil
 
         return GameCenterBattingSection(lines: lines, totals: totals)
-    }
-
-    private func plateAppearanceDerivedStats(
-        table: OfficialGridTable?,
-        row: OfficialGridRow?
-    ) -> PlateAppearanceDerivedStats? {
-        guard table?.battingTableInterpretation == .plateAppearanceResults,
-              let row else {
-            return nil
-        }
-
-        return row.cells.reduce(PlateAppearanceDerivedStats()) { stats, cell in
-            stats.adding(resultText: cell.text)
-        }
-    }
-
-    private func plateAppearanceTotals(table: OfficialGridTable?) -> PlateAppearanceDerivedStats? {
-        guard table?.battingTableInterpretation == .plateAppearanceResults,
-              let rows = table?.rows,
-              rows.isEmpty == false else {
-            return nil
-        }
-
-        return rows
-            .compactMap { plateAppearanceDerivedStats(table: table, row: $0) }
-            .reduce(PlateAppearanceDerivedStats()) { $0 + $1 }
     }
 
     private func logPlateAppearanceDiagnosticsIfNeeded(
@@ -1219,34 +1163,6 @@ private extension String {
     var representsNoOfficialEvents: Bool {
         let normalized = normalizedKeyStatLabel
         return normalized.isEmpty || ["없음", "무", "NONE", "NO", "NIL", "-"].contains(normalized)
-    }
-
-    var isHomeRunPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return normalized.contains("홈")
-    }
-
-    var isWalkPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return ["4구", "볼넷", "고4", "고의4구", "자동고의4구"].contains(normalized)
-    }
-
-    var isStrikeoutPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return normalized.contains("삼진") || normalized.contains("낫아웃")
-    }
-
-    var plateAppearanceResultTokens: [String] {
-        normalizedGridText
-            .split { character in
-                character == "," ||
-                    character == "，" ||
-                    character == "/" ||
-                    character == "\n" ||
-                    character == "\r"
-            }
-            .map(String.init)
-            .compactMap(\.nilIfBlank)
     }
 
     func firstGameCenterRegexCapture(pattern: String) -> String? {
