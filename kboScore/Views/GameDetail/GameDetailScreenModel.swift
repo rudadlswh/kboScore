@@ -32,20 +32,31 @@ enum GameDetailSection: String, CaseIterable, Identifiable {
 @Observable
 final class GameDetailScreenModel {
     private static let failedBoxscoreCooldown: TimeInterval = 30
+    private static let officialFallbackCacheTTL: TimeInterval = 60
+    private static let officialFallbackFailureCooldown: TimeInterval = 30
     private static var inFlightBoxscoreTasks: [String: Task<GameBoxscoreResponse?, Never>] = [:]
     private static var recentFailedBoxscoreFetches: [String: Date] = [:]
     private static var cachedBoxscores: [String: GameBoxscoreResponse] = [:]
+    private static var inFlightOfficialFallbackTasks: [String: Task<GameCenterReview?, Never>] = [:]
+    private static var cachedOfficialFallbackReviews: [String: (date: Date, review: GameCenterReview)] = [:]
+    private static var recentFailedOfficialFallbacks: [String: Date] = [:]
 
     private let fetchDetail: @Sendable (GameDetail) async throws -> GameCenterDetailPayload?
+    private let fetchOfficialRecordFallback: @Sendable (GameDetail) async throws -> GameCenterReview?
     private let boxscoreClient: any GameBoxscoreFetching
     private var lastLoadedGameKey: String?
     private var lastLoadedBoxscoreGameID: String?
+    private var lastLoadedOfficialFallbackGameKey: String?
+    private var currentGame: GameDetail?
     private var activeBoxscoreGameID: String?
+    private var activeOfficialFallbackGameKey: String?
     private var boxscoreLoadTask: Task<Void, Never>?
+    private var officialFallbackLoadTask: Task<Void, Never>?
 
     var selectedSection: GameDetailSection = .overview
     var detail: GameCenterDetailPayload?
     var boxscore: GameBoxscoreResponse?
+    var officialFallbackReview: GameCenterReview?
     var isLoading = false
     var errorMessage: String?
     var boxscoreErrorMessage: String?
@@ -54,11 +65,15 @@ final class GameDetailScreenModel {
     init(
         client: OfficialKBOGameCenterClient? = nil,
         boxscoreClient: (any GameBoxscoreFetching)? = nil,
-        fetchDetail: (@Sendable (GameDetail) async throws -> GameCenterDetailPayload?)? = nil
+        fetchDetail: (@Sendable (GameDetail) async throws -> GameCenterDetailPayload?)? = nil,
+        fetchOfficialRecordFallback: (@Sendable (GameDetail) async throws -> GameCenterReview?)? = nil
     ) {
         let resolvedClient = client ?? OfficialKBOGameCenterClient()
         self.fetchDetail = fetchDetail ?? { game in
-            try await resolvedClient.fetchDetail(for: game)
+            try await resolvedClient.fetchDetail(for: game, includeRecordFallback: false)
+        }
+        self.fetchOfficialRecordFallback = fetchOfficialRecordFallback ?? { game in
+            try await resolvedClient.fetchRecordFallbackReview(for: game)
         }
         self.boxscoreClient = boxscoreClient ?? GameBoxscoreClientFactory.makeAppClient()
     }
@@ -77,11 +92,13 @@ final class GameDetailScreenModel {
             game.status.rawValue
         ].joined(separator: "::")
         guard forceRefresh || lastLoadedGameKey != gameKey else { return }
+        currentGame = game
 
         isLoading = true
         errorMessage = nil
         hasAttemptedLoad = true
 
+        officialFallbackReview = nil
         scheduleBoxscoreLoadIfNeeded(for: game, forceRefresh: forceRefresh)
 
         do {
@@ -109,12 +126,18 @@ final class GameDetailScreenModel {
         if forceRefresh == false, let cached = Self.cachedBoxscores[boxscoreCacheKey] {
             boxscore = cached
             lastLoadedBoxscoreGameID = boxscoreCacheKey
+            if cached.hasRecords {
+                cancelOfficialFallbackLoad()
+            } else {
+                scheduleOfficialRecordFallbackIfNeeded(for: game, forceRefresh: forceRefresh)
+            }
             return
         }
         if forceRefresh == false,
            let failedAt = Self.recentFailedBoxscoreFetches[boxscoreCacheKey],
            Date().timeIntervalSince(failedAt) < Self.failedBoxscoreCooldown {
             boxscoreErrorMessage = "박스스코어 기록은 현재 데이터로 표시하고 있습니다."
+            scheduleOfficialRecordFallbackIfNeeded(for: game, forceRefresh: forceRefresh)
             return
         }
 
@@ -152,20 +175,124 @@ final class GameDetailScreenModel {
             Self.cachedBoxscores[cacheKey] = fetchedBoxscore
             Self.recentFailedBoxscoreFetches[cacheKey] = nil
             boxscore = fetchedBoxscore
+            if fetchedBoxscore.hasRecords {
+                cancelOfficialFallbackLoad()
+            } else if let currentGame = detailGame(publicGameID: publicGameID) {
+                scheduleOfficialRecordFallbackIfNeeded(for: currentGame, forceRefresh: forceRefresh)
+            }
         } else {
             Self.recentFailedBoxscoreFetches[cacheKey] = Date()
             boxscoreErrorMessage = "박스스코어 기록은 현재 데이터로 표시하고 있습니다."
+            if let currentGame = detailGame(publicGameID: publicGameID) {
+                scheduleOfficialRecordFallbackIfNeeded(for: currentGame, forceRefresh: forceRefresh)
+            }
         }
+    }
+
+    private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
+        guard game.status == .final else { return }
+        guard boxscore?.hasRecords != true else {
+            cancelOfficialFallbackLoad()
+            return
+        }
+        let cacheKey = officialFallbackCacheKey(for: game)
+        guard cacheKey.isEmpty == false else { return }
+        activeOfficialFallbackGameKey = cacheKey
+
+        if forceRefresh == false, lastLoadedOfficialFallbackGameKey == cacheKey {
+            return
+        }
+        if forceRefresh == false,
+           let cached = Self.cachedOfficialFallbackReviews[cacheKey],
+           Date().timeIntervalSince(cached.date) < Self.officialFallbackCacheTTL {
+            officialFallbackReview = cached.review
+            lastLoadedOfficialFallbackGameKey = cacheKey
+            return
+        }
+        if forceRefresh == false,
+           let failedAt = Self.recentFailedOfficialFallbacks[cacheKey],
+           Date().timeIntervalSince(failedAt) < Self.officialFallbackFailureCooldown {
+            return
+        }
+
+        officialFallbackLoadTask?.cancel()
+        officialFallbackLoadTask = Task { [weak self] in
+            await self?.loadOfficialRecordFallbackIfNeeded(for: game, cacheKey: cacheKey, forceRefresh: forceRefresh)
+        }
+    }
+
+    private func loadOfficialRecordFallbackIfNeeded(for game: GameDetail, cacheKey: String, forceRefresh: Bool) async {
+        let task: Task<GameCenterReview?, Never>
+        if forceRefresh == false, let inFlight = Self.inFlightOfficialFallbackTasks[cacheKey] {
+            task = inFlight
+        } else {
+            let fetchOfficialRecordFallback = fetchOfficialRecordFallback
+            task = Task.detached(priority: .utility) { () -> GameCenterReview? in
+                do {
+                    return try await fetchOfficialRecordFallback(game)
+                } catch {
+                    #if DEBUG
+                    print("[GameDetailStats] officialFallback failed gameKey=\(cacheKey) error=\(error)")
+                    #endif
+                    return nil
+                }
+            }
+            Self.inFlightOfficialFallbackTasks[cacheKey] = task
+        }
+
+        let fetchedReview = await task.value
+        Self.inFlightOfficialFallbackTasks[cacheKey] = nil
+        lastLoadedOfficialFallbackGameKey = cacheKey
+        guard activeOfficialFallbackGameKey == cacheKey,
+              boxscore?.hasRecords != true else { return }
+
+        if let fetchedReview, fetchedReview.hasDisplayableRecords {
+            Self.cachedOfficialFallbackReviews[cacheKey] = (Date(), fetchedReview)
+            Self.recentFailedOfficialFallbacks[cacheKey] = nil
+            officialFallbackReview = fetchedReview
+        } else {
+            Self.recentFailedOfficialFallbacks[cacheKey] = Date()
+        }
+    }
+
+    private func cancelOfficialFallbackLoad() {
+        officialFallbackLoadTask?.cancel()
+        officialFallbackLoadTask = nil
+        activeOfficialFallbackGameKey = nil
+        officialFallbackReview = nil
+    }
+
+    private func officialFallbackCacheKey(for game: GameDetail) -> String {
+        [
+            game.publicGameID?.nilIfBlank,
+            game.providerGameID?.nilIfBlank,
+            game.officialGameCenterID?.nilIfBlank,
+            game.id.uuidString
+        ]
+            .compactMap { $0 }
+            .joined(separator: "::")
+    }
+
+    private func detailGame(publicGameID: String) -> GameDetail? {
+        guard currentGame?.publicGameID == publicGameID else { return nil }
+        return currentGame
     }
 
     func waitForBoxscoreLoadForTesting() async {
         await boxscoreLoadTask?.value
     }
 
+    func waitForOfficialFallbackLoadForTesting() async {
+        await officialFallbackLoadTask?.value
+    }
+
     static func resetBoxscoreLoadingCacheForTesting() {
         inFlightBoxscoreTasks.removeAll()
         recentFailedBoxscoreFetches.removeAll()
         cachedBoxscores.removeAll()
+        inFlightOfficialFallbackTasks.removeAll()
+        cachedOfficialFallbackReviews.removeAll()
+        recentFailedOfficialFallbacks.removeAll()
     }
 }
 

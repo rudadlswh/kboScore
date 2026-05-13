@@ -6098,6 +6098,9 @@ struct kboScoreTests {
     }
 
     @Test func gameRecordPositionEnrichmentUsesUnambiguousRicherSameTeamSource() throws {
+        #if DEBUG
+        GameRecordPositionFormatter.resetDebugLogCacheForTesting()
+        #endif
         let current = GameCenterBattingSection(
             lines: [
                 makePositionBattingLine(name: "정현창", position: "--"),
@@ -6120,6 +6123,29 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display(enriched.lines[0].position) == "2B·SS")
         #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "SS·3B")
         #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "PR·2B")
+    }
+
+    @Test func gameRecordPositionDebugLogsAreDedupedForSamePlayerAndGame() throws {
+        #if DEBUG
+        GameRecordPositionFormatter.resetDebugLogCacheForTesting()
+        let current = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(name: "정현창", position: "--")
+            ],
+            totals: nil
+        )
+        let source = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(name: "정현창", position: "二유")
+            ],
+            totals: nil
+        )
+
+        _ = current.enrichingPositions(from: source, sideLabel: "away")
+        _ = current.enrichingPositions(from: source, sideLabel: "away")
+
+        #expect(GameRecordPositionFormatter.debugLoggedPositionCountForTesting == 1)
+        #endif
     }
 
     @Test func gameBoxscoreResponseSortsRecordsBySourceOrder() throws {
@@ -6155,11 +6181,13 @@ struct kboScoreTests {
     @Test func gameDetailScreenModelMergesBoxscoreWithoutClearingDetailState() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
         let model = GameDetailScreenModel(
             boxscoreClient: RecordingBoxscoreClient(state: state),
             fetchDetail: { game in
                 sampleGameCenterDetailPayload(game: game)
-            }
+            },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
         )
         let game = try makeBoxscoreDetailGame()
 
@@ -6171,25 +6199,134 @@ struct kboScoreTests {
         #expect(model.boxscore?.awayPitchers.first?.walksOrHitByPitch == 1)
         #expect(await state.fetchCount == 1)
         #expect(await state.requestedGameIDs == ["20260510-DOO-SSG"])
+        #expect(await officialFallback.fetchCount == 0)
     }
 
     @Test func gameDetailScreenModelAcceptsEmptyBoxscoreArrays() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
         let state = RecordingBoxscoreState(result: .success(empty))
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
         let model = GameDetailScreenModel(
             boxscoreClient: RecordingBoxscoreClient(state: state),
             fetchDetail: { game in
                 sampleGameCenterDetailPayload(game: game)
-            }
+            },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
         )
 
         await model.load(for: try makeBoxscoreDetailGame())
         await model.waitForBoxscoreLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
 
         #expect(model.boxscore?.awayBatters.isEmpty == true)
         #expect(model.boxscore?.homePitchers.isEmpty == true)
+        #expect(model.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
+        #expect(await officialFallback.fetchCount == 1)
         #expect(model.errorMessage == nil)
+    }
+
+    @Test func backendBoxscoreSuccessPreventsOfficialStatsFallback() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: state),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game)
+            },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: try makeBoxscoreDetailGame())
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(model.boxscore?.hasRecords == true)
+        #expect(model.officialFallbackReview == nil)
+        #expect(await officialFallback.fetchCount == 0)
+    }
+
+    @Test func officialFallbackInFlightDedupePreventsDuplicateRequests() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
+        let firstState = RecordingBoxscoreState(result: .success(empty))
+        let secondState = RecordingBoxscoreState(result: .success(empty))
+        let officialFallback = RecordingOfficialFallback(
+            result: .success(sampleOfficialFallbackReview()),
+            delayNanoseconds: 250_000_000
+        )
+        let firstModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: firstState, cacheIdentity: "first"),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let secondModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: secondState, cacheIdentity: "second"),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let game = try makeBoxscoreDetailGame()
+
+        async let firstLoad: Void = firstModel.load(for: game)
+        async let secondLoad: Void = secondModel.load(for: game)
+        _ = await (firstLoad, secondLoad)
+        await firstModel.waitForBoxscoreLoadForTesting()
+        await secondModel.waitForBoxscoreLoadForTesting()
+        await firstModel.waitForOfficialFallbackLoadForTesting()
+        await secondModel.waitForOfficialFallbackLoadForTesting()
+
+        #expect(await officialFallback.fetchCount == 1)
+        #expect(firstModel.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
+        #expect(secondModel.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
+    }
+
+    @Test func officialFallbackFailureCooldownPreventsImmediateRetry() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
+        let officialFallback = RecordingOfficialFallback(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let firstModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .success(empty)), cacheIdentity: "first"),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let secondModel = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .success(empty)), cacheIdentity: "second"),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let game = try makeBoxscoreDetailGame()
+
+        await firstModel.load(for: game)
+        await firstModel.waitForBoxscoreLoadForTesting()
+        await firstModel.waitForOfficialFallbackLoadForTesting()
+        await secondModel.load(for: game)
+        await secondModel.waitForBoxscoreLoadForTesting()
+        await secondModel.waitForOfficialFallbackLoadForTesting()
+
+        #expect(await officialFallback.fetchCount == 1)
+        #expect(firstModel.officialFallbackReview == nil)
+        #expect(secondModel.officialFallbackReview == nil)
+    }
+
+    @Test func baseRunnerSnapshotNamesDisplayWithoutOfficialStatsFallback() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let liveGame = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "홍길동", second: nil, third: nil)
+        )
+
+        await model.load(for: liveGame)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(await officialFallback.fetchCount == 0)
     }
 
     @Test func failedBoxscoreFetchDoesNotFailDetailLoad() async throws {
@@ -8776,6 +8913,27 @@ private actor RecordingBoxscoreState {
     }
 }
 
+private actor RecordingOfficialFallback {
+    private let result: Result<GameCenterReview?, Error>
+    private let delayNanoseconds: UInt64
+    private(set) var fetchCount = 0
+    private(set) var requestedGameIDs: [String] = []
+
+    init(result: Result<GameCenterReview?, Error>, delayNanoseconds: UInt64 = 0) {
+        self.result = result
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func fetch(game: GameDetail) async throws -> GameCenterReview? {
+        fetchCount += 1
+        requestedGameIDs.append(game.publicGameID ?? game.officialGameCenterID ?? game.id.uuidString)
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return try result.get()
+    }
+}
+
 private struct RecordingBoxscoreClient: GameBoxscoreFetching {
     let state: RecordingBoxscoreState
     var delayNanoseconds: UInt64 = 0
@@ -9100,6 +9258,33 @@ private func sampleGameCenterDetailPayload(game: GameDetail) -> GameCenterDetail
         lineScore: nil,
         review: nil,
         preview: nil
+    )
+}
+
+private func sampleOfficialFallbackReview() -> GameCenterReview {
+    GameCenterReview(
+        summaryItems: [],
+        awayBatting: GameCenterBattingSection(
+            lines: [
+                GameCenterBattingLine(
+                    battingOrder: "1",
+                    position: "좌",
+                    name: "공식타자",
+                    atBats: "4",
+                    runs: "1",
+                    hits: "2",
+                    runsBattedIn: "1",
+                    homeRuns: nil,
+                    walks: nil,
+                    strikeouts: nil,
+                    average: nil
+                )
+            ],
+            totals: nil
+        ),
+        homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+        awayPitching: GameCenterPitchingSection(lines: []),
+        homePitching: GameCenterPitchingSection(lines: [])
     )
 }
 

@@ -55,6 +55,7 @@ struct GameDetailView: View {
                     game: game,
                     payload: screenModel.detail,
                     boxscore: screenModel.boxscore,
+                    officialFallbackReview: screenModel.officialFallbackReview,
                     baseRunnerDisplay: viewModel.baseRunnerDisplay
                 )
                 let availableSections = GameDetailSection.availableSections(for: presentation.status)
@@ -393,6 +394,7 @@ private struct GameDetailPresentation {
         game: GameDetail,
         payload: GameCenterDetailPayload?,
         boxscore: GameBoxscoreResponse?,
+        officialFallbackReview: GameCenterReview? = nil,
         baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
     ) {
         let summary = payload?.summary
@@ -425,7 +427,9 @@ private struct GameDetailPresentation {
         crowdText = summary?.crowdText?.nilIfBlank
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
         lineScore = payload?.lineScore
-        review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ?? payload?.review
+        review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
+            officialFallbackReview ??
+            payload?.review
         preview = payload?.preview
     }
 

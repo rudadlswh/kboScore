@@ -10,6 +10,10 @@ import Foundation
 enum GameRecordPositionFormatter {
     private static let separator = "·"
     private static let separatorCharacter: Character = "·"
+    #if DEBUG
+    private static let debugLogLock = NSLock()
+    private static var debugLoggedPositionKeys: Set<String> = []
+    #endif
 
     private static let positionMap: [String: String] = [
         "투": "P", "투수": "P",
@@ -108,6 +112,38 @@ enum GameRecordPositionFormatter {
     private static func componentCount(in display: String) -> Int {
         display.split(separator: separatorCharacter).count
     }
+
+    #if DEBUG
+    static func resetDebugLogCacheForTesting() {
+        debugLogLock.withLock {
+            debugLoggedPositionKeys.removeAll()
+        }
+    }
+
+    static var debugLoggedPositionCountForTesting: Int {
+        debugLogLock.withLock {
+            debugLoggedPositionKeys.count
+        }
+    }
+
+    static func logPositionChangeIfNeeded(
+        sideLabel: String,
+        playerName: String,
+        rawPosition: String,
+        resolvedPosition: String,
+        enrichmentRaw: String?
+    ) {
+        let rawDisplay = display(rawPosition)
+        let enrichmentDisplay = enrichmentRaw.map { display($0) }
+        guard rawPosition != resolvedPosition || rawDisplay != rawPosition else { return }
+        let key = "\(sideLabel)::\(playerName)::\(rawPosition)::\(resolvedPosition)::\(enrichmentRaw ?? "<nil>")"
+        let shouldLog = debugLogLock.withLock {
+            debugLoggedPositionKeys.insert(key).inserted
+        }
+        guard shouldLog else { return }
+        print("[GameRecordPosition] side=\(sideLabel) player=\(playerName) raw=\(rawPosition) display=\(rawDisplay) enrichmentRaw=\(enrichmentRaw ?? "<nil>") enrichmentDisplay=\(enrichmentDisplay ?? "<nil>")")
+    }
+    #endif
 }
 
 extension GameCenterReview {
@@ -151,9 +187,13 @@ extension GameCenterBattingSection {
             } ?? line.position
 
             #if DEBUG
-            if line.position != position || GameRecordPositionFormatter.display(line.position) != line.position {
-                print("[GameRecordPosition] side=\(sideLabel) player=\(line.name) raw=\(line.position) display=\(GameRecordPositionFormatter.display(line.position)) enrichmentRaw=\(candidate ?? "<nil>") enrichmentDisplay=\(candidate.map { GameRecordPositionFormatter.display($0) } ?? "<nil>")")
-            }
+            GameRecordPositionFormatter.logPositionChangeIfNeeded(
+                sideLabel: sideLabel,
+                playerName: line.name,
+                rawPosition: line.position,
+                resolvedPosition: position,
+                enrichmentRaw: candidate
+            )
             #endif
 
             return line.replacingPosition(position)

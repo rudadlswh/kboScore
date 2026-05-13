@@ -545,13 +545,20 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 
     func fetchDetail(for game: GameDetail) async throws -> GameCenterDetailPayload? {
+        try await fetchDetail(for: game, includeRecordFallback: true)
+    }
+
+    func fetchDetail(for game: GameDetail, includeRecordFallback: Bool) async throws -> GameCenterDetailPayload? {
         guard let context = try await fetchContext(for: game) else {
             return nil
         }
 
         async let scoreboard = fetchScoreboardIfNeeded(for: context)
-        async let boxScore = fetchBoxScoreIfNeeded(for: context)
-        async let lineupBattingSections = fetchLineupBattingSectionsIfNeeded(for: context)
+        async let boxScore = includeRecordFallback ? fetchBoxScoreIfNeeded(for: context) : nil
+        async let lineupBattingSections = shouldFetchLineupBattingSections(
+            for: context,
+            includeRecordFallback: includeRecordFallback
+        ) ? fetchLineupBattingSectionsIfNeeded(for: context) : nil
         async let preview = fetchPreviewIfNeeded(for: context)
 
         let scoreboardValue = try await scoreboard
@@ -587,6 +594,32 @@ struct OfficialKBOGameCenterClient: Sendable {
             review: boxScoreValue?.review?.enrichingBatterPositions(from: lineupBattingSectionsValue),
             preview: try await preview
         )
+    }
+
+    func fetchRecordFallbackReview(for game: GameDetail) async throws -> GameCenterReview? {
+        guard let context = try await fetchContext(for: game) else {
+            return nil
+        }
+
+        async let boxScore = fetchBoxScoreIfNeeded(for: context)
+        async let lineupBattingSections = fetchLineupBattingSectionsIfNeeded(for: context)
+        let boxScoreValue = try await boxScore
+        let lineupBattingSectionsValue = try await lineupBattingSections
+        return boxScoreValue?.review?.enrichingBatterPositions(from: lineupBattingSectionsValue)
+    }
+
+    private func shouldFetchLineupBattingSections(
+        for context: OfficialGameLookupContext,
+        includeRecordFallback: Bool
+    ) -> Bool {
+        if includeRecordFallback {
+            return true
+        }
+        guard context.entry.status == .live || context.entry.status == .rainDelay,
+              let bases = context.entry.bases else {
+            return false
+        }
+        return bases.first || bases.second || bases.third
     }
 
     func reconcileScheduledStartTimes(in games: [GameDetail]) async -> [GameDetail] {
