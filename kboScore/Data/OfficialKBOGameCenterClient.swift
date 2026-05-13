@@ -1453,21 +1453,7 @@ private struct OfficialGameEntry: Decodable, Sendable {
     }
 }
 
-private struct OfficialPreviewRecordResponse: Decodable {
-    let rows: [OfficialPreviewRecordRow]
-}
-
-private struct OfficialPreviewRecordRow: Decodable {
-    let row: [OfficialPreviewRecordCell]
-}
-
-private struct OfficialPreviewRecordCell: Decodable {
-    let text: String
-
-    private enum CodingKeys: String, CodingKey {
-        case text = "Text"
-    }
-
+private extension OfficialPreviewRecordCell {
     var normalizedText: String {
         text.normalizedGridText
     }

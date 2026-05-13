@@ -68,3 +68,19 @@ struct OfficialBattingTableGroup: Decodable {
 struct OfficialPitchingTableGroup: Decodable {
     let table: String
 }
+
+struct OfficialPreviewRecordResponse: Decodable {
+    let rows: [OfficialPreviewRecordRow]
+}
+
+struct OfficialPreviewRecordRow: Decodable {
+    let row: [OfficialPreviewRecordCell]
+}
+
+struct OfficialPreviewRecordCell: Decodable {
+    let text: String
+
+    private enum CodingKeys: String, CodingKey {
+        case text = "Text"
+    }
+}
