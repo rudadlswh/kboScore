@@ -1226,13 +1226,6 @@ private extension OfficialGameEntry {
 
         return matches.first?.1
     }
-
-    var probableStarters: GameCenterProbableStarters {
-        GameCenterProbableStarters(
-            away: awayProbablePitcherName?.nilIfBlank,
-            home: homeProbablePitcherName?.nilIfBlank
-        )
-    }
 }
 
 private extension OfficialPreviewRecordCell {
