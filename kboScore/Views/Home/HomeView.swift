@@ -89,7 +89,8 @@ struct HomeView: View {
                             GameCardView(
                                 summary: game.summary(isMyTeamGame: game.involves(teamID: appModel.settings.favoriteTeamID)),
                                 showsHomeTeamBadge: true,
-                                liveColorStyle: .white
+                                liveColorStyle: .white,
+                                teamMarkAssetStyle: .mascotPreferred
                             )
                         }
                         .buttonStyle(.plain)
@@ -401,8 +402,8 @@ private struct TeamHeroBackground: View {
             )
             Color.black.opacity(0.18)
 
-            if identity.hasLogoAsset {
-                Image(identity.logoAssetName)
+            if TeamLogoAssetResolver.hasPreferredAsset(for: identity, style: .mascotPreferred) {
+                Image(TeamLogoAssetResolver.preferredAssetName(for: identity, style: .mascotPreferred))
                     .resizable()
                     .scaledToFit()
                     .opacity(0.16)
@@ -416,6 +417,7 @@ private struct TeamHeroBackground: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityHidden(true)
     }
 }
 
@@ -427,7 +429,7 @@ private struct HeroTeamMatchupSide: View {
 
     var body: some View {
         VStack(alignment: alignment, spacing: 10) {
-            TeamMarkView(team: team, size: 38)
+            TeamMarkView(team: team, size: 38, assetStyle: .mascotPreferred)
 
             VStack(alignment: alignment, spacing: 5) {
                 Text(team.identity.displayName)
@@ -496,7 +498,7 @@ private struct HomeFallbackStandingsRow: View {
                 .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
                 .frame(width: 28)
 
-            TeamMarkView(team: snapshot.team, size: 42)
+            TeamMarkView(team: snapshot.team, size: 42, assetStyle: .mascotPreferred)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {

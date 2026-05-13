@@ -7,9 +7,42 @@
 
 import SwiftUI
 
+enum FavoriteTeamCatalog {
+    nonisolated static let orderedTeamIDs: [String] = [
+        "kia",
+        "samsung",
+        "lg",
+        "doosan",
+        "kt",
+        "ssg",
+        "lotte",
+        "hanwha",
+        "nc",
+        "kiwoom"
+    ]
+
+    nonisolated static let teams: [Team] = orderedTeamIDs.compactMap { teamID in
+        guard let identity = TeamIdentity.catalog[teamID] else { return nil }
+        return Team(
+            id: identity.id,
+            name: identity.displayName,
+            shortName: identity.shortLabel,
+            englishName: identity.displayName,
+            markText: identity.monogram
+        )
+    }
+}
+
 struct FavoriteTeamOnboardingView: View {
     @Environment(AppModel.self) private var appModel
     @State private var selectedTeamID: String?
+    private let teams = FavoriteTeamCatalog.teams
+
+    init() {
+        #if DEBUG
+        print("[FavoriteTeamOnboarding] using static catalog count=\(FavoriteTeamCatalog.teams.count)")
+        #endif
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,62 +55,42 @@ struct FavoriteTeamOnboardingView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if appModel.teams.isEmpty {
-                    if appModel.isLoading {
-                        Spacer()
-                        ProgressView("팀 정보를 불러오는 중")
-                            .frame(maxWidth: .infinity)
-                        Spacer()
-                    } else if let loadErrorMessage = appModel.loadErrorMessage {
-                        ContentUnavailableView(
-                            "팀 목록을 가져오지 못했습니다",
-                            systemImage: "wifi.exclamationmark",
-                            description: Text(loadErrorMessage)
-                        )
-                    } else {
-                        Spacer()
-                        ProgressView("팀 정보를 준비하는 중")
-                            .frame(maxWidth: .infinity)
-                        Spacer()
-                    }
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            ForEach(appModel.teams) { team in
-                                Button {
-                                    selectedTeamID = team.id
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        TeamMarkView(team: team, size: 38)
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(teams) { team in
+                            Button {
+                                selectedTeamID = team.id
+                            } label: {
+                                HStack(spacing: 12) {
+                                    TeamMarkView(team: team, size: 38)
 
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(team.displayName)
-                                                .font(.subheadline.weight(.bold))
-                                                .foregroundStyle(.primary)
-                                            Text(team.shortName)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-
-                                        Spacer()
-
-                                        Image(systemName: selectedTeamID == team.id ? "checkmark.circle.fill" : "circle")
-                                            .font(.system(size: 20, weight: .bold))
-                                            .foregroundStyle(selectedTeamID == team.id ? appModel.currentTheme.accent : .secondary)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(team.displayName)
+                                            .font(.subheadline.weight(.bold))
+                                            .foregroundStyle(.primary)
+                                        Text(team.shortName)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                     }
-                                    .padding(12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay {
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(selectedTeamID == team.id ? appModel.currentTheme.accent.opacity(0.35) : Color.primary.opacity(0.06), lineWidth: 1)
-                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: selectedTeamID == team.id ? "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundStyle(selectedTeamID == team.id ? appModel.currentTheme.accent : .secondary)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityAddTraits(selectedTeamID == team.id ? .isSelected : [])
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(Color(.secondarySystemBackground))
+                                )
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(selectedTeamID == team.id ? appModel.currentTheme.accent.opacity(0.35) : Color.primary.opacity(0.06), lineWidth: 1)
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(selectedTeamID == team.id ? .isSelected : [])
                         }
                     }
                 }

@@ -29,6 +29,11 @@ enum TeamThemeID: String, Codable, Sendable {
     case neutral
 }
 
+enum TeamImageAssetStyle: Equatable, Sendable {
+    case officialLogoPreferred
+    case mascotPreferred
+}
+
 struct TeamTheme: Sendable {
     let id: TeamThemeID
     let accent: Color
@@ -66,6 +71,7 @@ struct TeamIdentity: Sendable {
     let shortLabel: String
     let monogram: String
     let logoAssetName: String
+    let mascotAssetName: String?
     let themeID: TeamThemeID
     let theme: TeamTheme
 
@@ -80,6 +86,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "두산",
             monogram: "DOO",
             logoAssetName: "team-doosan",
+            mascotAssetName: "doosan_mascot_bear",
             themeID: .doosan,
             theme: TeamTheme(
                 id: .doosan,
@@ -100,6 +107,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "한화",
             monogram: "HAN",
             logoAssetName: "team-hanwha",
+            mascotAssetName: "hanwha_mascot_eagle",
             themeID: .hanwha,
             theme: TeamTheme(
                 id: .hanwha,
@@ -120,6 +128,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "기아",
             monogram: "KIA",
             logoAssetName: "team-kia",
+            mascotAssetName: "kia_mascot_tiger",
             themeID: .kia,
             theme: TeamTheme(
                 id: .kia,
@@ -140,6 +149,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "키움",
             monogram: "KIW",
             logoAssetName: "team-kiwoom",
+            mascotAssetName: "kiwoom_mascot_hero",
             themeID: .kiwoom,
             theme: TeamTheme(
                 id: .kiwoom,
@@ -160,6 +170,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "KT",
             monogram: "KT",
             logoAssetName: "team-kt",
+            mascotAssetName: "kt_mascot_wizard",
             themeID: .kt,
             theme: TeamTheme(
                 id: .kt,
@@ -180,6 +191,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "LG",
             monogram: "LG",
             logoAssetName: "team-lg",
+            mascotAssetName: "lg_mascot_twins",
             themeID: .lg,
             theme: TeamTheme(
                 id: .lg,
@@ -200,6 +212,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "롯데",
             monogram: "LOT",
             logoAssetName: "team-lotte",
+            mascotAssetName: "lotte_mascot_seagull",
             themeID: .lotte,
             theme: TeamTheme(
                 id: .lotte,
@@ -220,6 +233,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "NC",
             monogram: "NC",
             logoAssetName: "team-nc",
+            mascotAssetName: "nc_mascot_dino",
             themeID: .nc,
             theme: TeamTheme(
                 id: .nc,
@@ -240,6 +254,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "삼성",
             monogram: "SAM",
             logoAssetName: "team-samsung",
+            mascotAssetName: "samsung_mascot_lion",
             themeID: .samsung,
             theme: TeamTheme(
                 id: .samsung,
@@ -260,6 +275,7 @@ struct TeamIdentity: Sendable {
             shortLabel: "SSG",
             monogram: "SSG",
             logoAssetName: "team-ssg",
+            mascotAssetName: "ssg_mascot_dog",
             themeID: .ssg,
             theme: TeamTheme(
                 id: .ssg,
@@ -277,6 +293,44 @@ struct TeamIdentity: Sendable {
     ]
 }
 
+enum TeamLogoAssetResolver {
+    static func mascotAssetName(for teamIdentifier: String?) -> String? {
+        guard let canonicalTeamID = Team.canonicalID(for: teamIdentifier) else { return nil }
+        return TeamIdentity.catalog[canonicalTeamID]?.mascotAssetName
+    }
+
+    static func preferredAssetName(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
+        switch style {
+        case .officialLogoPreferred:
+            return identity.logoAssetName
+        case .mascotPreferred:
+            if let mascotAssetName = identity.mascotAssetName,
+               UIImage(named: mascotAssetName) != nil {
+                return mascotAssetName
+            }
+            return identity.logoAssetName
+        }
+    }
+
+    static func hasPreferredAsset(for identity: TeamIdentity, style: TeamImageAssetStyle) -> Bool {
+        UIImage(named: preferredAssetName(for: identity, style: style)) != nil
+    }
+
+    static func accessibilityLabel(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
+        if style == .mascotPreferred,
+           let mascotAssetName = identity.mascotAssetName,
+           UIImage(named: mascotAssetName) != nil {
+            return "\(identity.displayName) mascot"
+        }
+
+        if UIImage(named: identity.logoAssetName) != nil {
+            return "\(identity.displayName) logo"
+        }
+
+        return identity.displayName
+    }
+}
+
 extension Team {
     var identity: TeamIdentity {
         TeamIdentity.catalog[id] ?? TeamIdentity(
@@ -285,6 +339,7 @@ extension Team {
             shortLabel: shortName,
             monogram: markText,
             logoAssetName: "team-\(id)",
+            mascotAssetName: nil,
             themeID: .neutral,
             theme: .neutral
         )

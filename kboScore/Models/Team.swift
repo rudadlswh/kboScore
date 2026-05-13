@@ -35,19 +35,29 @@ struct Team: Identifiable, Hashable, Codable, Sendable {
         Self.displayName(forTeamID: id, fallback: shortName)
     }
 
+    nonisolated static func canonicalID(for value: String?) -> String? {
+        guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              raw.isEmpty == false else {
+            return nil
+        }
+
+        let lowered = raw.lowercased()
+        if displayNamesByTeamID[lowered] != nil {
+            return lowered
+        }
+
+        return canonicalTeamIDsByAlias[lowered]
+    }
+
     nonisolated static func displayName(forTeamID teamID: String?, fallback: String) -> String {
         let fallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedID = teamID?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        if let normalizedID,
-           let displayName = displayNamesByTeamID[normalizedID] {
+        if let canonicalID = canonicalID(for: teamID),
+           let displayName = displayNamesByTeamID[canonicalID] {
             return displayName
         }
 
-        let normalizedFallback = fallback.lowercased()
-        if let displayName = displayNamesByTeamAlias[normalizedFallback] {
+        if let canonicalFallbackID = canonicalID(for: fallback),
+           let displayName = displayNamesByTeamID[canonicalFallbackID] {
             return displayName
         }
 
@@ -67,27 +77,44 @@ struct Team: Identifiable, Hashable, Codable, Sendable {
         "ssg": "SSG"
     ]
 
-    private nonisolated static let displayNamesByTeamAlias: [String: String] = [
-        "lotte": "롯데",
-        "lotte giants": "롯데",
-        "kiwoom": "키움",
-        "kiwoom heroes": "키움",
-        "hanwha": "한화",
-        "hanwha eagles": "한화",
-        "kia": "기아",
-        "kia tigers": "기아",
-        "doosan": "두산",
-        "doosan bears": "두산",
-        "samsung": "삼성",
-        "samsung lions": "삼성",
-        "kt": "KT",
-        "kt wiz": "KT",
-        "lg": "LG",
-        "lg twins": "LG",
-        "nc": "NC",
-        "nc dinos": "NC",
-        "ssg": "SSG",
-        "ssg landers": "SSG"
+    private nonisolated static let canonicalTeamIDsByAlias: [String: String] = [
+        "lotte": "lotte",
+        "lotte giants": "lotte",
+        "롯데": "lotte",
+        "롯데 자이언츠": "lotte",
+        "kiwoom": "kiwoom",
+        "kiwoom heroes": "kiwoom",
+        "키움": "kiwoom",
+        "키움 히어로즈": "kiwoom",
+        "hanwha": "hanwha",
+        "hanwha eagles": "hanwha",
+        "한화": "hanwha",
+        "한화 이글스": "hanwha",
+        "kia": "kia",
+        "kia tigers": "kia",
+        "kia 타이거즈": "kia",
+        "기아": "kia",
+        "기아 타이거즈": "kia",
+        "doosan": "doosan",
+        "doosan bears": "doosan",
+        "두산": "doosan",
+        "두산 베어스": "doosan",
+        "samsung": "samsung",
+        "samsung lions": "samsung",
+        "삼성": "samsung",
+        "삼성 라이온즈": "samsung",
+        "kt": "kt",
+        "kt wiz": "kt",
+        "kt 위즈": "kt",
+        "lg": "lg",
+        "lg twins": "lg",
+        "lg 트윈스": "lg",
+        "nc": "nc",
+        "nc dinos": "nc",
+        "nc 다이노스": "nc",
+        "ssg": "ssg",
+        "ssg landers": "ssg",
+        "ssg 랜더스": "ssg"
     ]
 }
 

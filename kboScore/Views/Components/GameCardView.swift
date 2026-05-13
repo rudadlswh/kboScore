@@ -17,15 +17,18 @@ struct GameCardView: View {
     let summary: GameSummary
     let showsHomeTeamBadge: Bool
     let liveColorStyle: GameCardLiveColorStyle
+    let teamMarkAssetStyle: TeamImageAssetStyle
 
     init(
         summary: GameSummary,
         showsHomeTeamBadge: Bool = false,
-        liveColorStyle: GameCardLiveColorStyle = .standard
+        liveColorStyle: GameCardLiveColorStyle = .standard,
+        teamMarkAssetStyle: TeamImageAssetStyle = .officialLogoPreferred
     ) {
         self.summary = summary
         self.showsHomeTeamBadge = showsHomeTeamBadge
         self.liveColorStyle = liveColorStyle
+        self.teamMarkAssetStyle = teamMarkAssetStyle
     }
 
     var body: some View {
@@ -70,13 +73,15 @@ struct GameCardView: View {
                     TeamRowDefault(
                         team: summary.awayTeam,
                         score: summary.awayScore,
-                        status: summary.status
+                        status: summary.status,
+                        assetStyle: teamMarkAssetStyle
                     )
                     TeamRowDefault(
                         team: summary.homeTeam,
                         score: summary.homeScore,
                         status: summary.status,
-                        showsHomeBadge: showsHomeTeamBadge
+                        showsHomeBadge: showsHomeTeamBadge,
+                        assetStyle: teamMarkAssetStyle
                     )
                 }
 
@@ -165,7 +170,8 @@ struct GameCardView: View {
                         score: summary.awayScore,
                         status: summary.status,
                         palette: palette,
-                        isWinningRow: awayTeamIsWinning
+                        isWinningRow: awayTeamIsWinning,
+                        assetStyle: teamMarkAssetStyle
                     )
                     TeamRowDoosan(
                         team: summary.homeTeam,
@@ -173,7 +179,8 @@ struct GameCardView: View {
                         status: summary.status,
                         palette: palette,
                         isWinningRow: homeTeamIsWinning,
-                        showsHomeBadge: showsHomeTeamBadge
+                        showsHomeBadge: showsHomeTeamBadge,
+                        assetStyle: teamMarkAssetStyle
                     )
                 }
 
@@ -279,10 +286,11 @@ private struct TeamRowDefault: View {
     let score: Int?
     let status: GameStatus
     var showsHomeBadge: Bool = false
+    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
 
     var body: some View {
         HStack(spacing: 8) {
-            TeamMarkView(team: team, size: 28)
+            TeamMarkView(team: team, size: 28, assetStyle: assetStyle)
             HStack(spacing: 4) {
                 Text(team.displayName)
                     .font(.subheadline.weight(.semibold))
@@ -310,13 +318,14 @@ private struct TeamRowDoosan: View {
     let palette: StadiumPalette
     var isWinningRow: Bool = false
     var showsHomeBadge: Bool = false
+    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
 
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1, style: .continuous)
                 .fill(isWinningRow ? palette.secondary : Color.clear)
                 .frame(width: 2, height: 24)
-            TeamMarkView(team: team, size: 28)
+            TeamMarkView(team: team, size: 28, assetStyle: assetStyle)
             HStack(spacing: 4) {
                 Text(team.displayName)
                     .font(.subheadline.weight(.semibold))
