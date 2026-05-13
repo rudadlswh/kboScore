@@ -698,50 +698,7 @@ struct OfficialKBOGameCenterClient: Sendable {
             return nil
         }
 
-        logPitcherDiagnosticsIfNeeded(table)
-
-        let lines = table.rows.compactMap { row -> GameCenterPitchingLine? in
-            guard let name = row.cells[safe: 0]?.text.nilIfBlank else {
-                return nil
-            }
-
-            // Current official unlabeled pitcher shape: 9 피홈런, 10 피안타, 11 볼넷, 12 사구, 13 삼진.
-            return GameCenterPitchingLine(
-                name: name,
-                role: row.cells[safe: 1]?.text.nilIfBlank,
-                result: row.cells[safe: 2]?.text.nilIfBlank,
-                innings: pitchingStat(table, row: row, labels: ["이닝", "IP"], fallbackIndex: 6),
-                pitches: pitchingStat(table, row: row, labels: ["투구수", "투구", "NP", "P"], fallbackIndex: 8),
-                hitsAllowed: pitchingStat(table, row: row, labels: ["피안타", "H"], fallbackIndex: 10),
-                walksAllowed: pitchingStat(table, row: row, labels: ["볼넷", "BB", "4구"], fallbackIndex: 11),
-                hitBatters: pitchingStat(table, row: row, labels: ["사구", "HBP"], fallbackIndex: 12),
-                strikeouts: pitchingStat(table, row: row, labels: ["삼진", "SO", "K"], fallbackIndex: 13),
-                homeRunsAllowed: pitchingStat(table, row: row, labels: ["피홈런", "홈런", "HR"], fallbackIndex: 9),
-                runsAllowed: pitchingStat(table, row: row, labels: ["실점", "R"], fallbackIndex: 14),
-                earnedRuns: pitchingStat(table, row: row, labels: ["자책", "ER"], fallbackIndex: 15),
-                earnedRunAverage: pitchingStat(table, row: row, labels: ["평균자책점", "ERA"], fallbackIndex: 16)
-            )
-        }
-
-        return GameCenterPitchingSection(lines: lines)
-    }
-
-    private func logPitcherDiagnosticsIfNeeded(_ table: OfficialGridTable) {
-        #if DEBUG
-        let labels = table.headers.first?.cells.map { normalizeStatLabel($0.text) }.joined(separator: ",") ?? "<none>"
-        let rowSample = table.rows.first?.cells.prefix(17).map(\.text).joined(separator: ",") ?? "<none>"
-        let hbpColumn = columnIndex(in: table, labels: ["사구", "HBP"]) ?? 12
-        print("[GameDetailStats] arrPitcher labels=\(labels) row0=\(rowSample) hbpColumn=\(hbpColumn)")
-        #endif
-    }
-
-    private func pitchingStat(_ table: OfficialGridTable, row: OfficialGridRow, labels: [String], fallbackIndex: Int?) -> String? {
-        if let index = columnIndex(in: table, labels: labels),
-           let value = row.cells[safe: index]?.text.nilIfBlank {
-            return value
-        }
-        guard let fallbackIndex else { return nil }
-        return row.cells[safe: fallbackIndex]?.text.nilIfBlank
+        return makePitchingSection(from: table)
     }
 
     private func columnIndex(in table: OfficialGridTable?, labels: [String]) -> Int? {
