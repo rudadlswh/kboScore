@@ -1373,7 +1373,7 @@ private actor RepositoryResponseCache {
             noteValue("updated_at", in: game.note),
             noteValue("source_updated_at", in: game.note)
         ]
-        return values.compactMap(SupabaseDateParser.parseTimestamp).max()
+        return values.compactMap(KBODateParser.parseTimestamp).max()
     }
 
     private static func noteValue(_ key: String, in note: String?) -> String? {

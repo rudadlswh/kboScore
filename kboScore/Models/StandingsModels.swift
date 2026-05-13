@@ -106,13 +106,13 @@ struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
         streakType = try container.decode(String.self, forKey: .streakType)
         streakCount = try container.decode(Int.self, forKey: .streakCount)
         streakText = try container.decode(String.self, forKey: .streakText)
-        lastGameDate = SupabaseDateParser.parseGameDate(try? container.decodeIfPresent(String.self, forKey: .lastGameDate))
+        lastGameDate = KBODateParser.parseGameDate(try? container.decodeIfPresent(String.self, forKey: .lastGameDate))
         calculatedAt = (try? container.decodeIfPresent(Date.self, forKey: .calculatedAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .calculatedAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .calculatedAt))
         updatedAt = (try? container.decodeIfPresent(Date.self, forKey: .updatedAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
         createdAt = (try? container.decodeIfPresent(Date.self, forKey: .createdAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
     }
 
     nonisolated func encode(to encoder: any Encoder) throws {

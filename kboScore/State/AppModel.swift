@@ -3843,7 +3843,7 @@ final class AppModel {
             gameNoteValue("updated_at", in: game.note),
             gameNoteValue("source_updated_at", in: game.note)
         ]
-        .compactMap(SupabaseDateParser.parseTimestamp)
+        .compactMap(KBODateParser.parseTimestamp)
         .max()
     }
 
