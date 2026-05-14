@@ -512,25 +512,6 @@ struct OfficialKBOGameCenterClient: Sendable {
         return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
-    private func makeMatchupSnapshot(from row: OfficialPreviewRecordRow) -> GameCenterMatchupSnapshot? {
-        guard row.row.count >= 7 else { return nil }
-
-        let cells = row.row.map { $0.normalizedText }
-        guard let teamName = cells[safe: 0]?.nilIfBlank else {
-            return nil
-        }
-
-        return GameCenterMatchupSnapshot(
-            teamName: teamName,
-            seasonRecord: cells[safe: 1]?.nilIfBlank,
-            recentFive: cells[safe: 2]?.nilIfBlank,
-            teamERA: cells[safe: 3]?.nilIfBlank,
-            battingAverage: cells[safe: 4]?.nilIfBlank,
-            runsScored: cells[safe: 5]?.nilIfBlank,
-            runsAllowed: cells[safe: 6]?.nilIfBlank
-        )
-    }
-
     func decodeLineupFallbackGridTable(from rawValue: String) -> OfficialGridTable? {
         decodeGridTable(from: rawValue)
     }
@@ -716,12 +697,6 @@ private struct OfficialScoreboardPayload: Sendable {
 private enum OfficialKBOGameCenterError: Error {
     case invalidURL
     case invalidResponse
-}
-
-private extension OfficialPreviewRecordCell {
-    var normalizedText: String {
-        text.normalizedGridText
-    }
 }
 
 private extension Collection {
