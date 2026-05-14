@@ -455,36 +455,6 @@ struct OfficialKBOGameCenterClient: Sendable {
         return formatter.date(from: String(format: "%04d-%02d-%02d %@", year, month, day, trimmedStartTime))
     }
 
-    private func makeLineScore(from payload: OfficialScoreboardResponse) -> GameCenterLineScore? {
-        guard let inningTable = decodeGridTable(from: payload.inningTable),
-              let totalsTable = decodeGridTable(from: payload.totalsTable),
-              inningTable.rows.count >= 2,
-              totalsTable.rows.count >= 2 else {
-            return nil
-        }
-
-        let inningLabels = inningTable.headers.first?.cells.map(\.text) ?? []
-        let awayInnings = inningTable.rows[0].cells.map(\.text)
-        let homeInnings = inningTable.rows[1].cells.map(\.text)
-
-        return GameCenterLineScore(
-            inningLabels: inningLabels,
-            awayInnings: awayInnings,
-            homeInnings: homeInnings,
-            awayTotals: makeTotals(from: totalsTable.rows[0]),
-            homeTotals: makeTotals(from: totalsTable.rows[1])
-        )
-    }
-
-    private func makeTotals(from row: OfficialGridRow) -> GameCenterTeamLineTotals {
-        GameCenterTeamLineTotals(
-            runs: row.cells[safe: 0]?.text.nilIfBlank,
-            hits: row.cells[safe: 1]?.text.nilIfBlank,
-            errors: row.cells[safe: 2]?.text.nilIfBlank,
-            walks: row.cells[safe: 3]?.text.nilIfBlank
-        )
-    }
-
     private func makeBattingSection(from tableGroup: OfficialBattingTableGroup) -> GameCenterBattingSection? {
         guard let orderTable = decodeGridTable(from: tableGroup.orderTable) else {
             return nil
