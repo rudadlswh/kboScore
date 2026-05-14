@@ -2920,42 +2920,10 @@ final class AppModel {
 
     private func recordReceivedNotification(_ payload: ScoreNotificationPayload) {
         let receivedAt = currentDateProvider()
-        let item = NotificationItem(
-            id: UUID(),
-            type: notificationType(from: payload.eventType),
-            title: payload.title,
-            body: payload.body,
-            sentAt: receivedAt,
-            receivedAt: receivedAt,
-            isRead: false,
-            relatedGameID: GameIdentifier.uuid(from: payload.gameID ?? payload.publicGameID),
-            publicGameID: payload.publicGameID,
-            relatedTeamIDs: payload.teamIDs
-        )
+        let item = NotificationHistoryBuilder.makeItem(from: payload, receivedAt: receivedAt)
         notifications.insert(item, at: 0)
         notifications = notifications.sorted { $0.sentAt > $1.sentAt }
         persistNotificationHistory()
-    }
-
-    private func notificationType(from eventType: ScoreNotificationEventType) -> NotificationType {
-        switch eventType {
-        case .gameStart:
-            .gameStart
-        case .scoreChange:
-            .scoreChange
-        case .onBase:
-            .onBase
-        case .leadChange:
-            .leadChange
-        case .gameEnd:
-            .gameEnd
-        case .inningChange:
-            .inningChange
-        case .rainDelay:
-            .rainDelay
-        case .general:
-            .scoreChange
-        }
     }
 
     private func routeNotification(_ payload: ScoreNotificationPayload) {
