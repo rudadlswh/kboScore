@@ -69,12 +69,6 @@ private struct HomeFavoriteGameRefreshKey: Hashable {
 @MainActor
 @Observable
 final class AppModel {
-    private static let settingsStorageKey = "kbo_live_app_settings"
-    private static let deviceTokenStorageKey = "kbo_live_apns_device_token"
-    private static let notificationHistoryStorageKey = "kbo_live_notification_history"
-    private static let attendedGamesStorageKey = "kbo_live_attended_game_keys"
-    private static let cancellationNotificationStorageKey = "kbo_live_cancellation_notification_keys"
-    private static let onboardingCompletionStorageKey = "kbo_live_onboarding_completed"
     private static let staleThreshold: TimeInterval = 90
     private static let gameDetailFreshnessThreshold: TimeInterval = 8
     private static let previousRegularSeasonRankByTeamID: [String: Int] = [
@@ -215,12 +209,12 @@ final class AppModel {
         self.liveActivityController = liveActivityController ?? NoOpFavoriteTeamLiveActivityController()
         #endif
         self.usesPersistedSettings = usePersistedSettings
-        let persistedSettings = usePersistedSettings ? Self.loadPersistedSettings() : nil
-        let persistedOnboardingCompletion = usePersistedSettings ? Self.loadPersistedOnboardingCompletion() : nil
-        let persistedDeviceToken = usePersistedSettings ? Self.loadPersistedDeviceToken() : nil
-        let persistedNotificationHistory = usePersistedSettings ? Self.loadPersistedNotificationHistory() : []
-        let persistedAttendedGameKeys = usePersistedSettings ? Self.loadPersistedAttendedGameKeys() : []
-        let persistedCancellationNotificationKeys = usePersistedSettings ? Self.loadPersistedCancellationNotificationKeys() : []
+        let persistedSettings = usePersistedSettings ? AppModelPersistenceStore.loadSettings() : nil
+        let persistedOnboardingCompletion = usePersistedSettings ? AppModelPersistenceStore.loadOnboardingCompletion() : nil
+        let persistedDeviceToken = usePersistedSettings ? AppModelPersistenceStore.loadDeviceToken() : nil
+        let persistedNotificationHistory = usePersistedSettings ? AppModelPersistenceStore.loadNotificationHistory() : []
+        let persistedAttendedGameKeys = usePersistedSettings ? AppModelPersistenceStore.loadAttendedGameKeys() : []
+        let persistedCancellationNotificationKeys = usePersistedSettings ? AppModelPersistenceStore.loadCancellationNotificationKeys() : []
         let hasPersistedFavoriteTeam = Self.canonicalTeamIdentifier(persistedSettings?.favoriteTeamID) != nil
         let initialHasCompletedOnboarding: Bool
         self.hasPersistedSettingsAtLaunch = persistedSettings != nil
@@ -2817,13 +2811,7 @@ final class AppModel {
             snapshot: FavoriteTeamScheduleWidgetShared.loadSnapshot()
         )
         guard usesPersistedSettings else { return }
-        guard let encoded = try? JSONEncoder().encode(settings) else { return }
-        UserDefaults.standard.set(encoded, forKey: Self.settingsStorageKey)
-    }
-
-    private static func loadPersistedSettings() -> AppSettings? {
-        guard let data = UserDefaults.standard.data(forKey: Self.settingsStorageKey) else { return nil }
-        return try? JSONDecoder().decode(AppSettings.self, from: data)
+        AppModelPersistenceStore.saveSettings(settings)
     }
 
     private func updateAPNsDeviceToken(_ token: String) {
@@ -2837,28 +2825,14 @@ final class AppModel {
 
         apnsDeviceToken = token
         if usesPersistedSettings {
-            _ = APNsDeviceTokenStore.save(token)
-            UserDefaults.standard.removeObject(forKey: Self.deviceTokenStorageKey)
+            AppModelPersistenceStore.saveDeviceToken(token)
         }
         scheduleNotificationRegistrationSync(force: true)
     }
 
-    private static func loadPersistedDeviceToken() -> String? {
-        APNsDeviceTokenStore.loadOrMigrateLegacyValue(legacyKey: Self.deviceTokenStorageKey)
-    }
-
     private func persistNotificationHistory() {
         guard usesPersistedSettings else { return }
-        guard let encoded = try? JSONEncoder().encode(notifications) else { return }
-        UserDefaults.standard.set(encoded, forKey: Self.notificationHistoryStorageKey)
-    }
-
-    private static func loadPersistedNotificationHistory() -> [NotificationItem] {
-        guard let data = UserDefaults.standard.data(forKey: Self.notificationHistoryStorageKey),
-              let decoded = try? JSONDecoder().decode([NotificationItem].self, from: data) else {
-            return []
-        }
-        return decoded.sorted { $0.sentAt > $1.sentAt }
+        AppModelPersistenceStore.saveNotificationHistory(notifications)
     }
 
     private func mergedNotifications(with incoming: [NotificationItem]) -> [NotificationItem] {
@@ -2874,42 +2848,17 @@ final class AppModel {
 
     private func persistAttendedGameKeys() {
         guard usesPersistedSettings else { return }
-        guard let encoded = try? JSONEncoder().encode(Array(attendedGameKeys).sorted()) else { return }
-        UserDefaults.standard.set(encoded, forKey: Self.attendedGamesStorageKey)
-    }
-
-    private static func loadPersistedAttendedGameKeys() -> Set<String> {
-        guard let data = UserDefaults.standard.data(forKey: Self.attendedGamesStorageKey),
-              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
-        }
-        return Set(decoded)
+        AppModelPersistenceStore.saveAttendedGameKeys(attendedGameKeys)
     }
 
     private func persistCancellationNotificationKeys() {
         guard usesPersistedSettings else { return }
-        guard let encoded = try? JSONEncoder().encode(Array(notifiedCancellationKeys).sorted()) else { return }
-        UserDefaults.standard.set(encoded, forKey: Self.cancellationNotificationStorageKey)
-    }
-
-    private static func loadPersistedCancellationNotificationKeys() -> Set<String> {
-        guard let data = UserDefaults.standard.data(forKey: Self.cancellationNotificationStorageKey),
-              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
-            return []
-        }
-        return Set(decoded)
+        AppModelPersistenceStore.saveCancellationNotificationKeys(notifiedCancellationKeys)
     }
 
     private func persistOnboardingCompletion() {
         guard usesPersistedSettings else { return }
-        UserDefaults.standard.set(hasCompletedOnboarding, forKey: Self.onboardingCompletionStorageKey)
-    }
-
-    private static func loadPersistedOnboardingCompletion() -> Bool? {
-        guard UserDefaults.standard.object(forKey: Self.onboardingCompletionStorageKey) != nil else {
-            return nil
-        }
-        return UserDefaults.standard.bool(forKey: Self.onboardingCompletionStorageKey)
+        AppModelPersistenceStore.saveOnboardingCompletion(hasCompletedOnboarding)
     }
 
     func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
