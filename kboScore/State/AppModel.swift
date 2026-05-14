@@ -1835,20 +1835,23 @@ final class AppModel {
     }
 
     func isGameAttended(_ game: GameDetail) -> Bool {
-        attendedGameKeys.isDisjoint(with: attendanceEquivalentKeys(for: game)) == false
+        AttendanceKeyResolver.isAttended(
+            game: game,
+            equivalentGames: equivalentGames(to: game),
+            attendedKeys: attendedGameKeys
+        )
     }
 
     func toggleGameAttendance(for game: GameDetail) {
-        var updatedKeys = attendedGameKeys
-        let equivalentKeys = attendanceEquivalentKeys(for: game)
-        let key = canonicalAttendanceStorageKey(for: game, equivalentKeys: equivalentKeys)
-        let isAttended = updatedKeys.isDisjoint(with: equivalentKeys) == false
-        if isAttended {
-            updatedKeys.subtract(equivalentKeys)
-        } else {
-            updatedKeys.insert(key)
-        }
-        attendedGameKeys = updatedKeys
+        let equivalentGames = equivalentGames(to: game)
+        let equivalentKeys = AttendanceKeyResolver.equivalentKeys(for: game, equivalentGames: equivalentGames)
+        let key = AttendanceKeyResolver.canonicalStorageKey(for: game, equivalentKeys: equivalentKeys)
+        let isAttended = attendedGameKeys.isDisjoint(with: equivalentKeys) == false
+        attendedGameKeys = AttendanceKeyResolver.toggledKeys(
+            for: game,
+            equivalentGames: equivalentGames,
+            attendedKeys: attendedGameKeys
+        )
         #if DEBUG
         debugLogAttendanceToggle(game: game, storedKey: key, equivalentKeys: equivalentKeys, isAttended: !isAttended)
         #endif
@@ -3917,30 +3920,6 @@ final class AppModel {
 
     private func identityMatchTokens(for game: GameDetail) -> [GameIdentifier.IdentityMatchToken] {
         game.gameIdentityMatchTokens
-    }
-
-    private func attendanceEquivalentKeys(for game: GameDetail) -> Set<String> {
-        let equivalentGames = equivalentGames(to: game)
-        var keys = game.attendanceStorageAliases
-
-        for candidate in equivalentGames {
-            keys.formUnion(candidate.attendanceStorageAliases)
-        }
-
-        return keys
-    }
-
-    private func canonicalAttendanceStorageKey(for game: GameDetail, equivalentKeys: Set<String>) -> String {
-        if let providerKey = equivalentKeys
-            .filter({ $0.hasPrefix("provider:") })
-            .sorted()
-            .first(where: { key in
-                let value = String(key.dropFirst("provider:".count))
-                return UUID(uuidString: value) == nil
-            }) {
-            return providerKey
-        }
-        return game.attendanceStorageKey
     }
 
     #if DEBUG
