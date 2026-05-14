@@ -561,12 +561,6 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
-    private func decodeGridTable(from rawValue: String) -> OfficialGridTable? {
-        guard let data = rawValue.data(using: .utf8) else { return nil }
-        let decoder = JSONDecoder()
-        return try? decoder.decode(OfficialGridTableDTO.self, from: data).table
-    }
-
     func decodeLineupFallbackGridTable(from rawValue: String) -> OfficialGridTable? {
         decodeGridTable(from: rawValue)
     }
