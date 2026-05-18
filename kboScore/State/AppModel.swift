@@ -2862,55 +2862,19 @@ final class AppModel {
     }
 
     private func homePriority(for summary: GameSummary) -> Int {
-        switch summary.status {
-        case .live, .rainDelay:
-            return summary.isMyTeamGame ? 0 : 1
-        case .upcoming:
-            return 2
-        case .final, .cancelled:
-            return 3
-        }
+        HomeGameSelector.priority(for: summary)
     }
 
     private func matchesHomeFilter(_ summary: GameSummary) -> Bool {
-        switch homeFilter {
-        case .all:
-            true
-        case .live:
-            summary.status.isLiveLike
-        case .upcoming:
-            summary.status == .upcoming
-        case .final:
-            summary.status.isFinishedLike
-        case .myTeam:
-            summary.isMyTeamGame
-        }
+        HomeGameSelector.matches(summary, filter: homeFilter)
     }
 
     private func homeSummaryComparator(_ lhs: GameSummary, _ rhs: GameSummary) -> Bool {
-        if lhs.isMyTeamGame != rhs.isMyTeamGame {
-            return lhs.isMyTeamGame && !rhs.isMyTeamGame
-        }
-
-        let lhsPriority = homePriority(for: lhs)
-        let rhsPriority = homePriority(for: rhs)
-
-        if lhsPriority != rhsPriority {
-            return lhsPriority < rhsPriority
-        }
-
-        if lhs.status.isLiveLike && rhs.status.isLiveLike, lhs.isMyTeamGame == rhs.isMyTeamGame {
-            return lhs.scheduledStart > rhs.scheduledStart
-        }
-
-        return lhs.scheduledStart < rhs.scheduledStart
+        HomeGameSelector.compare(lhs, rhs)
     }
 
     private func todayGameComparator(_ lhs: GameDetail, _ rhs: GameDetail) -> Bool {
-        homeSummaryComparator(
-            lhs.summary(isMyTeamGame: lhs.involves(teamID: settings.favoriteTeamID)),
-            rhs.summary(isMyTeamGame: rhs.involves(teamID: settings.favoriteTeamID))
-        )
+        HomeGameSelector.compareTodayGames(lhs, rhs, favoriteTeamID: settings.favoriteTeamID)
     }
 
     private func dominantStatus(for games: [GameDetail]) -> GameStatus? {
