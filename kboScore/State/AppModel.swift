@@ -763,42 +763,12 @@ final class AppModel {
     }
 
     var homeFallbackStandingsSnapshots: [TeamStandingsSnapshot] {
-        let referenceWeekGames = homeFallbackReferenceWeekCompletedGames
-        guard referenceWeekGames.isEmpty == false else { return [] }
-
-        let rankedSnapshots = teams
-            .map { team in
-                let completedGames = referenceWeekGames
-                    .filter { $0.involves(teamID: team.id) }
-                    .sorted { $0.scheduledStart > $1.scheduledStart }
-                return makeStandingsSnapshot(
-                    for: team,
-                    completedGames: completedGames,
-                    recentResultsLimit: completedGames.count
-                )
-            }
-            .sorted(by: standingsComparator)
-
-        return rankedSnapshots.enumerated().map { index, snapshot in
-            TeamStandingsSnapshot(
-                team: snapshot.team,
-                rank: index + 1,
-                wins: snapshot.wins,
-                losses: snapshot.losses,
-                ties: snapshot.ties,
-                runsScored: snapshot.runsScored,
-                runsAllowed: snapshot.runsAllowed,
-                remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
-                recentResults: snapshot.recentResults,
-                unknownClassificationGames: snapshot.unknownClassificationGames,
-                virtualUnscheduledRemainingGames: snapshot.virtualUnscheduledRemainingGames,
-                rankingResolution: snapshot.rankingResolution,
-                rankingResolutionPosition: snapshot.rankingResolutionPosition,
-                postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
-                postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
-                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
-            )
-        }
+        HomeFallbackStandingsBuilder.makeSnapshots(
+            teams: teams,
+            referenceCompletedGames: homeFallbackReferenceWeekCompletedGames,
+            seasonGames: regularSeasonGames,
+            previousRankProvider: previousRegularSeasonRank
+        )
     }
 
     var homeFallbackTitleText: String {
