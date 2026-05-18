@@ -933,108 +933,11 @@ final class AppModel {
     }
 
     private func makeHomeSummary(from game: GameDetail) -> GameSummary {
-        let providerIDs = homeCardProviderTeamIDs(from: game.note)
-        let awayTeam = resolveHomeCardTeam(game.awayTeam, fallbackID: providerIDs?.awayID)
-        let homeTeam = resolveHomeCardTeam(game.homeTeam, fallbackID: providerIDs?.homeID)
-        let recentEvent = sanitizeHomeCardRecentEvent(
-            game.highlightText ?? game.note,
-            awayTeam: awayTeam,
-            homeTeam: homeTeam,
-            status: game.status
+        HomeGameSummaryBuilder.makeSummary(
+            game: game,
+            teams: teams,
+            favoriteTeamID: settings.favoriteTeamID
         )
-
-        let summary = GameSummary(
-            id: game.id,
-            scheduledStart: game.scheduledStart,
-            venue: game.venue,
-            awayTeam: awayTeam,
-            homeTeam: homeTeam,
-            awayScore: game.awayScore,
-            homeScore: game.homeScore,
-            status: game.status,
-            inningText: game.inningText,
-            recentEvent: recentEvent,
-            isMyTeamGame: game.involves(teamID: settings.favoriteTeamID),
-            awayStartingPitcherName: game.awayStartingPitcherName,
-            homeStartingPitcherName: game.homeStartingPitcherName,
-            currentPitcherName: game.currentPitcherName,
-            currentBatterName: game.currentBatterName,
-            bases: game.bases,
-            baseRunners: game.baseRunners,
-            balls: game.balls,
-            strikes: game.strikes,
-            outs: game.outs
-        )
-        return summary
-    }
-
-    private func resolveHomeCardTeam(_ team: Team, fallbackID: String? = nil) -> Team {
-        let canonicalID = Self.canonicalTeamIdentifier(team.id) ?? team.id
-        let resolvedID: String
-        if canonicalID.hasPrefix("unknown"),
-           let fallbackID = Self.canonicalTeamIdentifier(fallbackID) {
-            resolvedID = fallbackID
-        } else {
-            resolvedID = canonicalID
-        }
-
-        if let resolved = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == resolvedID }) {
-            return resolved
-        }
-
-        if let identity = TeamIdentity.catalog[resolvedID] {
-            return Team(
-                id: resolvedID,
-                name: identity.displayName,
-                shortName: identity.shortLabel,
-                englishName: team.englishName,
-                markText: identity.monogram
-            )
-        }
-
-        return Team(
-            id: resolvedID,
-            name: team.name,
-            shortName: team.shortName,
-            englishName: team.englishName,
-            markText: team.markText
-        )
-    }
-
-    private func homeCardProviderTeamIDs(from note: String?) -> (awayID: String, homeID: String)? {
-        guard let note else { return nil }
-        guard let providerRange = note.range(of: "provider_game_id=") else { return nil }
-
-        let suffix = note[providerRange.upperBound...]
-        let rawValue = suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first ?? ""
-        let components = rawValue.split(separator: "_").map(String.init)
-        guard components.count >= 2 else { return nil }
-
-        let awayRaw = components[components.count - 2]
-        let homeRaw = components[components.count - 1]
-        guard let awayID = Self.canonicalTeamIdentifier(awayRaw),
-              let homeID = Self.canonicalTeamIdentifier(homeRaw) else {
-            return nil
-        }
-
-        return (awayID: awayID, homeID: homeID)
-    }
-
-    private func sanitizeHomeCardRecentEvent(
-        _ text: String?,
-        awayTeam: Team,
-        homeTeam: Team,
-        status: GameStatus
-    ) -> String? {
-        guard let text else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return nil }
-
-        let lowered = trimmed.lowercased()
-        if lowered.contains("provider_game_id=") || lowered.hasPrefix("db_export") {
-            return "\(awayTeam.displayName) vs \(homeTeam.displayName) · \(status.title)"
-        }
-        return trimmed
     }
 
     private func homeFallbackWeekStart(for date: Date) -> Date? {
