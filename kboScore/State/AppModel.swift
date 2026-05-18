@@ -1706,7 +1706,10 @@ final class AppModel {
     }
 
     func shouldShowLiveActivityAction(for game: GameDetail) -> Bool {
-        game.status.isLiveLike && game.involves(teamID: settings.favoriteTeamID)
+        LiveActivityActionPresentation.shouldShow(
+            game: game,
+            favoriteTeamID: settings.favoriteTeamID
+        )
     }
 
     func shouldAutoStartLiveActivity(for game: GameDetail) -> Bool {
@@ -1722,30 +1725,26 @@ final class AppModel {
     }
 
     func isLiveActivityActionEnabled(for game: GameDetail) -> Bool {
-        shouldShowLiveActivityAction(for: game) && settings.liveActivitiesEnabled && liveActivitySupported
+        LiveActivityActionPresentation.isEnabled(
+            game: game,
+            favoriteTeamID: settings.favoriteTeamID,
+            liveActivitiesEnabled: settings.liveActivitiesEnabled,
+            liveActivitySupported: liveActivitySupported
+        )
     }
 
     func liveActivityButtonTitle(for game: GameDetail) -> String {
-        guard shouldShowLiveActivityAction(for: game) else {
-            return "Live Activity"
-        }
-        if settings.liveActivitiesEnabled == false {
-            return "Live Activity 꺼짐"
-        }
-        if liveActivitySupported == false {
-            return "Live Activity 사용 불가"
-        }
-        if isLiveActivityOn(for: game.id) {
-            return "Live Activity 중지"
-        }
-        return "Live Activity 시작"
+        LiveActivityActionPresentation.buttonTitle(
+            game: game,
+            favoriteTeamID: settings.favoriteTeamID,
+            liveActivitiesEnabled: settings.liveActivitiesEnabled,
+            liveActivitySupported: liveActivitySupported,
+            isActive: isLiveActivityOn(for: game.id)
+        )
     }
 
     func liveActivityButtonSystemImage(for game: GameDetail) -> String {
-        if isLiveActivityOn(for: game.id) {
-            return "dot.radiowaves.left.and.right"
-        }
-        return "dot.radiowaves.left.and.right"
+        LiveActivityActionPresentation.buttonSystemImage(isActive: isLiveActivityOn(for: game.id))
     }
 
     func toggleLiveActivity(for game: GameDetail) async {
