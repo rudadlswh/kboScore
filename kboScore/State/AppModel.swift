@@ -536,7 +536,7 @@ final class AppModel {
         print("[StandingsRank] local load count=\(rows.count)")
         #endif
         guard rows.isEmpty == false else { return 0 }
-        standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
+        standingsSnapshotCacheBySeason[season] = StandingsRowBuilder.makeSnapshots(from: rows, teams: teams)
         standingsSourceGamesBySeason[season] = nil
         #if DEBUG
         print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
@@ -576,7 +576,7 @@ final class AppModel {
                 #endif
                 _ = await loadLocalTeamRanks(season: season)
             } else {
-                standingsSnapshotCacheBySeason[season] = makeStandingsSnapshots(from: rows)
+                standingsSnapshotCacheBySeason[season] = StandingsRowBuilder.makeSnapshots(from: rows, teams: teams)
                 standingsSourceGamesBySeason[season] = nil
                 #if DEBUG
                 print("[StandingsRank] remote cache write count=0 season=\(season)")
@@ -634,66 +634,6 @@ final class AppModel {
         } catch {
             markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
         }
-    }
-
-    private func makeStandingsSnapshots(from rows: [TeamRankRow]) -> [TeamStandingsSnapshot] {
-        rows.sorted { $0.rank < $1.rank }.map { row in
-            TeamStandingsSnapshot(
-                team: team(for: row),
-                rank: row.rank,
-                wins: row.wins,
-                losses: row.losses,
-                ties: row.draws,
-                remainingRegularSeasonGames: max(0, 144 - row.gamesPlayed),
-                recentResults: recentResults(for: row),
-                precomputedGamesBehind: row.gamesBehind,
-                precomputedStreakText: row.streakText
-            )
-        }
-    }
-
-    private func team(for row: TeamRankRow) -> Team {
-        if let canonicalID = Self.canonicalTeamIdentifier(row.teamCode),
-           let team = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == canonicalID }) {
-            return team
-        }
-        if let canonicalID = Self.canonicalTeamIdentifier(row.teamName),
-           let team = teams.first(where: { Self.canonicalTeamIdentifier($0.id) == canonicalID }) {
-            return team
-        }
-        let fallbackID = Self.canonicalTeamIdentifier(row.teamCode) ?? Self.canonicalTeamIdentifier(row.teamName) ?? row.teamID.uuidString
-        if let identity = TeamIdentity.catalog[fallbackID] {
-            return Team(
-                id: fallbackID,
-                name: row.teamName,
-                shortName: identity.shortLabel,
-                englishName: identity.displayName,
-                markText: identity.monogram
-            )
-        }
-        return Team(
-            id: fallbackID,
-            name: row.teamName,
-            shortName: Team.displayName(forTeamID: fallbackID, fallback: row.teamName),
-            englishName: row.teamName,
-            markText: String(row.teamName.prefix(2))
-        )
-    }
-
-    private func recentResults(for row: TeamRankRow) -> [TeamGameResult] {
-        let result: TeamGameResult?
-        switch row.streakType.uppercased() {
-        case "WIN":
-            result = .win
-        case "LOSS":
-            result = .loss
-        case "DRAW":
-            result = .tie
-        default:
-            result = nil
-        }
-        guard let result else { return [] }
-        return Array(repeating: result, count: max(0, min(row.streakCount, 5)))
     }
 
     private func currentStandingsSeason() -> Int {
