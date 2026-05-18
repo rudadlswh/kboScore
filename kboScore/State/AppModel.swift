@@ -2902,77 +2902,12 @@ final class AppModel {
         probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:],
         recentResultsLimit: Int = 5
     ) -> TeamStandingsSnapshot {
-        let seasonCompletedGames = regularSeasonGames
-            .filter { $0.involves(teamID: team.id) }
-            .filter(\.hasCompleteFinalScore)
-        let wins = completedGames.reduce(into: 0) { partialResult, game in
-            if game.finalResult(for: team.id) == .win {
-                partialResult += 1
-            }
-        }
-        let losses = completedGames.reduce(into: 0) { partialResult, game in
-            if game.finalResult(for: team.id) == .loss {
-                partialResult += 1
-            }
-        }
-        let ties = completedGames.reduce(into: 0) { partialResult, game in
-            if game.hasCompleteFinalScore,
-               let awayScore = game.awayScore,
-               let homeScore = game.homeScore,
-               awayScore == homeScore,
-               game.involves(teamID: team.id) {
-                partialResult += 1
-            }
-        }
-        let runsScored = seasonCompletedGames.reduce(into: 0) { partialResult, game in
-            guard let awayScore = game.awayScore,
-                  let homeScore = game.homeScore else {
-                return
-            }
-
-            if game.awayTeam.id == team.id {
-                partialResult += awayScore
-            } else if game.homeTeam.id == team.id {
-                partialResult += homeScore
-            }
-        }
-        let runsAllowed = seasonCompletedGames.reduce(into: 0) { partialResult, game in
-            guard let awayScore = game.awayScore,
-                  let homeScore = game.homeScore else {
-                return
-            }
-
-            if game.awayTeam.id == team.id {
-                partialResult += homeScore
-            } else if game.homeTeam.id == team.id {
-                partialResult += awayScore
-            }
-        }
-
-        let probabilitySignal: LocalStandingsProbabilitySignal? = {
-            guard let canonicalID = Self.canonicalTeamIdentifier(team.id) else {
-                return nil
-            }
-            return probabilitySignalsByTeamID[canonicalID]
-        }()
-
-        return TeamStandingsSnapshot(
-            team: team,
-            rank: 0,
-            wins: wins,
-            losses: losses,
-            ties: ties,
-            runsScored: runsScored,
-            runsAllowed: runsAllowed,
-            remainingRegularSeasonGames: max(0, 144 - (wins + losses + ties)),
-            recentResults: Array(completedGames.compactMap { $0.finalResult(for: team.id) }.prefix(recentResultsLimit)),
-            unknownClassificationGames: probabilitySignal?.unknownClassificationGames ?? 0,
-            virtualUnscheduledRemainingGames: probabilitySignal?.virtualUnscheduledRemainingGames ?? 0,
-            rankingResolution: probabilitySignal?.rankingResolution ?? .resolved,
-            rankingResolutionPosition: probabilitySignal?.rankingResolutionPosition,
-            postseasonQualificationProbability: probabilitySignal?.postseasonQualificationProbability,
-            postseasonQualificationStatus: probabilitySignal?.postseasonQualificationStatus,
-            postseasonProbabilityUnavailableReason: probabilitySignal?.postseasonProbabilityUnavailableReason
+        StandingsCalculator.makeSnapshot(
+            for: team,
+            completedGames: completedGames,
+            seasonGames: regularSeasonGames,
+            probabilitySignalsByTeamID: probabilitySignalsByTeamID,
+            recentResultsLimit: recentResultsLimit
         )
     }
 
