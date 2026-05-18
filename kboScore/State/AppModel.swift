@@ -2650,37 +2650,14 @@ final class AppModel {
         }
 
         let snapshot = makeFavoriteTeamWidgetSnapshot()
-        let semanticKey = favoriteTeamWidgetSemanticKey(favoriteTeamID: settings.favoriteTeamID, snapshot: snapshot)
+        let semanticKey = FavoriteTeamWidgetSnapshotBuilder.semanticKey(
+            favoriteTeamID: settings.favoriteTeamID,
+            snapshot: snapshot
+        )
         guard semanticKey != lastFavoriteTeamWidgetSemanticKey else { return }
         FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: settings.favoriteTeamID, snapshot: snapshot)
         lastFavoriteTeamWidgetSemanticKey = semanticKey
         reloadFavoriteTeamWidgetTimelines()
-    }
-
-    private func favoriteTeamWidgetSemanticKey(
-        favoriteTeamID: String?,
-        snapshot: FavoriteTeamScheduleWidgetSnapshot?
-    ) -> String {
-        let dayKey = snapshot?.days.map { day in
-            [
-                scheduleDayKey(for: day.date),
-                day.isInDisplayedMonth ? "1" : "0",
-                day.isToday ? "1" : "0",
-                String(day.gameCount),
-                day.dominantStatus?.rawValue ?? "-",
-                day.opponentTeamID ?? "-",
-                day.favoriteTeamIsHome.map(String.init) ?? "-",
-                day.favoriteTeamResult?.rawValue ?? "-"
-            ].joined(separator: ":")
-        }.joined(separator: "|") ?? "nil"
-        return [
-            favoriteTeamID ?? "nil",
-            snapshot?.teamID ?? "nil",
-            snapshot?.monthTitle ?? "nil",
-            snapshot?.monthSummaryText ?? "nil",
-            snapshot?.state.rawValue ?? "nil",
-            dayKey
-        ].joined(separator: "#")
     }
 
     private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
@@ -2706,39 +2683,20 @@ final class AppModel {
         let hasAnyMyTeamGames = knownScheduleGames(filter: .myTeam).isEmpty == false
         let displayedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam) ?? requestedMonth
         let calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
-        let displayedMonthDays = calendarDays.filter(\.isInDisplayedMonth)
 
         if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty {
             return nil
         }
 
-        let days = calendarDays.map { day in
-            FavoriteTeamScheduleWidgetSnapshot.Day(
-                date: day.date,
-                isInDisplayedMonth: day.isInDisplayedMonth,
-                isToday: day.isToday,
-                gameCount: day.gameCount,
-                dominantStatus: favoriteTeamWidgetGameStatus(day.dominantStatus),
-                opponentTeamID: day.opponentTeam?.id,
-                favoriteTeamIsHome: day.favoriteTeamIsHome,
-                favoriteTeamResult: favoriteTeamWidgetTeamResult(day.favoriteTeamResult)
-            )
-        }
-        let displayedMonthGameCount = displayedMonthDays.reduce(0) { partialResult, day in
-            partialResult + day.gameCount
-        }
-
-        return FavoriteTeamScheduleWidgetSnapshot(
-            generatedAt: referenceDate,
-            refreshAfter: nextFavoriteTeamWidgetRefreshDate(from: referenceDate, calendar: scheduleCalendar),
+        return FavoriteTeamWidgetSnapshotBuilder.makeSnapshot(
             teamID: favoriteTeam.id,
             teamName: favoriteTeam.name,
             teamShortName: favoriteTeam.shortName,
             displayedMonth: displayedMonth,
             monthTitle: calendarMonthTitle(for: displayedMonth),
-            monthSummaryText: displayedMonthGameCount == 0 ? "등록 경기 없음" : "이달 경기 \(displayedMonthGameCount)",
-            state: displayedMonthGameCount == 0 ? .emptySchedule : .ready,
-            days: days
+            days: calendarDays,
+            referenceDate: referenceDate,
+            calendar: scheduleCalendar
         )
     }
 
@@ -2754,45 +2712,6 @@ final class AppModel {
         }
 
         return (favoriteTeamID, favoriteTeamID.uppercased(), favoriteTeamID.uppercased())
-    }
-
-    private func favoriteTeamWidgetGameStatus(_ status: GameStatus?) -> FavoriteTeamScheduleWidgetGameStatus? {
-        switch status {
-        case .upcoming:
-            .upcoming
-        case .live:
-            .live
-        case .final:
-            .final
-        case .rainDelay:
-            .rainDelay
-        case .cancelled:
-            .cancelled
-        case .none:
-            nil
-        }
-    }
-
-    private func favoriteTeamWidgetTeamResult(_ result: TeamGameResult?) -> FavoriteTeamScheduleWidgetTeamResult? {
-        switch result {
-        case .win:
-            .win
-        case .loss:
-            .loss
-        case .tie:
-            .tie
-        case .none:
-            nil
-        }
-    }
-
-    private func nextFavoriteTeamWidgetRefreshDate(from startDate: Date, calendar: Calendar) -> Date {
-        let nextMorning = calendar.nextDate(
-            after: startDate,
-            matching: DateComponents(hour: 6, minute: 0),
-            matchingPolicy: .nextTime
-        )
-        return nextMorning ?? startDate.addingTimeInterval(60 * 60 * 6)
     }
 
     private func widgetScheduleCalendar() -> Calendar {
