@@ -1030,18 +1030,7 @@ final class AppModel {
         let selectedDayKey = scheduleDayKey(for: date)
         let dayGames = groupedScheduleGamesByDay(for: date, filter: filter)[selectedDayKey] ?? []
 
-        let sortedGames = dayGames.sorted { lhs, rhs in
-            let lhsIsMyTeam = lhs.involves(teamID: settings.favoriteTeamID)
-            let rhsIsMyTeam = rhs.involves(teamID: settings.favoriteTeamID)
-            if lhsIsMyTeam != rhsIsMyTeam {
-                return lhsIsMyTeam && !rhsIsMyTeam
-            }
-            if lhs.status == rhs.status {
-                return lhs.scheduledStart < rhs.scheduledStart
-            }
-            return homePriority(for: lhs.summary(isMyTeamGame: lhsIsMyTeam)) < homePriority(for: rhs.summary(isMyTeamGame: rhsIsMyTeam))
-        }
-        return sortedGames
+        return ScheduleGameSelector.sortSelectedGames(dayGames, favoriteTeamID: settings.favoriteTeamID)
     }
 
     func myTeamGames(on date: Date) -> [GameDetail] {

@@ -519,29 +519,7 @@ private struct SchedulePresentation: Sendable {
     }
 
     nonisolated private static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
-        games.sorted { lhs, rhs in
-            let lhsIsMyTeam = favoriteTeamID.map { lhs.involves(teamID: $0) } ?? false
-            let rhsIsMyTeam = favoriteTeamID.map { rhs.involves(teamID: $0) } ?? false
-            if lhsIsMyTeam != rhsIsMyTeam {
-                return lhsIsMyTeam && !rhsIsMyTeam
-            }
-            if lhs.status == rhs.status {
-                return lhs.scheduledStart < rhs.scheduledStart
-            }
-            return homePriority(for: lhs.status, isMyTeamGame: lhsIsMyTeam) <
-                homePriority(for: rhs.status, isMyTeamGame: rhsIsMyTeam)
-        }
-    }
-
-    nonisolated private static func homePriority(for status: GameStatus, isMyTeamGame: Bool) -> Int {
-        switch status {
-        case .live, .rainDelay:
-            return isMyTeamGame ? 0 : 1
-        case .upcoming:
-            return 2
-        case .final, .cancelled:
-            return 3
-        }
+        ScheduleGameSelector.sortSelectedGames(games, favoriteTeamID: favoriteTeamID)
     }
 
     nonisolated private static func dominantStatus(for games: [GameDetail]) -> GameStatus? {
