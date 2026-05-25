@@ -94,6 +94,8 @@ final class ScheduleViewModel: ObservableObject {
                 attendedGameKeys: appModel.attendedGameKeys
             )
         }
+
+        await reconcileStalePastGamesIfNeeded(appModel: appModel)
     }
 
     func changeDisplayedMonth(
@@ -173,6 +175,7 @@ final class ScheduleViewModel: ObservableObject {
 
         if forceRefresh == false, cachedMonths[key] != nil {
             logLocalMonthIfNeeded(key)
+            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
             applyPendingAutomaticSelectionIfNeeded(for: key)
             await rebuildPresentation(
                 favoriteTeamID: appModel.settings.favoriteTeamID,
@@ -313,6 +316,103 @@ final class ScheduleViewModel: ObservableObject {
         }
 
         return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    private func mergePostReconciliationDateRefresh(
+        _ refreshedSnapshot: [GameDetail],
+        into existingMonthGames: [GameDetail],
+        refreshedDayKeys: Set<String>
+    ) -> [GameDetail] {
+        guard refreshedDayKeys.isEmpty == false else {
+            return existingMonthGames.sorted { $0.scheduledStart < $1.scheduledStart }
+        }
+
+        let preservedGames = existingMonthGames.filter {
+            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart)) == false
+        }
+        let refreshedGames = refreshedSnapshot.filter {
+            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart))
+        }
+        return (preservedGames + refreshedGames).sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    private func reconcileStalePastGamesIfNeeded(appModel: AppModel) async {
+        guard appModel.isScheduleStaleReconciliationInFlight() == false else {
+#if DEBUG
+            print("[ScheduleRefresh] stale reconciliation skipped reason=inFlight")
+#endif
+            return
+        }
+
+        let key = displayedMonthKey
+        let visibleGames = cachedMonths[key]?.games ?? []
+        let dates = ScheduleStaleGameReconciliationResolver.staleGameDates(
+            in: visibleGames,
+            today: appModel.currentScheduleRefreshDate(),
+            calendar: calendar
+        )
+
+        guard dates.isEmpty == false else {
+#if DEBUG
+            print("[ScheduleRefresh] stale reconciliation skipped reason=noCandidates")
+#endif
+            return
+        }
+
+        let selectedDates = Array(dates.prefix(3))
+        let droppedOlderDateCount = dates.count - selectedDates.count
+#if DEBUG
+        print("[ScheduleRefresh] stale reconciliation totalStaleDateCount=\(dates.count) selectedDateCount=\(selectedDates.count) droppedOlderDateCount=\(droppedOlderDateCount) selectedDates=\(selectedDates.joined(separator: ","))")
+#endif
+        let preflightResult = await appModel.preflightRefreshStaleScheduleDates(selectedDates)
+        if displayedMonthKey == key {
+            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
+#if DEBUG
+            print("[ScheduleRefresh] stale preflight visibleMonth updated month=\(key.yearMonthText)")
+#endif
+        } else {
+#if DEBUG
+            print("[ScheduleRefresh] stale preflight visibleMonth skipped reason=differentMonth month=\(key.yearMonthText) current=\(displayedMonthKey.yearMonthText)")
+#endif
+        }
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
+
+        let reconciliationDates = preflightResult.remainingStaleDateKeys
+        guard reconciliationDates.isEmpty == false else {
+#if DEBUG
+            print("[ScheduleRefresh] stale reconciliation skipped reason=freshDataResolvedStaleDates")
+#endif
+            return
+        }
+
+        do {
+            let reconciledDates = try await appModel.reconcileStaleScheduleGameDates(reconciliationDates)
+            guard reconciledDates.isEmpty == false else {
+                return
+            }
+#if DEBUG
+            print("[ScheduleRefresh] stale reconciliation success dates=\(reconciledDates.joined(separator: ","))")
+#endif
+            appModel.startPostReconciliationForceRefresh(reconciledDates)
+        } catch {
+#if DEBUG
+            print("[ScheduleRefresh] stale reconciliation failure dates=\(reconciliationDates.joined(separator: ",")) error=\(error)")
+#endif
+        }
+    }
+
+    private func syncCachedMonthFromAppModelIfNeeded(_ key: KBOMonthScheduleKey, appModel: AppModel) async {
+        let snapshot = appModel.currentScheduleMonthSnapshot(for: key)
+        guard snapshot.isEmpty == false else { return }
+        let currentGames = cachedMonths[key]?.games ?? []
+        guard currentGames != snapshot else { return }
+        cachedMonths[key] = await ScheduleMonthCacheEntry.build(key: key, games: snapshot)
+#if DEBUG
+        print("[ScheduleCache] month=\(key.yearMonthText) source=appModelSync gameCount=\(snapshot.count)")
+#endif
     }
 
     func adjacentMonth(offset: Int) -> Date {
@@ -646,7 +746,7 @@ struct ScheduleView: View {
     }
 
     private var scheduleTaskID: String {
-        "\(viewModel.scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(viewModel.displayedMonthKey.yearMonthText)"
+        "\(viewModel.scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(viewModel.displayedMonthKey.yearMonthText)-\(appModel.schedulePostReconciliationRefreshGeneration)"
     }
 }
 
