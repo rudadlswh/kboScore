@@ -373,6 +373,9 @@ actor RepositoryResponseCache {
     }
 
     private static func preferredStateSource(existing: GameDetail, candidate: GameDetail) -> GameDetail {
+        if shouldRecoverUnconfirmedFinal(existing: existing, candidate: candidate) {
+            return candidate
+        }
         let candidatePriority = statePriority(candidate)
         let existingPriority = statePriority(existing)
         if candidatePriority != existingPriority {
@@ -390,6 +393,39 @@ actor RepositoryResponseCache {
             return candidate.hasCompleteFinalScore ? candidate : existing
         }
         return candidate
+    }
+
+    private static func shouldRecoverUnconfirmedFinal(existing: GameDetail, candidate: GameDetail) -> Bool {
+        guard existing.status == .final,
+              hasConfirmedFinalStatus(existing) == false,
+              isLiveLike(candidate) else {
+            return false
+        }
+        let candidateFreshness = freshnessDate(candidate)
+        let existingFreshness = freshnessDate(existing)
+        if let candidateFreshness, let existingFreshness {
+            return candidateFreshness >= existingFreshness
+        }
+        if candidateFreshness != nil, existingFreshness == nil {
+            return true
+        }
+        return hasLiveProgress(candidate)
+    }
+
+    private static func hasConfirmedFinalStatus(_ game: GameDetail) -> Bool {
+        game.status == .final && noteValue("final_confirmed_at", in: game.note) != nil
+    }
+
+    private static func isLiveLike(_ game: GameDetail) -> Bool {
+        game.status.isLiveLike || hasLiveProgress(game)
+    }
+
+    private static func hasLiveProgress(_ game: GameDetail) -> Bool {
+        nonBlank(game.currentPitcherName) != nil
+            || nonBlank(game.currentBatterName) != nil
+            || game.balls != nil
+            || game.strikes != nil
+            || game.outs != nil
     }
 
     private static func statePriority(_ game: GameDetail) -> Int {
