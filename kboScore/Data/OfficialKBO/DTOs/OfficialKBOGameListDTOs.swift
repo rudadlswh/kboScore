@@ -128,7 +128,7 @@ struct OfficialGameEntry: Decodable, Sendable {
                 return (value, key)
             }
             if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
-               let intValue = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+               let intValue = OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber(value) {
                 return (intValue, key)
             }
         }
