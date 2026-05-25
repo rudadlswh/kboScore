@@ -58,6 +58,7 @@ enum AppTab: Hashable, Sendable {
     case home
     case standings
     case schedule
+    case attendance
     case settings
 }
 
@@ -87,6 +88,7 @@ final class AppModel {
     private let repository: any KBORepository
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
+    private let scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
     private let cancellationNotificationScheduler: GameCancellationNotificationScheduler
     private let currentDateProvider: CurrentDateProvider
@@ -102,6 +104,8 @@ final class AppModel {
     private var hasConnectedNotificationDelegate = false
     private var notificationRegistrationDeduplicationState = NotificationRegistrationDeduplicationState()
     private var notificationRegistrationSyncTask: Task<Void, Never>?
+    private var notificationRegistrationSyncTaskKey: NotificationRegistrationKey?
+    private var notificationRegistrationSyncGeneration = 0
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
     private var notifiedGameContentKeys: Set<String> = []
     private var lastFavoriteTeamWidgetSemanticKey: String?
@@ -175,6 +179,11 @@ final class AppModel {
     private var lastHomeFavoriteGameRefreshAt: [HomeFavoriteGameRefreshKey: Date] = [:]
     private var inFlightTodayLiveRefreshTasks: [String: Task<Void, Never>] = [:]
     private var lastTodayLiveRefreshAt: [String: Date] = [:]
+    private var inFlightScheduleStaleReconciliationTask: Task<Void, Error>?
+    private var inFlightSchedulePostReconciliationRefreshDates: Set<String> = []
+    private var recentlyReconciledScheduleDates: [String: Date] = [:]
+    private let scheduleReconciliationCooldown: TimeInterval = 120
+    private(set) var schedulePostReconciliationRefreshGeneration = 0
     private var scheduleStartupSyncState: ScheduleStartupSyncState = .notStarted
     private var scheduleCalendarDaysCache: [ScheduleCalendarCacheKey: [MyTeamCalendarDay]] = [:]
     private var scheduleGamesByDayCache: [ScheduleCalendarCacheKey: [String: [GameDetail]]] = [:]
@@ -190,6 +199,7 @@ final class AppModel {
         repository: any KBORepository = MockKBORepository(),
         repositoryRuntimeState: RepositoryRuntimeState? = nil,
         notificationRegistrationClient: any NotificationRegistrationClient = NoOpNotificationRegistrationClient(),
+        scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient = NoOpScheduleStaleGameReconciliationClient(),
         liveActivityController: (any FavoriteTeamLiveActivityControlling)? = nil,
         bootstrap: KBOBootstrapData? = nil,
         usePersistedSettings: Bool = true,
@@ -201,6 +211,7 @@ final class AppModel {
         self.repository = repository
         self.repositoryRuntimeState = repositoryRuntimeState
         self.notificationRegistrationClient = notificationRegistrationClient
+        self.scheduleStaleGameReconciliationClient = scheduleStaleGameReconciliationClient
         self.cancellationNotificationScheduler = cancellationNotificationScheduler
         self.currentDateProvider = currentDateProvider
         #if canImport(ActivityKit)
@@ -286,6 +297,7 @@ final class AppModel {
         }
 
         await refreshFavoriteTeamGameForHome(reason: "launch", bypassingCache: true)
+        await loadHomeFallbackStandingsSourceIfNeeded(reason: "launch")
         await syncFavoriteTeamLiveActivity()
         await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
         isLoading = false
@@ -449,11 +461,13 @@ final class AppModel {
 
     func refreshHome() async {
         await refreshFavoriteTeamGameForHome(reason: "homeRefresh", bypassingCache: true)
+        await loadHomeFallbackStandingsSourceIfNeeded(reason: "homeRefresh")
     }
 
     func refreshTodayOnForeground() async {
         guard hasLoaded else { return }
         await refreshFavoriteTeamGameForHome(reason: "foreground", bypassingCache: true)
+        await loadHomeFallbackStandingsSourceIfNeeded(reason: "foreground")
         await syncFavoriteTeamLiveActivity()
         await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
     }
@@ -608,14 +622,7 @@ final class AppModel {
             print("[StandingsRank] fallback to games reason=\(reason)")
             #endif
 
-            let sourceGames: [GameDetail]
-            if let standingsGameSource = repository as? any KBOStandingsGameDataSource {
-                sourceGames = try await standingsGameSource.fetchStandingsSource(season: season)
-            } else {
-                sourceGames = try await repository.fetchGames()
-                    .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
-            }
-
+            let sourceGames = try await fetchStandingsSourceGames(season: season)
             let snapshot = await repositoryRuntimeState?.snapshot()
             let normalizedGames = await reconcileOfficialScheduleStartTimesIfNeeded(
                 in: sourceGames,
@@ -634,6 +641,48 @@ final class AppModel {
         } catch {
             markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
         }
+    }
+
+    private func loadHomeFallbackStandingsSourceIfNeeded(reason: String) async {
+        guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
+
+        let season = currentStandingsSeason()
+        if let task = inFlightStandingsTasks[season] {
+            await task.value
+            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
+        }
+        guard standingsSourceGamesBySeason[season] == nil else { return }
+
+        do {
+            ensureCatalogTeamsLoadedIfNeeded()
+            let sourceGames = try await fetchStandingsSourceGames(season: season)
+            let snapshot = await repositoryRuntimeState?.snapshot()
+            let normalizedGames = await reconcileOfficialScheduleStartTimesIfNeeded(
+                in: sourceGames,
+                snapshot: snapshot
+            )
+            standingsSourceGamesBySeason[season] = normalizedGames
+            refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            markRefreshSuccess(for: .games, at: Date(), isStale: false)
+            await refreshRepositoryDebugInfo(dataSets: [])
+            #if DEBUG
+            print("[HomeFallback] standings source loaded reason=\(reason) season=\(season) count=\(normalizedGames.count)")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[HomeFallback] standings source load failed reason=\(reason) error=\(error)")
+            #endif
+            markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
+        }
+    }
+
+    private func fetchStandingsSourceGames(season: Int) async throws -> [GameDetail] {
+        if let standingsGameSource = repository as? any KBOStandingsGameDataSource {
+            return try await standingsGameSource.fetchStandingsSource(season: season)
+        }
+
+        return try await repository.fetchGames()
+            .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
     }
 
     private func currentStandingsSeason() -> Int {
@@ -802,39 +851,27 @@ final class AppModel {
     }
 
     private var homeFallbackWeekNumber: Int? {
-        let completedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
-        guard let latestCompletedGameDate = completedGames.map(\.scheduledStart).max(),
-              let latestWeekStart = homeFallbackWeekStart(for: latestCompletedGameDate) else {
-            return nil
-        }
-
-        let orderedWeekStarts = Array(
-            Set(
-                completedGames.compactMap { homeFallbackWeekStart(for: $0.scheduledStart) }
-            )
-        ).sorted()
-
-        guard let weekIndex = orderedWeekStarts.firstIndex(of: latestWeekStart) else {
-            return nil
-        }
-        return weekIndex + 1
+        HomeFallbackStandingsResolver.weekNumber(
+            games: regularSeasonGames,
+            currentDate: currentDateProvider(),
+            calendar: homeFallbackScheduleCalendar
+        )
     }
 
     private var homeFallbackCompletedRegularSeasonGamesBeforeToday: [GameDetail] {
-        let cutoffDate = homeFallbackScheduleCalendar.startOfDay(for: currentDateProvider())
-        return regularSeasonGames
-            .filter { $0.scheduledStart < cutoffDate }
-            .filter(\.hasCompleteFinalScore)
+        HomeFallbackStandingsResolver.completedRegularSeasonGamesBeforeToday(
+            games: regularSeasonGames,
+            currentDate: currentDateProvider(),
+            calendar: homeFallbackScheduleCalendar
+        )
     }
 
     private var homeFallbackReferenceWeekCompletedGames: [GameDetail] {
-        let completedGames = homeFallbackCompletedRegularSeasonGamesBeforeToday
-        guard let latestCompletedGameDate = completedGames.map(\.scheduledStart).max(),
-              let referenceWeek = homeFallbackWeekInterval(for: latestCompletedGameDate) else {
-            return []
-        }
-
-        return completedGames.filter { referenceWeek.contains($0.scheduledStart) }
+        HomeFallbackStandingsResolver.referenceWeekCompletedGames(
+            games: regularSeasonGames,
+            currentDate: currentDateProvider(),
+            calendar: homeFallbackScheduleCalendar
+        )
     }
 
     var favoriteTeamLiveGame: GameDetail? {
@@ -850,20 +887,12 @@ final class AppModel {
         )
     }
 
-    private func homeFallbackWeekStart(for date: Date) -> Date? {
-        homeFallbackWeekInterval(for: date)?.start
-    }
-
     private var homeFallbackScheduleCalendar: Calendar {
         var weekCalendar = calendar
         weekCalendar.timeZone = scheduleTimeZone
         weekCalendar.firstWeekday = 2
         weekCalendar.minimumDaysInFirstWeek = 1
         return weekCalendar
-    }
-
-    private func homeFallbackWeekInterval(for date: Date) -> DateInterval? {
-        homeFallbackScheduleCalendar.dateInterval(of: .weekOfYear, for: date)
     }
 
     var myTeamNextGame: GameDetail? {
@@ -941,19 +970,29 @@ final class AppModel {
         )
     }
 
+    var attendanceDashboard: AttendanceDashboard {
+        AttendanceDashboardBuilder.build(
+            attendedGames: knownScheduleGames(filter: .all).filter { isGameAttended($0) },
+            favoriteTeamID: settings.favoriteTeamID
+        )
+    }
+
     var regularSeasonGames: [GameDetail] {
         standingsCalculationGames.filter(\.isRegularSeason)
     }
 
     var standingsSnapshots: [TeamStandingsSnapshot] {
         let season = currentStandingsSeason()
+        let preGameRanks = preGameRankByTeamID(for: season)
         if let cached = standingsSnapshotCacheBySeason[season], cached.isEmpty == false {
-            return cached.sorted { left, right in
-                if left.rank != right.rank {
-                    return left.rank < right.rank
+            return cached
+                .map { $0.withPreGameRank(preGameRanks[$0.team.id]) }
+                .sorted { left, right in
+                    if left.rank != right.rank {
+                        return left.rank < right.rank
+                    }
+                    return left.team.name.localizedStandardCompare(right.team.name) == .orderedAscending
                 }
-                return left.team.name.localizedStandardCompare(right.team.name) == .orderedAscending
-            }
         }
 
         let rankedSnapshots = teams
@@ -976,7 +1015,8 @@ final class AppModel {
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
                 postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
-                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
+                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason,
+                preGameRank: preGameRanks[snapshot.team.id]
             )
         }
     }
@@ -984,6 +1024,15 @@ final class AppModel {
     private var standingsCalculationGames: [GameDetail] {
         let season = currentStandingsSeason()
         return standingsSourceGamesBySeason[season] ?? games
+    }
+
+    private func preGameRankByTeamID(for season: Int) -> [String: Int] {
+        StandingsRankMovementResolver.preGameRanks(
+            teams: teams,
+            games: standingsSourceGamesBySeason[season] ?? games,
+            currentDate: currentDateProvider(),
+            previousRankProvider: previousRegularSeasonRank
+        )
     }
 
 #if DEBUG
@@ -1170,6 +1219,231 @@ final class AppModel {
     func refreshScheduleDay(for date: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadScheduleDay(for: date, forceRefresh: true)
+    }
+
+    func currentScheduleRefreshDate() -> Date {
+        currentDateProvider()
+    }
+
+    func isScheduleStaleReconciliationInFlight() -> Bool {
+        inFlightScheduleStaleReconciliationTask != nil
+    }
+
+    func preflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
+        let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
+        let task = Task { @MainActor in
+            await self.performPreflightRefreshStaleScheduleDates(uniqueDateKeys)
+        }
+        return await task.value
+    }
+
+    func reconcileStaleScheduleGameDates(_ dates: [String]) async throws -> [String] {
+        pruneExpiredRecentlyReconciledScheduleDates()
+        let uniqueDates = Array(Set(dates)).sorted(by: >)
+        let reconciliableDates = uniqueDates.filter { recentlyReconciledScheduleDates[$0] == nil }
+        guard uniqueDates.isEmpty == false else {
+            return []
+        }
+        guard reconciliableDates.isEmpty == false else {
+            #if DEBUG
+            print("[ScheduleRefresh] stale reconciliation skipped reason=recentlyReconciled dates=\(uniqueDates.joined(separator: ","))")
+            #endif
+            return []
+        }
+
+        if inFlightScheduleStaleReconciliationTask != nil {
+            #if DEBUG
+            print("[ScheduleRefresh] stale reconciliation skipped reason=inFlight dates=\(reconciliableDates.joined(separator: ","))")
+            #endif
+            return []
+        }
+
+        let task = Task {
+            try await scheduleStaleGameReconciliationClient.reconcileStaleGames(dates: reconciliableDates)
+        }
+        inFlightScheduleStaleReconciliationTask = task
+        defer { inFlightScheduleStaleReconciliationTask = nil }
+
+        try await task.value
+        markScheduleDatesRecentlyReconciled(reconciliableDates)
+        return reconciliableDates
+    }
+
+    func startPostReconciliationForceRefresh(_ dateKeys: [String]) {
+        let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
+        let refreshDateKeys = uniqueDateKeys.filter { inFlightSchedulePostReconciliationRefreshDates.contains($0) == false }
+        guard refreshDateKeys.isEmpty == false else {
+            #if DEBUG
+            print("[ScheduleRefresh] post-reconciliation force refresh skipped reason=inFlight dates=\(uniqueDateKeys.joined(separator: ","))")
+            #endif
+            return
+        }
+        inFlightSchedulePostReconciliationRefreshDates.formUnion(refreshDateKeys)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performPostReconciliationForceRefresh(refreshDateKeys)
+        }
+    }
+
+    func waitForSchedulePostReconciliationRefreshIfNeeded() async {
+        while inFlightSchedulePostReconciliationRefreshDates.isEmpty == false {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    private func performPostReconciliationForceRefresh(_ dateKeys: [String]) async {
+        do {
+            _ = try await forceRefreshScheduleDatesAfterReconciliation(dateKeys)
+        } catch is CancellationError {
+            #if DEBUG
+            print("[ScheduleRefresh] post-reconciliation force refresh cancelled dates=\(dateKeys.joined(separator: ","))")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[ScheduleRefresh] post-reconciliation force refresh failure dates=\(dateKeys.joined(separator: ",")) error=\(error)")
+            #endif
+        }
+        inFlightSchedulePostReconciliationRefreshDates.subtract(dateKeys)
+    }
+
+    private func performPreflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
+        guard dateKeys.isEmpty == false else {
+            return ScheduleStalePreflightRefreshResult(
+                requestedDateKeys: [],
+                remainingStaleDateKeys: [],
+                resolvedDateKeys: [],
+                failedDateKeys: []
+            )
+        }
+
+        #if DEBUG
+        print("[ScheduleRefresh] stale preflight force refresh dates=\(dateKeys.joined(separator: ","))")
+        #endif
+
+        var remainingStaleDateKeys = Set<String>()
+        var resolvedDateKeys: [String] = []
+        var failedDateKeys: [String] = []
+        var refreshedMonthKeys = Set<KBOMonthScheduleKey>()
+        var didMergeFreshGames = false
+
+        for dateKey in dateKeys {
+            do {
+                let date = try scheduleDate(fromDayKey: dateKey)
+                let fetched = try await repository.fetchSchedule(for: date, bypassingCache: true)
+                #if DEBUG
+                print("[ScheduleRefresh] stale preflight fetched date=\(dateKey) count=\(fetched.count)")
+                #endif
+
+                let monthKey = scheduleMonthKey(for: date)
+                let overlayResult = overlayScheduleGames(fetched, intoMonth: monthKey)
+                let upsertResult = upsertScheduleGamesIntoLocalStore(fetched)
+                _ = await upsertScheduleGamesIntoRepositoryCache(fetched)
+                refreshedMonthKeys.insert(monthKey)
+                didMergeFreshGames = true
+
+                #if DEBUG
+                print("[ScheduleRefresh] stale preflight merge date=\(dateKey) inserted=\(upsertResult.inserted) updated=\(upsertResult.updated) skipped=\(upsertResult.skippedExisting)")
+                print("[ScheduleRefresh] stale preflight overlay month=\(monthKey.yearMonthText) before=\(overlayResult.before) fetched=\(fetched.count) inserted=\(overlayResult.inserted) updated=\(overlayResult.updated) unchanged=\(overlayResult.unchanged) after=\(overlayResult.after)")
+                #endif
+
+                let overlaidDateGames = overlayResult.games.filter {
+                    scheduleDayKey(for: $0.scheduledStart) == dateKey
+                }
+                let freshStaleDates = ScheduleStaleGameReconciliationResolver.staleGameDates(
+                    in: overlaidDateGames,
+                    today: currentDateProvider(),
+                    calendar: calendar
+                )
+                if overlaidDateGames.isEmpty || freshStaleDates.contains(dateKey) {
+                    remainingStaleDateKeys.insert(dateKey)
+                } else {
+                    resolvedDateKeys.append(dateKey)
+                }
+            } catch {
+                failedDateKeys.append(dateKey)
+                remainingStaleDateKeys.insert(dateKey)
+                #if DEBUG
+                print("[ScheduleRefresh] stale preflight failure date=\(dateKey) error=\(error)")
+                #endif
+            }
+        }
+
+        for monthKey in refreshedMonthKeys {
+            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+        }
+        if didMergeFreshGames {
+            schedulePostReconciliationRefreshGeneration += 1
+        }
+
+        let remainingOrdered = dateKeys.filter { remainingStaleDateKeys.contains($0) }
+        #if DEBUG
+        if resolvedDateKeys.isEmpty == false {
+            print("[ScheduleRefresh] stale preflight resolved dates=\(resolvedDateKeys.joined(separator: ","))")
+        }
+        #endif
+
+        return ScheduleStalePreflightRefreshResult(
+            requestedDateKeys: dateKeys,
+            remainingStaleDateKeys: remainingOrdered,
+            resolvedDateKeys: resolvedDateKeys,
+            failedDateKeys: failedDateKeys
+        )
+    }
+
+    private func forceRefreshScheduleDatesAfterReconciliation(_ dateKeys: [String]) async throws -> SchedulePostReconciliationRefreshResult {
+        let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
+        guard uniqueDateKeys.isEmpty == false else {
+            return SchedulePostReconciliationRefreshResult(dateResults: [])
+        }
+
+        #if DEBUG
+        print("[ScheduleRefresh] post-reconciliation force refresh source=AppModel dates=\(uniqueDateKeys.joined(separator: ","))")
+        #endif
+
+        var fetches: [(dateKey: String, date: Date, games: [GameDetail])] = []
+        for dateKey in uniqueDateKeys {
+            let date = try scheduleDate(fromDayKey: dateKey)
+            let fetched = try await repository.fetchSchedule(for: date, bypassingCache: true)
+            #if DEBUG
+            print("[ScheduleRefresh] post-reconciliation fetched date=\(dateKey) count=\(fetched.count)")
+            #endif
+            fetches.append((dateKey, date, fetched))
+        }
+
+        var dateResults: [SchedulePostReconciliationDateRefreshResult] = []
+        var refreshedMonthKeys = Set<KBOMonthScheduleKey>()
+        for fetch in fetches {
+            let monthKey = scheduleMonthKey(for: fetch.date)
+            let overlayResult = overlayScheduleGames(fetch.games, intoMonth: monthKey)
+            let upsertResult = upsertScheduleGamesIntoLocalStore(fetch.games)
+            _ = await upsertScheduleGamesIntoRepositoryCache(fetch.games)
+            refreshedMonthKeys.insert(monthKey)
+            dateResults.append(
+                SchedulePostReconciliationDateRefreshResult(
+                    dateKey: fetch.dateKey,
+                    games: fetch.games,
+                    inserted: upsertResult.inserted,
+                    updated: upsertResult.updated,
+                    skippedExisting: upsertResult.skippedExisting
+                )
+            )
+            #if DEBUG
+            print("[ScheduleRefresh] post-reconciliation merge date=\(fetch.dateKey) inserted=\(upsertResult.inserted) updated=\(upsertResult.updated) skipped=\(upsertResult.skippedExisting)")
+            print("[ScheduleRefresh] post-reconciliation overlay month=\(monthKey.yearMonthText) before=\(overlayResult.before) fetched=\(fetch.games.count) inserted=\(overlayResult.inserted) updated=\(overlayResult.updated) unchanged=\(overlayResult.unchanged) after=\(overlayResult.after)")
+            #endif
+        }
+
+        for monthKey in refreshedMonthKeys {
+            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+        }
+
+        #if DEBUG
+        print("[ScheduleRefresh] post-reconciliation completed dates=\(uniqueDateKeys.joined(separator: ","))")
+        #endif
+        clearRecentlyReconciledScheduleDates(uniqueDateKeys)
+        schedulePostReconciliationRefreshGeneration += 1
+
+        return SchedulePostReconciliationRefreshResult(dateResults: dateResults)
     }
 
     private func loadScheduleDay(for date: Date, forceRefresh: Bool) async {
@@ -2136,6 +2410,47 @@ final class AppModel {
         return (inserted, updated, skippedExisting)
     }
 
+    private func overlayScheduleGames(
+        _ incomingGames: [GameDetail],
+        intoMonth monthKey: KBOMonthScheduleKey
+    ) -> (games: [GameDetail], before: Int, inserted: Int, updated: Int, unchanged: Int, after: Int) {
+        var overlaidGames = monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+        let before = overlaidGames.count
+        var inserted = 0
+        var updated = 0
+
+        for candidate in incomingGames {
+            let candidateAliases = identityAliases(for: candidate)
+            if let existingIndex = overlaidGames.firstIndex(where: { existing in
+                identityAliases(for: existing).isDisjoint(with: candidateAliases) == false
+            }) {
+                let existing = overlaidGames[existingIndex]
+                let selected = preferredKnownScheduleGame(existing: existing, candidate: candidate)
+                if selected != existing {
+                    overlaidGames[existingIndex] = selected
+                    updated += 1
+                }
+            } else {
+                overlaidGames.append(candidate)
+                inserted += 1
+            }
+        }
+
+        let mergedGames = mergeEquivalentGames(overlaidGames)
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        monthlyScheduleGames[monthKey] = mergedGames
+        invalidateScheduleDerivedCaches(for: monthKey)
+
+        return (
+            games: mergedGames,
+            before: before,
+            inserted: inserted,
+            updated: updated,
+            unchanged: max(0, mergedGames.count - inserted - updated),
+            after: mergedGames.count
+        )
+    }
+
 #if DEBUG
     private func logPitcherMerge(existing: GameDetail, incoming: GameDetail, merged: GameDetail) {
         if existing.awayStartingPitcherName != merged.awayStartingPitcherName ||
@@ -2155,7 +2470,8 @@ final class AppModel {
             keys.insert(key)
         }
         for monthKey in keys {
-            monthlyScheduleGames[monthKey] = mergeMonthlyScheduleGames(fallbackMonthSchedule(for: monthKey), for: monthKey)
+            let existingMonthGames = monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+            monthlyScheduleGames[monthKey] = mergeMonthlyScheduleGames(existingMonthGames, for: monthKey)
                 .sorted { $0.scheduledStart < $1.scheduledStart }
         }
         invalidateScheduleDerivedCaches()
@@ -2632,7 +2948,7 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
-    private func scheduleNotificationRegistrationSync(force _: Bool) {
+    private func scheduleNotificationRegistrationSync(force: Bool) {
         guard let payload = currentNotificationRegistrationPayload else {
             notificationRegistrationSyncStatus = .waitingForToken
             return
@@ -2665,7 +2981,7 @@ final class AppModel {
             payload: payload,
             endpointDescription: notificationRegistrationClient.debugEndpointDescription
         )
-        switch notificationRegistrationDeduplicationState.start(key) {
+        switch notificationRegistrationDeduplicationState.start(key, force: force) {
         case .skipInFlight:
             #if DEBUG
             print("[NotificationPipeline] registration skipped reason=inFlight key=\(key)")
@@ -2685,23 +3001,39 @@ final class AppModel {
             }
         }
 
+        notificationRegistrationSyncGeneration += 1
+        let generation = notificationRegistrationSyncGeneration
+        if let previousKey = notificationRegistrationSyncTaskKey {
+            notificationRegistrationDeduplicationState.fail(previousKey)
+        }
+        notificationRegistrationSyncTask?.cancel()
+        notificationRegistrationSyncTaskKey = key
         notificationRegistrationSyncTask = Task { [weak self] in
-            await self?.performNotificationRegistrationSync(payload, key: key)
+            await self?.performNotificationRegistrationSync(payload, key: key, generation: generation)
         }
     }
 
     private func performNotificationRegistrationSync(
         _ payload: NotificationRegistrationPayload,
-        key: NotificationRegistrationKey
+        key: NotificationRegistrationKey,
+        generation: Int
     ) async {
         notificationRegistrationSyncStatus = .syncing
         notificationRegistrationLastAttemptAt = Date()
 
         do {
+            try Task.checkCancellation()
             #if DEBUG
-            print("[NotificationPipeline] registration request start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing")")
+            print("[NotificationPipeline] registration request start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") \(payload.debugBooleanDescription)")
             #endif
             let status = try await notificationRegistrationClient.syncRegistration(payload)
+            guard generation == notificationRegistrationSyncGeneration else {
+                notificationRegistrationDeduplicationState.fail(key)
+                #if DEBUG
+                print("[NotificationPipeline] registration stale result ignored key=\(key)")
+                #endif
+                return
+            }
             notificationRegistrationSyncStatus = status
             #if DEBUG
             print("[NotificationPipeline] registration sync status=\(status.rawValue)")
@@ -2712,9 +3044,22 @@ final class AppModel {
             }
             #endif
             notificationRegistrationDeduplicationState.complete(key, status: status)
+            if notificationRegistrationSyncTaskKey == key {
+                notificationRegistrationSyncTaskKey = nil
+            }
         } catch {
+            guard generation == notificationRegistrationSyncGeneration else {
+                notificationRegistrationDeduplicationState.fail(key)
+                #if DEBUG
+                print("[NotificationPipeline] registration stale failure ignored key=\(key) error=\(error)")
+                #endif
+                return
+            }
             notificationRegistrationSyncStatus = .failed
             notificationRegistrationDeduplicationState.fail(key)
+            if notificationRegistrationSyncTaskKey == key {
+                notificationRegistrationSyncTaskKey = nil
+            }
             #if DEBUG
             print("[NotificationPipeline] backend token registration failure error=\(error)")
             print("[NotificationPipeline] registration failure error=\(error)")
@@ -3200,6 +3545,9 @@ final class AppModel {
     }
 
     private func preferredGameStateSource(existing: GameDetail, candidate: GameDetail) -> GameDetail {
+        if shouldRecoverUnconfirmedFinal(existing: existing, candidate: candidate) {
+            return candidate
+        }
         let candidatePriority = gameStateMergePriority(candidate)
         let existingPriority = gameStateMergePriority(existing)
         if candidatePriority != existingPriority {
@@ -3222,6 +3570,39 @@ final class AppModel {
             return candidateHasProvider ? candidate : existing
         }
         return candidate
+    }
+
+    private func shouldRecoverUnconfirmedFinal(existing: GameDetail, candidate: GameDetail) -> Bool {
+        guard existing.status == .final,
+              hasConfirmedFinalStatus(existing) == false,
+              isLiveLike(candidate) else {
+            return false
+        }
+        let candidateFreshness = freshnessDate(for: candidate)
+        let existingFreshness = freshnessDate(for: existing)
+        if let candidateFreshness, let existingFreshness {
+            return candidateFreshness >= existingFreshness
+        }
+        if candidateFreshness != nil, existingFreshness == nil {
+            return true
+        }
+        return hasLiveProgress(candidate)
+    }
+
+    private func hasConfirmedFinalStatus(_ game: GameDetail) -> Bool {
+        game.status == .final && gameNoteValue("final_confirmed_at", in: game.note) != nil
+    }
+
+    private func isLiveLike(_ game: GameDetail) -> Bool {
+        game.status.isLiveLike || hasLiveProgress(game)
+    }
+
+    private func hasLiveProgress(_ game: GameDetail) -> Bool {
+        nonBlank(game.currentPitcherName) != nil
+            || nonBlank(game.currentBatterName) != nil
+            || game.balls != nil
+            || game.strikes != nil
+            || game.outs != nil
     }
 
     private func preferredTeam(_ candidate: Team, fallback: Team) -> Team {
@@ -3533,6 +3914,81 @@ final class AppModel {
         let day = components.day ?? 1
         return String(format: "%04d-%02d-%02d", year, month, day)
     }
+
+    private func scheduleDate(fromDayKey dayKey: String) throws -> Date {
+        let parts = dayKey.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else {
+            throw SchedulePostReconciliationRefreshError.invalidDateKey(dayKey)
+        }
+        var scheduleCalendar = calendar
+        scheduleCalendar.timeZone = scheduleTimeZone
+        var components = DateComponents()
+        components.calendar = scheduleCalendar
+        components.timeZone = scheduleTimeZone
+        components.year = parts[0]
+        components.month = parts[1]
+        components.day = parts[2]
+        components.hour = 12
+        guard let date = scheduleCalendar.date(from: components) else {
+            throw SchedulePostReconciliationRefreshError.invalidDateKey(dayKey)
+        }
+        return date
+    }
+
+    private func markScheduleDatesRecentlyReconciled(_ dateKeys: [String]) {
+        let now = Date()
+        for dateKey in dateKeys {
+            recentlyReconciledScheduleDates[dateKey] = now
+        }
+        #if DEBUG
+        print("[ScheduleRefresh] recentlyReconciled added dates=\(dateKeys.joined(separator: ","))")
+        #endif
+    }
+
+    private func clearRecentlyReconciledScheduleDates(_ dateKeys: [String]) {
+        for dateKey in dateKeys {
+            recentlyReconciledScheduleDates.removeValue(forKey: dateKey)
+        }
+        #if DEBUG
+        print("[ScheduleRefresh] recentlyReconciled removed dates=\(dateKeys.joined(separator: ","))")
+        #endif
+    }
+
+    private func pruneExpiredRecentlyReconciledScheduleDates() {
+        let now = Date()
+        let expiredDateKeys = recentlyReconciledScheduleDates.compactMap { dateKey, markedAt in
+            now.timeIntervalSince(markedAt) >= scheduleReconciliationCooldown ? dateKey : nil
+        }
+        guard expiredDateKeys.isEmpty == false else { return }
+        clearRecentlyReconciledScheduleDates(expiredDateKeys)
+    }
+}
+
+struct ScheduleStalePreflightRefreshResult: Sendable {
+    let requestedDateKeys: [String]
+    let remainingStaleDateKeys: [String]
+    let resolvedDateKeys: [String]
+    let failedDateKeys: [String]
+}
+
+struct SchedulePostReconciliationRefreshResult: Sendable {
+    let dateResults: [SchedulePostReconciliationDateRefreshResult]
+
+    var dateKeys: [String] {
+        dateResults.map(\.dateKey)
+    }
+}
+
+struct SchedulePostReconciliationDateRefreshResult: Sendable {
+    let dateKey: String
+    let games: [GameDetail]
+    let inserted: Int
+    let updated: Int
+    let skippedExisting: Int
+}
+
+enum SchedulePostReconciliationRefreshError: Error, Sendable {
+    case invalidDateKey(String)
 }
 
 private struct ScheduleCalendarCacheKey: Hashable {

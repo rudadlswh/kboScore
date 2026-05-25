@@ -891,8 +891,9 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     }
 
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
-        let startDate = "\(season)-03-01"
-        let endDate = "\(season)-11-30"
+        let dateRange = standingsSeasonDateRange(for: season)
+        let startDate = gameDateString(dateRange.start)
+        let endDate = gameDateString(dateRange.end)
         #if DEBUG
         print("[SupabaseKBO] fetchGames(standings:) query start schema=\(schemaName) table=games season=\(season) dateRange=\(startDate)...\(endDate)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
@@ -902,7 +903,9 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .select(Self.gameSelectColumns)
             .gte("game_date", value: startDate)
             .lte("game_date", value: endDate)
-            .or("status.eq.final,status.eq.completed,status.eq.ended,status.eq.game_over,inning_state.eq.final,inning_state.eq.game_over")
+            .eq("status", value: "final")
+            .eq("is_cancelled", value: false)
+            .eq("is_postponed", value: false)
             .order("game_date", ascending: true)
             .order("scheduled_at", ascending: true)
             .execute()
@@ -1070,6 +1073,12 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         let start = calendar.date(from: startComponents) ?? .distantPast
         let end = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) ?? start
         return DateInterval(start: start, end: end)
+    }
+
+    nonisolated private func standingsSeasonDateRange(for season: Int) -> (start: Date, end: Date) {
+        let start = calendar.date(from: DateComponents(calendar: calendar, year: season, month: 3, day: 1)) ?? .distantPast
+        let end = calendar.date(from: DateComponents(calendar: calendar, year: season, month: 11, day: 30)) ?? start
+        return (start, end)
     }
 
     nonisolated private func gameDateString(_ date: Date) -> String {

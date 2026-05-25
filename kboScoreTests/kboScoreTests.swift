@@ -887,6 +887,237 @@ struct kboScoreTests {
         #expect(refreshed?.baseRunners?.first == "전민재")
     }
 
+    @MainActor
+    @Test func gameDetailRefreshRecoversUnconfirmedFinalWhenIncomingLiveIsNewer() async throws {
+        let referenceDate = isoDate("2026-05-19T21:20:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-19T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            inningText: "경기 종료",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 updated_at=2026-05-19T21:00:00+09:00",
+            providerGameID: "20260519LTHH0"
+        )
+        let incoming = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000002")!,
+            scheduledStart: existing.scheduledStart,
+            venue: existing.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 9",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 live_last_checked_at=2026-05-19T21:10:00+09:00 updated_at=2026-05-19T21:10:00+09:00",
+            providerGameID: "20260519LTHH0",
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: "최준용",
+            currentBatterName: "황영묵"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in incoming }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        let refreshed = try #require(await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true))
+
+        #expect(refreshed.status == .live)
+        #expect(refreshed.inningText == "Bottom 9")
+        #expect(refreshed.currentPitcherName == "최준용")
+        #expect(refreshed.currentBatterName == "황영묵")
+    }
+
+    @MainActor
+    @Test func gameDetailRefreshRecoversUnconfirmedFinalFromLiveLikeSnapshotWithoutFreshness() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-05-19T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0",
+            providerGameID: "20260519LTHH0"
+        )
+        let incoming = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000004")!,
+            scheduledStart: existing.scheduledStart,
+            venue: existing.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 9",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0",
+            providerGameID: "20260519LTHH0",
+            balls: 0,
+            strikes: 1,
+            outs: 1,
+            currentPitcherName: "최준용",
+            currentBatterName: "황영묵"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in incoming }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = try #require(await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true))
+
+        #expect(refreshed.status == .live)
+        #expect(refreshed.inningText == "Bottom 9")
+    }
+
+    @MainActor
+    @Test func gameDetailRefreshKeepsConfirmedFinalWhenIncomingLiveIsOlder() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000005")!,
+            scheduledStart: isoDate("2026-05-19T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            inningText: "경기 종료",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 updated_at=2026-05-19T21:10:00+09:00 final_confirmed_at=2026-05-19T21:10:00+09:00",
+            providerGameID: "20260519LTHH0"
+        )
+        let incoming = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000006")!,
+            scheduledStart: existing.scheduledStart,
+            venue: existing.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 9",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 updated_at=2026-05-19T21:00:00+09:00",
+            providerGameID: "20260519LTHH0",
+            currentPitcherName: "최준용",
+            currentBatterName: "황영묵"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in incoming }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = try #require(await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true))
+
+        #expect(refreshed.status == .final)
+        #expect(refreshed.inningText == "경기 종료")
+    }
+
+    @MainActor
+    @Test func liveActivityAutoStartUsesRecoveredLiveStateAfterFalseFinalMerge() async throws {
+        let controller = TestLiveActivityController(isSupported: true)
+        let referenceDate = isoDate("2026-05-19T21:10:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000007")!,
+            scheduledStart: isoDate("2026-05-19T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 updated_at=2026-05-19T21:00:00+09:00",
+            providerGameID: "20260519LTHH0"
+        )
+        let incoming = makeGameDetail(
+            id: UUID(uuidString: "20260519-0000-0000-0000-000000000008")!,
+            scheduledStart: existing.scheduledStart,
+            venue: existing.venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 6,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 9",
+            note: "public_game_id=20260519-HAN-LOT provider_game_id=20260519LTHH0 updated_at=2026-05-19T21:10:00+09:00",
+            providerGameID: "20260519LTHH0",
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: "최준용",
+            currentBatterName: "황영묵"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in incoming }
+        )
+        let model = AppModel(
+            repository: repository,
+            liveActivityController: controller,
+            bootstrap: KBOBootstrapData(teams: teams, games: [existing], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        model.settings.favoriteTeamID = "lotte"
+        model.settings.liveActivitiesEnabled = true
+
+        let refreshed = try #require(await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true))
+        await model.startOrUpdateLiveActivityIfNeeded(for: refreshed)
+
+        #expect(refreshed.status == .live)
+        #expect(controller.snapshots.count == 1)
+        #expect(model.isLiveActivityOn(for: refreshed.id))
+    }
+
     @Test func gameLookupResolvesProviderStableIdentityAndPublicRawID() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let lotte = try #require(teams.first(where: { $0.id == "lotte" }))
@@ -2166,6 +2397,99 @@ struct kboScoreTests {
         #expect(model.myTeamAttendanceSummary.completedGames == 2)
     }
 
+    @Test func attendanceDashboardAggregatesHomeAttendanceRecord() throws {
+        let teams = try attendanceFixtureTeams()
+        let homeWin = makeAttendanceFixtureGame(index: 1, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
+        let homeLoss = makeAttendanceFixtureGame(index: 2, awayTeam: teams.samsung, homeTeam: teams.lg, awayScore: 6, homeScore: 3)
+        let homeDraw = makeAttendanceFixtureGame(index: 3, awayTeam: teams.lotte, homeTeam: teams.lg, awayScore: 4, homeScore: 4)
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [homeWin, homeLoss, homeDraw], favoriteTeamID: "lg")
+
+        #expect(dashboard.home.games == 3)
+        #expect(dashboard.home.wins == 1)
+        #expect(dashboard.home.losses == 1)
+        #expect(dashboard.home.draws == 1)
+        #expect(dashboard.home.winPercentageText == "0.500")
+        #expect(dashboard.away.games == 0)
+    }
+
+    @Test func attendanceDashboardAggregatesAwayAttendanceRecord() throws {
+        let teams = try attendanceFixtureTeams()
+        let awayWin = makeAttendanceFixtureGame(index: 4, awayTeam: teams.lg, homeTeam: teams.doosan, awayScore: 5, homeScore: 2)
+        let awayLoss = makeAttendanceFixtureGame(index: 5, awayTeam: teams.lg, homeTeam: teams.samsung, awayScore: 3, homeScore: 6)
+        let awayDraw = makeAttendanceFixtureGame(index: 6, awayTeam: teams.lg, homeTeam: teams.lotte, awayScore: 4, homeScore: 4)
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [awayWin, awayLoss, awayDraw], favoriteTeamID: "lg")
+
+        #expect(dashboard.away.games == 3)
+        #expect(dashboard.away.wins == 1)
+        #expect(dashboard.away.losses == 1)
+        #expect(dashboard.away.draws == 1)
+        #expect(dashboard.away.winPercentageText == "0.500")
+        #expect(dashboard.home.games == 0)
+    }
+
+    @Test func attendanceDashboardAggregatesCombinedHomeAndAwayRecord() throws {
+        let teams = try attendanceFixtureTeams()
+        let homeWin = makeAttendanceFixtureGame(index: 7, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
+        let awayLoss = makeAttendanceFixtureGame(index: 8, awayTeam: teams.lg, homeTeam: teams.samsung, awayScore: 3, homeScore: 6)
+        let awayDraw = makeAttendanceFixtureGame(index: 9, awayTeam: teams.lg, homeTeam: teams.lotte, awayScore: 4, homeScore: 4)
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [homeWin, awayLoss, awayDraw], favoriteTeamID: "lg")
+
+        #expect(dashboard.overall.games == 3)
+        #expect(dashboard.overall.wins == 1)
+        #expect(dashboard.overall.losses == 1)
+        #expect(dashboard.overall.draws == 1)
+        #expect(dashboard.home.games == 1)
+        #expect(dashboard.away.games == 2)
+    }
+
+    @Test func attendanceDashboardExcludesDrawsFromWinningPercentage() throws {
+        let teams = try attendanceFixtureTeams()
+        let win = makeAttendanceFixtureGame(index: 10, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
+        let draw = makeAttendanceFixtureGame(index: 11, awayTeam: teams.samsung, homeTeam: teams.lg, awayScore: 4, homeScore: 4)
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [win, draw], favoriteTeamID: "lg")
+        let drawOnly = AttendanceDashboardBuilder.build(attendedGames: [draw], favoriteTeamID: "lg")
+
+        #expect(dashboard.overall.games == 2)
+        #expect(dashboard.overall.winPercentageText == "1.000")
+        #expect(drawOnly.overall.winPercentage == nil)
+        #expect(drawOnly.overall.winPercentageText == "---")
+    }
+
+    @Test func attendanceDashboardExcludesGamesUnrelatedToFavoriteTeam() throws {
+        let teams = try attendanceFixtureTeams()
+        let favoriteGame = makeAttendanceFixtureGame(index: 12, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
+        let unrelatedGame = makeAttendanceFixtureGame(index: 13, awayTeam: teams.samsung, homeTeam: teams.lotte, awayScore: 3, homeScore: 1)
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [favoriteGame, unrelatedGame], favoriteTeamID: "lg")
+
+        #expect(dashboard.overall.games == 1)
+        #expect(dashboard.games.map(\.opponentName) == ["두산"])
+    }
+
+    @Test func attendanceDashboardGameListIncludesOpponentStadiumAndScore() throws {
+        let teams = try attendanceFixtureTeams()
+        let game = makeAttendanceFixtureGame(
+            index: 14,
+            venue: "잠실",
+            awayTeam: teams.doosan,
+            homeTeam: teams.lg,
+            awayScore: 2,
+            homeScore: 5
+        )
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [game], favoriteTeamID: "lg")
+        let record = try #require(dashboard.games.first)
+
+        #expect(record.opponentName == "두산")
+        #expect(record.stadium == "잠실")
+        #expect(record.scoreText == "두산 2 : 5 LG")
+        #expect(record.gameDate == game.scheduledStart)
+    }
+
     @Test func attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
         let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
@@ -2878,6 +3202,41 @@ struct kboScoreTests {
         #expect(model.regularSeasonGames.count == 2)
     }
 
+    @Test func standingsRankMovementMovedUpShowsUpIndicator() {
+        let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: 5)
+
+        #expect(movement == .up)
+        #expect(movement.indicator == "▲")
+    }
+
+    @Test func standingsRankMovementMovedDownShowsDownIndicator() {
+        let movement = StandingsRankMovementResolver.movement(currentRank: 5, preGameRank: 3)
+
+        #expect(movement == .down)
+        #expect(movement.indicator == "▼")
+    }
+
+    @Test func standingsRankMovementUnchangedShowsNoIndicator() {
+        let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: 4)
+
+        #expect(movement == .unchanged)
+        #expect(movement.indicator == nil)
+    }
+
+    @Test func standingsRankMovementMissingPreGameRankShowsNoIndicator() {
+        let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: nil)
+
+        #expect(movement == .unchanged)
+        #expect(movement.indicator == nil)
+    }
+
+    @Test func standingsRankMovementMissingCurrentRankShowsNoIndicator() {
+        let movement = StandingsRankMovementResolver.movement(currentRank: nil, preGameRank: 4)
+
+        #expect(movement == .unchanged)
+        #expect(movement.indicator == nil)
+    }
+
     @Test func standingsRecentResultsAreLimitedToFiveMostRecentFinalGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-10T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -3061,6 +3420,158 @@ struct kboScoreTests {
         #expect(model.todayGames.isEmpty)
         #expect(model.homeFallbackStandingsSnapshots.isEmpty == false)
         #expect(model.homeFallbackStandingsSnapshots.first?.wins == 1)
+    }
+
+    @Test func homeFallbackCompletedResolverIncludesFinalGamesBeforeToday() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let finalGame = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-24T17:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let completedGames = HomeFallbackStandingsResolver.completedRegularSeasonGamesBeforeToday(
+            games: [finalGame],
+            currentDate: isoDate("2026-05-25T09:00:00+09:00"),
+            calendar: homeFallbackTestCalendar()
+        )
+
+        #expect(completedGames.map(\.id) == [finalGame.id])
+    }
+
+    @Test func homeFallbackCompletedResolverExcludesCancelledGames() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let cancelledGame = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-05-24T17:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason
+        )
+
+        let completedGames = HomeFallbackStandingsResolver.completedRegularSeasonGamesBeforeToday(
+            games: [cancelledGame],
+            currentDate: isoDate("2026-05-25T09:00:00+09:00"),
+            calendar: homeFallbackTestCalendar()
+        )
+
+        #expect(completedGames.isEmpty)
+    }
+
+    @Test func homeFallbackCompletedResolverExcludesTodayAndFutureGames() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let todayGame = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-05-25T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let futureGame = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000004")!,
+            scheduledStart: isoDate("2026-05-26T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let completedGames = HomeFallbackStandingsResolver.completedRegularSeasonGamesBeforeToday(
+            games: [todayGame, futureGame],
+            currentDate: isoDate("2026-05-25T09:00:00+09:00"),
+            calendar: homeFallbackTestCalendar()
+        )
+
+        #expect(completedGames.isEmpty)
+    }
+
+    @Test func homeFallbackWeeklyStandingsNotEmptyWhenValidFinalGamesExist() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let finalGame = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000005")!,
+            scheduledStart: isoDate("2026-05-24T17:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let referenceGames = HomeFallbackStandingsResolver.referenceWeekCompletedGames(
+            games: [finalGame],
+            currentDate: isoDate("2026-05-25T09:00:00+09:00"),
+            calendar: homeFallbackTestCalendar()
+        )
+
+        let snapshots = HomeFallbackStandingsBuilder.makeSnapshots(
+            teams: [lg, doosan],
+            referenceCompletedGames: referenceGames,
+            seasonGames: [finalGame],
+            previousRankProvider: { _ in nil }
+        )
+
+        #expect(snapshots.isEmpty == false)
+        #expect(snapshots.first(where: { $0.team.id == "lg" })?.wins == 1)
+    }
+
+    @Test func homeFallbackWeeklyStandingsUsesAllTeamsNotFavoriteOnly() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let samsung = try #require(base.teams.first(where: { $0.id == "samsung" }))
+        let lotte = try #require(base.teams.first(where: { $0.id == "lotte" }))
+        let nonFavoriteFinal = makeGameDetail(
+            id: UUID(uuidString: "92510000-0000-0000-0000-000000000006")!,
+            scheduledStart: isoDate("2026-05-24T17:00:00+09:00"),
+            venue: "사직",
+            awayTeam: samsung,
+            homeTeam: lotte,
+            awayScore: 7,
+            homeScore: 3,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let referenceGames = HomeFallbackStandingsResolver.referenceWeekCompletedGames(
+            games: [nonFavoriteFinal],
+            currentDate: isoDate("2026-05-25T09:00:00+09:00"),
+            calendar: homeFallbackTestCalendar()
+        )
+
+        let snapshots = HomeFallbackStandingsBuilder.makeSnapshots(
+            teams: [lg, samsung, lotte],
+            referenceCompletedGames: referenceGames,
+            seasonGames: [nonFavoriteFinal],
+            previousRankProvider: { team in team.id == "lg" ? 1 : nil }
+        )
+
+        #expect(referenceGames.map(\.id) == [nonFavoriteFinal.id])
+        #expect(snapshots.first(where: { $0.team.id == "samsung" })?.wins == 1)
+        #expect(snapshots.first(where: { $0.team.id == "lotte" })?.losses == 1)
     }
 
     @Test func todayGamesUseKSTDateFiltering() async throws {
@@ -3589,7 +4100,7 @@ struct kboScoreTests {
                 onBaseEnabled: true,
                 inningChangeEnabled: true,
                 favoriteTeamOnlyEnabled: true,
-                muteWhenLosingEnabled: false
+                muteWhenLosingEnabled: true
             ),
             quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
             liveActivitiesEnabled: true,
@@ -3606,7 +4117,7 @@ struct kboScoreTests {
         #expect(decoded.notificationPreferences.onBaseEnabled == true)
         #expect(decoded.notificationPreferences.inningChangeEnabled == true)
         #expect(decoded.notificationPreferences.favoriteTeamOnlyEnabled == true)
-        #expect(decoded.notificationPreferences.muteWhenLosingEnabled == false)
+        #expect(decoded.notificationPreferences.muteWhenLosingEnabled == true)
     }
 
     @Test func notificationRegistrationKeyChangesWhenDetailedNotificationSettingsChange() async throws {
@@ -3800,6 +4311,96 @@ struct kboScoreTests {
         #expect(didRegister)
         #expect(await client.favoriteTeamIDs() == ["lotte"])
         #expect(model.notificationRegistrationSyncStatus == .synced)
+    }
+
+    @Test func backendDeviceRegistrationPayloadAndKeyIncludeFavoriteTeamOnlyPreference() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(favoriteTeamOnlyEnabled: true)
+        )
+
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+        let key = NotificationRegistrationKey(payload: payload, endpointDescription: client.debugEndpointDescription)
+
+        #expect(didRegister)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(key.favoriteTeamOnlyEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationPayloadAndKeyIncludeMuteWhenLosingPreference() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(muteWhenLosingEnabled: true)
+        )
+
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+        let key = NotificationRegistrationKey(payload: payload, endpointDescription: client.debugEndpointDescription)
+
+        #expect(didRegister)
+        #expect(payload.muteWhenLosingEnabled == true)
+        #expect(key.muteWhenLosingEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationKeepsTeamFilterPreferencesWhenOtherSettingChanges() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: true
+            )
+        )
+
+        let didRegisterInitialSettings = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+
+        var updatedSettings = model.settings
+        updatedSettings.notificationPreferences.onBaseEnabled = true
+        model.settings = updatedSettings
+
+        let didRegisterUpdatedSettings = await eventually(timeout: 1.0) {
+            await client.requestCount() == 2
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+        let key = NotificationRegistrationKey(payload: payload, endpointDescription: client.debugEndpointDescription)
+
+        #expect(didRegisterInitialSettings)
+        #expect(didRegisterUpdatedSettings)
+        #expect(payload.onBaseEnabled == true)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(payload.muteWhenLosingEnabled == true)
+        #expect(key.favoriteTeamOnlyEnabled == true)
+        #expect(key.muteWhenLosingEnabled == true)
     }
 
     @Test func backendDeviceRegistrationRunsWhenAuthorizationIsProvisional() async throws {
@@ -4691,6 +5292,174 @@ struct kboScoreTests {
         #expect(first?.bases?.second == false)
         #expect(first?.bases?.third == true)
         #expect(first?.outs == 1)
+    }
+
+    @Test func testBaseRunnerBattingOrderNormalization() {
+        #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("3") == 3)
+        #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("3번") == 3)
+        #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("03") == 3)
+        #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("") == nil)
+        #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber(nil) == nil)
+    }
+
+    @Test func testBaseRunnerOffenseSideFromTopInningUsesAwayLineup() throws {
+        let battingSections = makeBaseRunnerLineupSections(
+            away: [(2, "김민석")],
+            home: [(2, "홈2번")]
+        )
+
+        for halfText in ["Top 1", "1회 초", "초"] {
+            let runners = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+                firstOrder: 2,
+                secondOrder: nil,
+                thirdOrder: nil,
+                inningHalfText: halfText,
+                battingSections: battingSections
+            ))
+
+            #expect(OfficialBaseRunnerLineupResolver.offenseSide(inningHalfText: halfText) == .away)
+            #expect(runners.first == "김민석")
+        }
+    }
+
+    @Test func testBaseRunnerOffenseSideFromBottomInningUsesHomeLineup() throws {
+        let battingSections = makeBaseRunnerLineupSections(
+            away: [(4, "원정4번")],
+            home: [(4, "레이예스")]
+        )
+
+        for halfText in ["Bottom 1", "1회 말", "말"] {
+            let runners = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+                firstOrder: nil,
+                secondOrder: 4,
+                thirdOrder: nil,
+                inningHalfText: halfText,
+                battingSections: battingSections
+            ))
+
+            #expect(OfficialBaseRunnerLineupResolver.offenseSide(inningHalfText: halfText) == .home)
+            #expect(runners.second == "레이예스")
+        }
+    }
+
+    @Test func testBaseRunnerMapsFirstSecondThirdRunnerNamesFromBattingOrders() throws {
+        let battingSections = makeBaseRunnerLineupSections(
+            away: [(2, "김민석"), (5, "전준우")],
+            home: [(4, "레이예스")]
+        )
+
+        let runners = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+            firstOrder: 2,
+            secondOrder: 4,
+            thirdOrder: 5,
+            inningHalfText: nil,
+            battingSections: battingSections
+        ))
+
+        #expect(runners.first == "김민석")
+        #expect(runners.second == "레이예스")
+        #expect(runners.third == "전준우")
+    }
+
+    @Test func testBaseRunnerKeepsCachedNameWhenBaseStillOccupiedAndNewNameMissing() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let occupied = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "김민석", second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: occupied)
+        let missingName = try makeBaseRunnerDisplayGame(
+            id: occupied.id,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: missingName)
+
+        #expect(display.runners.first == "김민석")
+        #expect(display.source == "carryForward")
+    }
+
+    @Test func testBaseRunnerClearsCachedNameWhenBaseIsEmpty() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let occupied = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "김민석", second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: occupied)
+        let empty = try makeBaseRunnerDisplayGame(
+            id: occupied.id,
+            bases: RunnerState(first: false, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: occupied.stableDetailIdentity, game: empty)
+
+        #expect(display.runners.first == nil)
+        #expect(display.source == "empty")
+    }
+
+    @Test func testBaseRunnerReplacesCachedNameWhenBattingOrderChanges() throws {
+        let battingSections = makeBaseRunnerLineupSections(
+            away: [(2, "김민석"), (5, "전준우")],
+            home: []
+        )
+        var resolver = BaseRunnerDisplayResolver()
+        let firstRunner = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+            firstOrder: 2,
+            secondOrder: nil,
+            thirdOrder: nil,
+            inningHalfText: "초",
+            battingSections: battingSections
+        ))
+        let initial = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: firstRunner.first, second: nil, third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: initial.stableDetailIdentity, game: initial)
+        let changedRunner = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+            firstOrder: 5,
+            secondOrder: nil,
+            thirdOrder: nil,
+            inningHalfText: "초",
+            battingSections: battingSections
+        ))
+        let changed = try makeBaseRunnerDisplayGame(
+            id: initial.id,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: changedRunner.first, second: nil, third: nil)
+        )
+
+        let display = resolver.resolve(gameIdentity: initial.stableDetailIdentity, game: changed)
+
+        #expect(display.runners.first == "전준우")
+        #expect(display.source == "snapshot")
+    }
+
+    @Test func baseRunnerResolvedNamesFeedDisplayResolutionBeforeViewRendering() throws {
+        let battingSections = makeBaseRunnerLineupSections(
+            away: [(2, "김민석")],
+            home: []
+        )
+        let runners = try #require(OfficialBaseRunnerLineupResolver.baseRunners(
+            firstOrder: 2,
+            secondOrder: nil,
+            thirdOrder: nil,
+            inningHalfText: "1회 초",
+            battingSections: battingSections
+        ))
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: runners.first, second: runners.second, third: runners.third)
+        )
+
+        let display = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+
+        #expect(display.runners.first == "김민석")
+        #expect(display.runners.second == nil)
+        #expect(display.runners.third == nil)
+        #expect(display.source == "snapshot")
     }
 
     @Test func liveRepositoryMapsOfficialMonthlyScheduleFixture() async throws {
@@ -7968,6 +8737,663 @@ struct kboScoreTests {
         #expect(await dayFetchCounter.value == 1)
     }
 
+    @Test func staleScheduleResolverTreatsPastScheduledGameAsStale() throws {
+        let fixture = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-12")
+
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            fixture.game,
+            today: fixture.today,
+            calendar: fixture.calendar
+        ))
+    }
+
+    @Test func staleScheduleResolverTreatsPastUnknownMappedGameAsStale() throws {
+        let status = KBODataMapper.mapGameStatus(code: "unknown", text: nil)
+        let fixture = try makeStaleScheduleFixture(status: status, day: "2026-03-12")
+
+        #expect(status == .upcoming)
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            fixture.game,
+            today: fixture.today,
+            calendar: fixture.calendar
+        ))
+    }
+
+    @Test func staleScheduleResolverTreatsPastLiveGameAsStale() throws {
+        let fixture = try makeStaleScheduleFixture(status: .live, day: "2026-03-12")
+
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            fixture.game,
+            today: fixture.today,
+            calendar: fixture.calendar
+        ))
+    }
+
+    @Test func staleScheduleResolverDoesNotTreatPastFinalGameAsStale() throws {
+        let fixture = try makeStaleScheduleFixture(status: .final, day: "2026-03-12")
+
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            fixture.game,
+            today: fixture.today,
+            calendar: fixture.calendar
+        ) == false)
+    }
+
+    @Test func staleScheduleResolverDoesNotTreatPastCancelledOrPostponedGameAsStale() throws {
+        let cancelled = try makeStaleScheduleFixture(status: .cancelled, day: "2026-03-12")
+        let postponedStatus = KBODataMapper.mapGameStatus(code: "postponed", text: nil)
+        let postponed = try makeStaleScheduleFixture(status: postponedStatus, day: "2026-03-12")
+
+        #expect(postponedStatus == .cancelled)
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            cancelled.game,
+            today: cancelled.today,
+            calendar: cancelled.calendar
+        ) == false)
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            postponed.game,
+            today: postponed.today,
+            calendar: postponed.calendar
+        ) == false)
+    }
+
+    @Test func staleScheduleResolverDoesNotTreatTodayOrFutureGamesAsStale() throws {
+        let todayScheduled = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-13")
+        let todayLive = try makeStaleScheduleFixture(status: .live, day: "2026-03-13")
+        let futureScheduled = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-14")
+
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            todayScheduled.game,
+            today: todayScheduled.today,
+            calendar: todayScheduled.calendar
+        ) == false)
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            todayLive.game,
+            today: todayLive.today,
+            calendar: todayLive.calendar
+        ) == false)
+        #expect(ScheduleStaleGameReconciliationResolver.isStalePastGame(
+            futureScheduled.game,
+            today: futureScheduled.today,
+            calendar: futureScheduled.calendar
+        ) == false)
+    }
+
+    @Test func staleScheduleResolverDeduplicatesMultipleGamesOnSameDate() throws {
+        let first = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-12")
+        let second = try makeStaleScheduleFixture(status: .live, day: "2026-03-12", id: UUID())
+
+        let dates = ScheduleStaleGameReconciliationResolver.staleGameDates(
+            in: [first.game, second.game],
+            today: first.today,
+            calendar: first.calendar
+        )
+
+        #expect(dates == ["2026-03-12"])
+    }
+
+    @Test func staleScheduleResolverSortsDatesNewestFirst() throws {
+        let oldest = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-09")
+        let newest = try makeStaleScheduleFixture(status: .live, day: "2026-03-12")
+        let middle = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-10")
+
+        let dates = ScheduleStaleGameReconciliationResolver.staleGameDates(
+            in: [oldest.game, newest.game, middle.game],
+            today: newest.today,
+            calendar: newest.calendar
+        )
+
+        #expect(dates == ["2026-03-12", "2026-03-10", "2026-03-09"])
+    }
+
+    @Test func schedulePullToRefreshPreflightFreshDataSkipsBackendReconciliation() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: pastDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let finalGame = makeGameDetail(
+            id: staleGame.id,
+            scheduledStart: pastDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 2,
+            status: .final
+        )
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [[staleGame]])
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: [scheduleTestDayKey(for: pastDate): [finalGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            await fetchSequence.next()
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(await reconciliationClient.calls.isEmpty)
+        #expect(await fetchSequence.count == 1)
+        #expect(await dateFetchRecorder.calls.map { $0.dayKey } == ["2026-03-12"])
+        #expect(await dateFetchRecorder.calls.map { $0.bypassingCache } == [true])
+        #expect(viewModel.selectedDateGames.first?.status == .final)
+        #expect(model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: pastDate)).first?.status == .final)
+    }
+
+    @Test func schedulePullToRefreshCallsBackendOnlyForDatesStillStaleAfterPreflight() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let resolvedDate = ISO8601DateFormatter().date(from: "2026-03-11T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let stillStaleGame = makeGameDetail(id: UUID(), scheduledStart: staleDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let locallyStaleResolvedGame = makeGameDetail(id: UUID(), scheduledStart: resolvedDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let freshResolvedGame = makeGameDetail(id: locallyStaleResolvedGame.id, scheduledStart: resolvedDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 3, homeScore: 2, status: .final)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: [
+            "2026-03-12": [stillStaleGame],
+            "2026-03-11": [freshResolvedGame]
+        ])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            [stillStaleGame, locallyStaleResolvedGame]
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = resolvedDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+
+        #expect(await Array(dateFetchRecorder.calls.map { $0.dayKey }.prefix(2)) == ["2026-03-12", "2026-03-11"])
+        #expect(await reconciliationClient.calls == [["2026-03-12"]])
+        #expect(viewModel.selectedDateGames.first?.status == .final)
+    }
+
+    @Test func schedulePullToRefreshPreflightOverlayPreservesFullMonthGameCount() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-05-22T09:00:00+09:00")!
+        let staleDate = ISO8601DateFormatter().date(from: "2026-05-21T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGames = (0..<5).map { index in
+            makeGameDetail(
+                id: UUID(),
+                scheduledStart: staleDate.addingTimeInterval(TimeInterval(index * 60)),
+                venue: "잠실",
+                awayTeam: awayTeam,
+                homeTeam: homeTeam,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming
+            )
+        }
+        let unrelatedGames = (0..<267).map { index in
+            makeGameDetail(
+                id: UUID(),
+                scheduledStart: ISO8601DateFormatter().date(from: "2026-05-01T12:00:00+09:00")!.addingTimeInterval(TimeInterval(index * 60)),
+                venue: "고척",
+                awayTeam: awayTeam,
+                homeTeam: homeTeam,
+                awayScore: 1,
+                homeScore: 0,
+                status: .final
+            )
+        }
+        let refreshedGames = staleGames.map {
+            makeGameDetail(
+                id: $0.id,
+                scheduledStart: $0.scheduledStart,
+                venue: $0.venue,
+                awayTeam: awayTeam,
+                homeTeam: homeTeam,
+                awayScore: 4,
+                homeScore: 2,
+                status: .final
+            )
+        }
+        let monthGames = unrelatedGames + staleGames
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-05-21": refreshedGames])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            monthGames
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = staleDate
+        viewModel.selectedDate = staleDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let monthSnapshot = model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: staleDate))
+        #expect(await reconciliationClient.calls.isEmpty)
+        #expect(monthSnapshot.count == 272)
+        #expect(viewModel.monthGameCount == 272)
+        #expect(viewModel.selectedDateGames.count == 5)
+        #expect(viewModel.selectedDateGames.allSatisfy { $0.status == .final })
+    }
+
+    @Test func schedulePullToRefreshPreflightOverlayUpdatesMatchesAndInsertsMissingGames() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let unrelatedGame = makeGameDetail(id: UUID(), scheduledStart: ISO8601DateFormatter().date(from: "2026-03-10T18:30:00+09:00")!, venue: "고척", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 1, homeScore: 0, status: .final)
+        let refreshedExisting = makeGameDetail(id: staleGame.id, scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 4, homeScore: 2, status: .final)
+        let insertedGame = makeGameDetail(id: UUID(), scheduledStart: pastDate.addingTimeInterval(3600), venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 5, homeScore: 3, status: .final)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [refreshedExisting, insertedGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            [unrelatedGame, staleGame]
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: RecordingScheduleStaleGameReconciliationClient(),
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let monthSnapshot = model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: pastDate))
+        #expect(monthSnapshot.count == 3)
+        #expect(monthSnapshot.filter { $0.id == staleGame.id }.count == 1)
+        #expect(monthSnapshot.contains { $0.id == staleGame.id && $0.status == .final })
+        #expect(monthSnapshot.contains { $0.id == insertedGame.id })
+        #expect(monthSnapshot.contains { $0.id == unrelatedGame.id })
+    }
+
+    @Test func schedulePullToRefreshPreflightRecomputesStaleFromOverlaidDateGames() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let resolvedGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let stillStaleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate.addingTimeInterval(3600), venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let refreshedResolvedGame = makeGameDetail(id: resolvedGame.id, scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 4, homeScore: 2, status: .final)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [refreshedResolvedGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            [resolvedGame, stillStaleGame]
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+
+        #expect(await reconciliationClient.calls == [["2026-03-12"]])
+        #expect(model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: pastDate)).count == 2)
+    }
+
+    @Test func schedulePullToRefreshSendsOnlyNewestThreeStaleDates() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGames = try ["2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12"].map { day in
+            makeGameDetail(
+                id: UUID(),
+                scheduledStart: try #require(ISO8601DateFormatter().date(from: "\(day)T18:30:00+09:00")),
+                venue: "잠실",
+                awayTeam: awayTeam,
+                homeTeam: homeTeam,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming
+            )
+        }
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [staleGames])
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: Dictionary(
+            uniqueKeysWithValues: staleGames.map { (scheduleTestDayKey(for: $0.scheduledStart), [$0]) }
+        ))
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            await fetchSequence.next()
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+
+        #expect(await reconciliationClient.calls == [["2026-03-12", "2026-03-11", "2026-03-10"]])
+        #expect(await reconciliationClient.calls.first?.contains("2026-03-09") == false)
+        #expect(await Array(dateFetchRecorder.calls.map { $0.dayKey }.prefix(3)) == ["2026-03-12", "2026-03-11", "2026-03-10"])
+    }
+
+    @Test func schedulePullToRefreshPreservesUnrelatedDatesAfterPostReconciliationRefresh() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let unrelatedDate = ISO8601DateFormatter().date(from: "2026-03-11T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: staleDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let freshGame = makeGameDetail(id: staleGame.id, scheduledStart: staleDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 4, homeScore: 2, status: .final)
+        let unrelatedGame = makeGameDetail(id: UUID(), scheduledStart: unrelatedDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 1, homeScore: 0, status: .final)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [freshGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            [staleGame, unrelatedGame]
+        }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: RecordingScheduleStaleGameReconciliationClient(),
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = staleDate
+        viewModel.selectedDate = unrelatedDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let selectedGame = try #require(viewModel.selectedDateGames.first)
+        #expect(selectedGame.id == unrelatedGame.id)
+        #expect(selectedGame.status == .final)
+        let monthSnapshot = model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: staleDate))
+        #expect(monthSnapshot.contains { $0.id == freshGame.id && $0.status == .final })
+    }
+
+    @Test func schedulePullToRefreshDoesNotCallReconciliationWhenNoStalePastGamesExist() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let finalGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: pastDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 2,
+            status: .final
+        )
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [[finalGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            await fetchSequence.next()
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+
+        #expect(await reconciliationClient.calls.isEmpty)
+        #expect(await fetchSequence.count == 1)
+    }
+
+    @Test func schedulePullToRefreshKeepsExistingDataWhenReconciliationFailsAfterPreflight() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: [:])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in [staleGame] }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: RecordingScheduleStaleGameReconciliationClient(error: URLError(.badServerResponse)),
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+
+        #expect(await dateFetchRecorder.calls.map { $0.dayKey } == ["2026-03-12"])
+        #expect(viewModel.selectedDateGames.first?.status == .upcoming)
+    }
+
+    @Test func schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let repository = StubRepository(fetchMonthlySchedule: { _ in [staleGame] }, fetchScheduleBypassingCache: { _, _ in
+            throw URLError(.timedOut)
+        })
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: RecordingScheduleStaleGameReconciliationClient(),
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+
+        #expect(viewModel.selectedDateGames.first?.status == .upcoming)
+    }
+
+    @Test func schedulePullToRefreshSkipsRecentlyReconciledDatesWhileForceRefreshIsRunning() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [staleGame]], delayNanoseconds: 200_000_000)
+        let repository = StubRepository(fetchMonthlySchedule: { _ in [staleGame] }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient()
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        await model.waitForSchedulePostReconciliationRefreshIfNeeded()
+
+        #expect(await reconciliationClient.calls == [["2026-03-12"]])
+    }
+
+    @Test func schedulePullToRefreshDoesNotStartDuplicateReconciliationWhileInFlight() async throws {
+        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(
+            id: UUID(),
+            scheduledStart: pastDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let repository = StubRepository(fetchMonthlySchedule: { _ in [staleGame] }, fetchScheduleBypassingCache: { _, _ in
+            [staleGame]
+        })
+        let reconciliationClient = RecordingScheduleStaleGameReconciliationClient(delayNanoseconds: 200_000_000)
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        async let first: Void = viewModel.refreshDisplayedMonth(appModel: model)
+        async let second: Void = viewModel.refreshDisplayedMonth(appModel: model)
+        _ = await (first, second)
+
+        #expect(await reconciliationClient.calls == [["2026-03-12"]])
+    }
+
+    @Test func backendScheduleStaleGameReconciliationClientPostsExpectedEndpoint() async throws {
+        let session = makeStubSession()
+        let client = BackendScheduleStaleGameReconciliationClient(baseURL: URL(string: "http://192.168.45.140:8088")!, session: session)
+        URLProtocolStub.testResponses = [
+            "http://192.168.45.140:8088/api/v1/games/reconcile-stale": StubResponse(
+                statusCode: 200,
+                data: Data(#"{"dates":["2026-03-12"],"processedDateCount":1,"failedCount":0,"summaries":[]}"#.utf8)
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        try await client.reconcileStaleGames(dates: ["2026-03-12"])
+        let request = try #require(URLProtocolStub.lastRequest)
+        let body = try #require(httpBodyData(from: request))
+        let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+
+        #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/games/reconcile-stale")
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
+        #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        #expect(payload?["dates"] as? [String] == ["2026-03-12"])
+    }
+
+    @Test func scheduleStaleReconciliationResolverPrefersConfiguredLANBackendURL() throws {
+        let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
+            backendEnvironmentValue: "http://192.168.45.140:8088",
+            backendBundleValue: "http://localhost:8088",
+            notificationEnvironmentValue: nil,
+            notificationBundleValue: nil
+        ))
+
+        #expect(resolved.source == "environment")
+        #expect(resolved.url.absoluteString == "http://192.168.45.140:8088")
+    }
+
+    @Test func scheduleStaleReconciliationResolverDerivesBackendURLFromNotificationEndpoint() throws {
+        let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
+            backendEnvironmentValue: nil,
+            backendBundleValue: "http://localhost:8088",
+            notificationEnvironmentValue: "http://192.168.45.140:8088/devices/register",
+            notificationBundleValue: nil
+        ))
+
+        #expect(resolved.source == "notificationEnvironment")
+        #expect(resolved.url.absoluteString == "http://192.168.45.140:8088/")
+    }
+
+    @Test func scheduleStaleReconciliationResolverUsesLocalhostFallbackOnlyWithoutConfiguration() throws {
+        let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
+            backendEnvironmentValue: nil,
+            backendBundleValue: nil,
+            notificationEnvironmentValue: nil,
+            notificationBundleValue: nil
+        ))
+
+        #expect(resolved.source == "developmentFallback")
+        #expect(resolved.url.absoluteString == "http://localhost:8088")
+    }
+
     @Test func scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
         let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
@@ -9496,6 +10922,10 @@ private actor RecordingNotificationRegistrationClient: NotificationRegistrationC
     func favoriteTeamIDs() -> [String?] {
         payloads.map(\.favoriteTeamID)
     }
+
+    func recordedPayloads() -> [NotificationRegistrationPayload] {
+        payloads
+    }
 }
 
 private func notificationRegistrationSettings(
@@ -9629,7 +11059,10 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
 
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host else { return false }
-        return host == "example.com" || host == "www.koreabaseball.com" || host == "localhost"
+        return host == "example.com"
+            || host == "www.koreabaseball.com"
+            || host == "localhost"
+            || host == "192.168.45.140"
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
@@ -9824,6 +11257,76 @@ private actor FetchCounter {
     var value: Int { count }
 }
 
+private actor ScheduleMonthFetchSequence {
+    private let responses: [[GameDetail]]
+    private var index = 0
+
+    init(responses: [[GameDetail]]) {
+        self.responses = responses
+    }
+
+    func next() -> [GameDetail] {
+        defer { index += 1 }
+        guard responses.isEmpty == false else { return [] }
+        return responses[min(index, responses.count - 1)]
+    }
+
+    var count: Int { index }
+}
+
+private actor ScheduleDateFetchRecorder {
+    private let responses: [String: [GameDetail]]
+    private let delayNanoseconds: UInt64
+    private(set) var calls: [(dayKey: String, bypassingCache: Bool)] = []
+
+    init(responses: [String: [GameDetail]], delayNanoseconds: UInt64 = 0) {
+        self.responses = responses
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func fetch(date: Date, bypassingCache: Bool) async -> [GameDetail] {
+        let dayKey = scheduleTestDayKey(for: date)
+        calls.append((dayKey, bypassingCache))
+        if delayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return responses[dayKey] ?? []
+    }
+}
+
+private func scheduleTestDayKey(for date: Date) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+    let components = calendar.dateComponents([.year, .month, .day], from: date)
+    return String(
+        format: "%04d-%02d-%02d",
+        components.year ?? 1970,
+        components.month ?? 1,
+        components.day ?? 1
+    )
+}
+
+private actor RecordingScheduleStaleGameReconciliationClient: ScheduleStaleGameReconciliationClient {
+    private(set) var calls: [[String]] = []
+    private let delayNanoseconds: UInt64
+    private let error: Error?
+
+    init(delayNanoseconds: UInt64 = 0, error: Error? = nil) {
+        self.delayNanoseconds = delayNanoseconds
+        self.error = error
+    }
+
+    func reconcileStaleGames(dates: [String]) async throws {
+        calls.append(dates)
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        if let error {
+            throw error
+        }
+    }
+}
+
 @MainActor
 private final class TestLiveActivityController: FavoriteTeamLiveActivityControlling {
     let isSupported: Bool
@@ -9870,6 +11373,7 @@ private struct StubRepository: KBORepository {
     var fetchScheduleHandler: @Sendable (Date) async throws -> [GameDetail] = { _ in
         stubGames()
     }
+    var fetchScheduleBypassingCacheHandler: (@Sendable (Date, Bool) async throws -> [GameDetail])?
     var fetchStandingsHandler: @Sendable () async throws -> [TeamStandingsSnapshot] = {
         []
     }
@@ -9880,6 +11384,7 @@ private struct StubRepository: KBORepository {
         fetchNotifications: @escaping @Sendable () async throws -> [NotificationItem] = { stubNotifications() },
         fetchMonthlySchedule: @escaping @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail] = { _ in stubGames() },
         fetchSchedule: @escaping @Sendable (Date) async throws -> [GameDetail] = { _ in stubGames() },
+        fetchScheduleBypassingCache: (@Sendable (Date, Bool) async throws -> [GameDetail])? = nil,
         fetchStandings: @escaping @Sendable () async throws -> [TeamStandingsSnapshot] = { [] }
     ) {
         self.fetchBootstrapDataHandler = fetchBootstrapData
@@ -9887,6 +11392,7 @@ private struct StubRepository: KBORepository {
         self.fetchNotificationsHandler = fetchNotifications
         self.fetchMonthlyScheduleHandler = fetchMonthlySchedule
         self.fetchScheduleHandler = fetchSchedule
+        self.fetchScheduleBypassingCacheHandler = fetchScheduleBypassingCache
         self.fetchStandingsHandler = fetchStandings
     }
 
@@ -9911,7 +11417,10 @@ private struct StubRepository: KBORepository {
     }
 
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
-        try await fetchScheduleHandler(date)
+        if let fetchScheduleBypassingCacheHandler {
+            return try await fetchScheduleBypassingCacheHandler(date, bypassingCache)
+        }
+        return try await fetchScheduleHandler(date)
     }
 
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
@@ -9984,22 +11493,53 @@ private func isoDate(_ rawValue: String) -> Date {
     ISO8601DateFormatter().date(from: rawValue)!
 }
 
-private func previousKBOWeekStart(referenceDate: Date = Date()) -> Date {
+private func homeFallbackTestCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
     calendar.firstWeekday = 2
     calendar.minimumDaysInFirstWeek = 1
+    return calendar
+}
+
+private func previousKBOWeekStart(referenceDate: Date = Date()) -> Date {
+    let calendar = homeFallbackTestCalendar()
     let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: referenceDate)!.start
     return calendar.date(byAdding: .day, value: -7, to: currentWeekStart)!
 }
 
 private func dateInKBOWeek(start weekStart: Date, dayOffset: Int) -> Date {
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    let calendar = homeFallbackTestCalendar()
     return calendar.date(
         byAdding: DateComponents(day: dayOffset, hour: 18, minute: 30),
         to: weekStart
     )!
+}
+
+private func makeStaleScheduleFixture(
+    status: GameStatus,
+    day: String,
+    id: UUID = UUID(uuidString: "99000000-0000-0000-0000-000000000001")!
+) throws -> (game: GameDetail, today: Date, calendar: Calendar) {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    let teams = MockKBOData.makeBootstrap().teams
+    let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+    let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+    let game = makeGameDetail(
+        id: id,
+        scheduledStart: ISO8601DateFormatter().date(from: "\(day)T18:30:00+09:00")!,
+        venue: "잠실",
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: status == .final ? 4 : nil,
+        homeScore: status == .final ? 2 : nil,
+        status: status
+    )
+    return (
+        game: game,
+        today: ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!,
+        calendar: calendar
+    )
 }
 
 private func makeGameDetail(
@@ -10050,6 +11590,43 @@ private func makeGameDetail(
         homeStartingPitcherName: homeStartingPitcherName,
         currentPitcherName: currentPitcherName,
         currentBatterName: currentBatterName
+	    )
+}
+
+private func attendanceFixtureTeams() throws -> (
+    lg: Team,
+    doosan: Team,
+    samsung: Team,
+    lotte: Team
+) {
+    let teams = MockKBOData.makeBootstrap().teams
+    return (
+        lg: try #require(teams.first(where: { $0.id == "lg" })),
+        doosan: try #require(teams.first(where: { $0.id == "doosan" })),
+        samsung: try #require(teams.first(where: { $0.id == "samsung" })),
+        lotte: try #require(teams.first(where: { $0.id == "lotte" }))
+    )
+}
+
+private func makeAttendanceFixtureGame(
+    index: Int,
+    venue: String = "잠실",
+    awayTeam: Team,
+    homeTeam: Team,
+    awayScore: Int,
+    homeScore: Int
+) -> GameDetail {
+    makeGameDetail(
+        id: UUID(uuidString: String(format: "95000000-0000-0000-0000-%012d", index))!,
+        scheduledStart: isoDate(String(format: "2026-04-%02dT18:30:00+09:00", index)),
+        venue: venue,
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: awayScore,
+        homeScore: homeScore,
+        status: .final,
+        seasonClassification: .regularSeason,
+        note: "provider_game_id=202604\(String(format: "%02d", index))\(awayTeam.markText)\(homeTeam.markText)0"
     )
 }
 
@@ -10080,6 +11657,32 @@ private func makeBaseRunnerDisplayGame(
         outs: 0,
         currentPitcherName: "보쉴리",
         currentBatterName: "손성빈"
+    )
+}
+
+private func makeBaseRunnerLineupSections(
+    away: [(order: Int, name: String)],
+    home: [(order: Int, name: String)]
+) -> [GameCenterBattingSection] {
+    [
+        GameCenterBattingSection(lines: away.map(makeBaseRunnerLineupLine), totals: nil),
+        GameCenterBattingSection(lines: home.map(makeBaseRunnerLineupLine), totals: nil)
+    ]
+}
+
+private func makeBaseRunnerLineupLine(order: Int, name: String) -> GameCenterBattingLine {
+    GameCenterBattingLine(
+        battingOrder: "\(order)번",
+        position: "타자",
+        name: name,
+        atBats: nil,
+        runs: nil,
+        hits: nil,
+        runsBattedIn: nil,
+        homeRuns: nil,
+        walks: nil,
+        strikeouts: nil,
+        average: nil
     )
 }
 
