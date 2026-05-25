@@ -55,15 +55,15 @@ struct SettingsView: View {
         }
 
         Section("알림 설정") {
-            Toggle("경기 시작 알림", isOn: bindableAppModel.settings.notificationPreferences.gameStartEnabled)
-            Toggle("점수 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.scoreChangeEnabled)
-            Toggle("리드 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.leadChangeEnabled)
-            Toggle("경기 종료 알림", isOn: bindableAppModel.settings.notificationPreferences.gameEndEnabled)
-            Toggle("출루 알림", isOn: bindableAppModel.settings.notificationPreferences.onBaseEnabled)
-            Toggle("이닝 교체 알림", isOn: bindableAppModel.settings.notificationPreferences.inningChangeEnabled)
-            Toggle("응원팀 내용만 알림", isOn: bindableAppModel.settings.notificationPreferences.favoriteTeamOnlyEnabled)
-            Toggle("지고 있을 때 알림 끄기", isOn: bindableAppModel.settings.notificationPreferences.muteWhenLosingEnabled)
-            Toggle("우천/취소", isOn: bindableAppModel.settings.notificationPreferences.rainDelay)
+            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
+            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
+            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
+            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
+            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
+            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
+            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
+            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
+            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
 
             LabeledContent("권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
 //            LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
@@ -109,23 +109,23 @@ struct SettingsView: View {
         }
 
         Section {
-            Toggle("경기 시작 알림", isOn: bindableAppModel.settings.notificationPreferences.gameStartEnabled)
+            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("점수 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.scoreChangeEnabled)
+            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("리드 변경 알림", isOn: bindableAppModel.settings.notificationPreferences.leadChangeEnabled)
+            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("경기 종료 알림", isOn: bindableAppModel.settings.notificationPreferences.gameEndEnabled)
+            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("출루 알림", isOn: bindableAppModel.settings.notificationPreferences.onBaseEnabled)
+            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("이닝 교체 알림", isOn: bindableAppModel.settings.notificationPreferences.inningChangeEnabled)
+            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("응원팀 내용만 알림", isOn: bindableAppModel.settings.notificationPreferences.favoriteTeamOnlyEnabled)
+            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("지고 있을 때 알림 끄기", isOn: bindableAppModel.settings.notificationPreferences.muteWhenLosingEnabled)
+            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
                 .settingsRowStyle(palette)
-            Toggle("우천/취소", isOn: bindableAppModel.settings.notificationPreferences.rainDelay)
+            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
                 .settingsRowStyle(palette)
 
             InfoRow(title: "권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
@@ -183,6 +183,19 @@ struct SettingsView: View {
                 forTeamID: favoriteTeamID,
                 fallback: TeamIdentity.catalog[favoriteTeamID]?.shortLabel ?? favoriteTeamID
             )
+    }
+
+    private func notificationPreferenceBinding(
+        _ keyPath: WritableKeyPath<NotificationPreferences, Bool>,
+        appModel: AppModel
+    ) -> Binding<Bool> {
+        Binding {
+            appModel.settings.notificationPreferences[keyPath: keyPath]
+        } set: { newValue in
+            var settings = appModel.settings
+            settings.notificationPreferences[keyPath: keyPath] = newValue
+            appModel.settings = settings
+        }
     }
 }
 

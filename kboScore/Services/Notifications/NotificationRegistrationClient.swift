@@ -86,7 +86,7 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
 
         #if DEBUG
         print("[NotificationPipeline] registration URL=\(endpointURL.absoluteString)")
-        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized)")
+        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
         #endif
 
         var request = URLRequest(url: endpointURL)

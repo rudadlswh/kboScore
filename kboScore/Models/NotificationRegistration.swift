@@ -168,6 +168,21 @@ struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     }
 }
 
+extension NotificationRegistrationPayload {
+    nonisolated var debugBooleanDescription: String {
+        [
+            "gameStartEnabled=\(gameStartEnabled)",
+            "scoreChangeEnabled=\(scoreChangeEnabled)",
+            "leadChangeEnabled=\(leadChangeEnabled)",
+            "gameEndEnabled=\(gameEndEnabled)",
+            "onBaseEnabled=\(onBaseEnabled)",
+            "inningChangeEnabled=\(inningChangeEnabled)",
+            "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+        ].joined(separator: " ")
+    }
+}
+
 struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
     let deviceToken: String
     let environment: String
@@ -263,12 +278,12 @@ struct NotificationRegistrationDeduplicationState: Sendable {
     private(set) var inFlightRegistrationKeys: Set<NotificationRegistrationKey> = []
     private(set) var lastSuccessfulRegistrationKey: NotificationRegistrationKey?
 
-    mutating func start(_ key: NotificationRegistrationKey) -> NotificationRegistrationStartDecision {
+    mutating func start(_ key: NotificationRegistrationKey, force: Bool = false) -> NotificationRegistrationStartDecision {
         if inFlightRegistrationKeys.contains(key) {
             return .skipInFlight
         }
 
-        if lastSuccessfulRegistrationKey == key {
+        if !force, lastSuccessfulRegistrationKey == key {
             return .skipAlreadyRegistered
         }
 
