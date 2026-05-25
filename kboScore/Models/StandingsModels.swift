@@ -260,6 +260,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
     let precomputedGamesBehind: Double?
     let precomputedStreakText: String?
+    let preGameRank: Int?
 
     nonisolated init(
         team: Team,
@@ -279,7 +280,8 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         postseasonQualificationStatus: PostseasonQualificationStatus? = nil,
         postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason? = nil,
         precomputedGamesBehind: Double? = nil,
-        precomputedStreakText: String? = nil
+        precomputedStreakText: String? = nil,
+        preGameRank: Int? = nil
     ) {
         self.team = team
         self.rank = rank
@@ -299,6 +301,31 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.postseasonProbabilityUnavailableReason = postseasonProbabilityUnavailableReason
         self.precomputedGamesBehind = precomputedGamesBehind
         self.precomputedStreakText = precomputedStreakText
+        self.preGameRank = preGameRank
+    }
+
+    nonisolated func withPreGameRank(_ preGameRank: Int?) -> TeamStandingsSnapshot {
+        TeamStandingsSnapshot(
+            team: team,
+            rank: rank,
+            wins: wins,
+            losses: losses,
+            ties: ties,
+            runsScored: runsScored,
+            runsAllowed: runsAllowed,
+            remainingRegularSeasonGames: remainingRegularSeasonGames,
+            recentResults: recentResults,
+            unknownClassificationGames: unknownClassificationGames,
+            virtualUnscheduledRemainingGames: virtualUnscheduledRemainingGames,
+            rankingResolution: rankingResolution,
+            rankingResolutionPosition: rankingResolutionPosition,
+            postseasonQualificationProbability: postseasonQualificationProbability,
+            postseasonQualificationStatus: postseasonQualificationStatus,
+            postseasonProbabilityUnavailableReason: postseasonProbabilityUnavailableReason,
+            precomputedGamesBehind: precomputedGamesBehind,
+            precomputedStreakText: precomputedStreakText,
+            preGameRank: preGameRank
+        )
     }
 
     var id: String { team.id }

@@ -98,7 +98,7 @@ private struct StandingsTableMetrics {
     var horizontalPadding: CGFloat { isCompact ? 6 : 7 }
     var spacing: CGFloat { 4 }
     var teamColumnWidth: CGFloat { isCompact ? 76 : 128 }
-    var rankWidth: CGFloat { isCompact ? 22 : 28 }
+    var rankWidth: CGFloat { isCompact ? 30 : 36 }
     var logoSize: CGFloat { isCompact ? 22 : 30 }
     var gamesWidth: CGFloat { isCompact ? 24 : 26 }
     var countWidth: CGFloat { isCompact ? 19 : 20 }
@@ -179,11 +179,20 @@ private struct StandingsRowView: View {
 
     private var teamCell: some View {
         HStack(spacing: metrics.isCompact ? 4 : 6) {
-            Text("\(snapshot.rank)")
-                .font((isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy)))
-                .monospacedDigit()
-                .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
-                .frame(width: metrics.rankWidth, alignment: .trailing)
+            HStack(spacing: 2) {
+                Text("\(snapshot.rank)")
+                    .font((isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy)))
+                    .monospacedDigit()
+
+                if let indicator = rankMovement.indicator {
+                    Text(indicator)
+                        .font(.caption2.weight(.black))
+                }
+            }
+            .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .frame(width: metrics.rankWidth, alignment: .trailing)
 
             if metrics.isCompact == false {
                 TeamMarkView(team: snapshot.team, size: metrics.logoSize)
@@ -241,8 +250,13 @@ private struct StandingsRowView: View {
         isFavorite ? Color.white.opacity(0.28) : Color.white.opacity(0.08)
     }
 
+    private var rankMovement: RankingMovement {
+        StandingsRankMovementResolver.movement(currentRank: snapshot.rank, preGameRank: snapshot.preGameRank)
+    }
+
     private var accessibilityLabel: String {
-        "\(snapshot.rank)위 \(identity.standingsDisplayName), \(snapshot.wins)승 \(snapshot.losses)패 \(snapshot.ties)무, 승률 \(snapshot.winPercentageText), 게임차 \(snapshot.gamesBehindText(leader: leaderSnapshot)), 연속 \(snapshot.currentStreakText)"
+        let movementText = rankMovement.accessibilityText.map { ", \($0)" } ?? ""
+        return "\(snapshot.rank)위 \(identity.standingsDisplayName)\(movementText), \(snapshot.wins)승 \(snapshot.losses)패 \(snapshot.ties)무, 승률 \(snapshot.winPercentageText), 게임차 \(snapshot.gamesBehindText(leader: leaderSnapshot)), 연속 \(snapshot.currentStreakText)"
     }
 }
 
