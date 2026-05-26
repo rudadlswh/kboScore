@@ -606,7 +606,12 @@ enum KBODataMapper {
             return .cancelled
         }
 
-        if normalized.contains("rain") || normalized.contains("우천") || normalized.contains("delay") || normalized.contains("중단") {
+        if normalized.contains("rain") ||
+            normalized.contains("우천") ||
+            normalized.contains("delay") ||
+            normalized.contains("중단") ||
+            normalized.contains("suspend") ||
+            normalized.contains("interrupted") {
             return .rainDelay
         }
 

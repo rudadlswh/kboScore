@@ -3988,6 +3988,7 @@ struct kboScoreTests {
         #expect(KBODataMapper.mapGameStatus(code: "finished", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: "completed", text: nil) == .final)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "우천 중단") == .rainDelay)
+        #expect(KBODataMapper.mapGameStatus(code: "suspended", text: nil) == .rainDelay)
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "경기 종료") == .final)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: "준비중") == .upcoming)
         #expect(KBODataMapper.mapGameStatus(code: "UNKNOWN", text: nil, inningText: "1회초") == .live)
@@ -5970,6 +5971,107 @@ struct kboScoreTests {
         #expect(detail?.summary.baseRunners?.third == "김민수")
     }
 
+    @Test func officialGameCenterClientMapsLiveScoreboardLineScore() async throws {
+        let inningTable = #"""
+        {
+          "headers": [
+            { "row": [
+              { "Text": "1" }, { "Text": "2" }, { "Text": "3" }, { "Text": "4" }, { "Text": "5" }, { "Text": "6" },
+              { "Text": "7" }, { "Text": "8" }, { "Text": "9" }, { "Text": "10" }, { "Text": "11" }, { "Text": "12" }
+            ] }
+          ],
+          "rows": [
+            { "row": [
+              { "Text": "0" }, { "Text": "1" }, { "Text": "0" }, { "Text": "2" }, { "Text": "-" }, { "Text": "-" },
+              { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }
+            ] },
+            { "row": [
+              { "Text": "1" }, { "Text": "0" }, { "Text": "0" }, { "Text": "1" }, { "Text": "-" }, { "Text": "-" },
+              { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }, { "Text": "-" }
+            ] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let totalsTable = #"""
+        {
+          "headers": [],
+          "rows": [
+            { "row": [{ "Text": "3" }, { "Text": "7" }, { "Text": "0" }, { "Text": "4" }] },
+            { "row": [{ "Text": "2" }, { "Text": "5" }, { "Text": "1" }, { "Text": "2" }] }
+          ],
+          "tfoot": []
+        }
+        """#
+        let officialGameList = """
+        {
+          "game": [
+            {
+              "LE_ID": 1,
+              "SR_ID": 0,
+              "SEASON_ID": 2026,
+              "G_DT": "20260328",
+              "G_DT_TXT": "2026.03.28(토)",
+              "G_ID": "20260328KTLG0",
+              "G_TM": "14:00",
+              "S_NM": "잠실",
+              "AWAY_ID": "KT",
+              "HOME_ID": "LG",
+              "AWAY_NM": "KT",
+              "HOME_NM": "LG",
+              "GAME_STATE_SC": "2",
+              "CANCEL_SC_NM": "정상경기",
+              "GAME_INN_NO": 4,
+              "GAME_TB_SC_NM": "말",
+              "T_SCORE_CN": "3",
+              "B_SCORE_CN": "2"
+            }
+          ],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let scoreboardPayload = """
+        {
+          "S_NM": "잠실",
+          "START_TM": "14:00",
+          "table2": \(try jsonStringLiteral(inningTable)),
+          "table3": \(try jsonStringLiteral(totalsTable))
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList),
+            "https://www.koreabaseball.com/ws/Schedule.asmx/GetScoreBoardScroll": StubResponse(statusCode: 200, data: scoreboardPayload)
+        ]
+        defer { URLProtocolStub.testResponses = [:] }
+
+        let game = makeGameDetail(
+            id: UUID(uuidString: "fefefefe-fefe-fefe-fefe-fefefefefefe")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT"),
+            homeTeam: Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
+            awayScore: 3,
+            homeScore: 2,
+            status: .live,
+            seasonClassification: .regularSeason,
+            providerGameID: "20260328KTLG0"
+        )
+
+        let detail = try await client.fetchDetail(for: game, includeRecordFallback: false)
+
+        #expect(detail?.lineScore?.inningLabels.count == 12)
+        #expect(detail?.lineScore?.awayInnings.prefix(4) == ["0", "1", "0", "2"])
+        #expect(detail?.lineScore?.homeTotals.runs == "2")
+        #expect(detail?.lineScore?.awayTotals.hits == "7")
+        #expect(detail?.lineScore?.homeTotals.walks == "2")
+    }
+
     @Test func officialGameCenterClientFallsBackToLineupAnalysisForLiveBaseRunnerNames() async throws {
         let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
         let awayOrderTable = #"""
@@ -7480,6 +7582,83 @@ struct kboScoreTests {
         await model.waitForOfficialFallbackLoadForTesting()
 
         #expect(await officialFallback.fetchCount == 0)
+    }
+
+    @Test func liveGameLoadsOfficialRecordFallbackWithoutBackendBoxscore() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: boxscoreState),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+        let game = try makeLiveBoxscoreDetailGame()
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(await boxscoreState.fetchCount == 0)
+        #expect(await officialFallback.fetchCount == 1)
+        #expect(model.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
+    }
+
+    @Test func liveLineScoreDoesNotRequireBackendBoxscore() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let lineScore = sampleGameCenterLineScore()
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: boxscoreState),
+            fetchDetail: { game in
+                sampleGameCenterDetailPayload(game: game, lineScore: lineScore)
+            },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+
+        await model.load(for: try makeLiveBoxscoreDetailGame())
+
+        #expect(await boxscoreState.fetchCount == 0)
+        #expect(model.detail?.lineScore?.awayTotals.runs == "3")
+        #expect(model.cachedLineScore?.homeTotals.walks == "2")
+        #expect(model.boxscore == nil)
+    }
+
+    @Test func repeatedLiveDetailLoadsDedupeConcurrentOfficialFetch() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let fetcher = RecordingDetailPayloadFetcher(
+            payload: sampleGameCenterDetailPayload(game: try makeLiveBoxscoreDetailGame(), lineScore: sampleGameCenterLineScore()),
+            delayNanoseconds: 250_000_000
+        )
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in try await fetcher.fetch(game: game) },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+        let game = try makeLiveBoxscoreDetailGame()
+
+        async let firstLoad: Void = model.load(for: game, forceRefresh: true)
+        async let secondLoad: Void = model.load(for: game, forceRefresh: true)
+        _ = await (firstLoad, secondLoad)
+
+        #expect(await fetcher.fetchCount == 1)
+        #expect(model.cachedLineScore?.awayTotals.hits == "7")
+    }
+
+    @Test func gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForLiveLikeGames() throws {
+        let live = GameDetailViewModel(gameIdentity: "live", initialGame: try makeLiveBoxscoreDetailGame(status: .live))
+        let rainDelay = GameDetailViewModel(gameIdentity: "rain", initialGame: try makeLiveBoxscoreDetailGame(status: .rainDelay))
+        let final = GameDetailViewModel(gameIdentity: "final", initialGame: try makeLiveBoxscoreDetailGame(status: .final))
+        let cancelled = GameDetailViewModel(gameIdentity: "cancelled", initialGame: try makeLiveBoxscoreDetailGame(status: .cancelled))
+
+        #expect(live.shouldAutoRefreshLiveGame)
+        #expect(live.liveRefreshTaskID.hasPrefix("live:"))
+        #expect(rainDelay.shouldAutoRefreshLiveGame)
+        #expect(rainDelay.liveRefreshTaskID.hasPrefix("live:"))
+        #expect(final.shouldAutoRefreshLiveGame == false)
+        #expect(final.liveRefreshTaskID.hasPrefix("idle:"))
+        #expect(cancelled.shouldAutoRefreshLiveGame == false)
+        #expect(cancelled.liveRefreshTaskID.hasPrefix("idle:"))
     }
 
     @Test func failedBoxscoreFetchDoesNotFailDetailLoad() async throws {
@@ -10883,6 +11062,25 @@ private actor RecordingOfficialFallback {
     }
 }
 
+private actor RecordingDetailPayloadFetcher {
+    private let payload: GameCenterDetailPayload?
+    private let delayNanoseconds: UInt64
+    private(set) var fetchCount = 0
+
+    init(payload: GameCenterDetailPayload?, delayNanoseconds: UInt64 = 0) {
+        self.payload = payload
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func fetch(game: GameDetail) async throws -> GameCenterDetailPayload? {
+        fetchCount += 1
+        if delayNanoseconds > 0 {
+            try await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+        return payload
+    }
+}
+
 private struct RecordingBoxscoreClient: GameBoxscoreFetching {
     let state: RecordingBoxscoreState
     var delayNanoseconds: UInt64 = 0
@@ -11061,6 +11259,28 @@ private func makeBoxscoreDetailGame() throws -> GameDetail {
     )
 }
 
+private func makeLiveBoxscoreDetailGame(status: GameStatus = .live) throws -> GameDetail {
+    let teams = MockKBOData.makeBootstrap().teams
+    let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
+    let ssg = try #require(teams.first(where: { $0.id == "ssg" }))
+    return makeGameDetail(
+        id: UUID(uuidString: "11111111-2222-3333-4444-555555555556")!,
+        scheduledStart: isoDate("2026-05-10T14:00:00+09:00"),
+        venue: "잠실",
+        awayTeam: doosan,
+        homeTeam: ssg,
+        awayScore: status == .upcoming || status == .cancelled ? nil : 3,
+        homeScore: status == .upcoming || status == .cancelled ? nil : 1,
+        status: status,
+        note: "public_game_id=20260510-DOO-SSG provider_game_id=20260510SKOB0",
+        providerGameID: "20260510SKOB0",
+        bases: RunnerState(first: true, second: false, third: false),
+        balls: 1,
+        strikes: 2,
+        outs: 1
+    )
+}
+
 private func makeIdentityLookupGame(
     id: UUID,
     publicGameID: String,
@@ -11180,7 +11400,11 @@ private func supabaseGameDate(from publicGameID: String) -> String {
     return "\(year)-\(month)-\(day)"
 }
 
-private func sampleGameCenterDetailPayload(game: GameDetail) -> GameCenterDetailPayload {
+private func sampleGameCenterDetailPayload(
+    game: GameDetail,
+    lineScore: GameCenterLineScore? = nil,
+    review: GameCenterReview? = nil
+) -> GameCenterDetailPayload {
     GameCenterDetailPayload(
         summary: GameCenterSummary(
             officialGameID: game.officialGameCenterID ?? "20260510SKOB0",
@@ -11204,9 +11428,19 @@ private func sampleGameCenterDetailPayload(game: GameDetail) -> GameCenterDetail
             losingPitcher: nil,
             savePitcher: nil
         ),
-        lineScore: nil,
-        review: nil,
+        lineScore: lineScore,
+        review: review,
         preview: nil
+    )
+}
+
+private func sampleGameCenterLineScore() -> GameCenterLineScore {
+    GameCenterLineScore(
+        inningLabels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+        awayInnings: ["0", "1", "0", "2", "-", "-", "-", "-", "-", "-", "-", "-"],
+        homeInnings: ["1", "0", "0", "0", "-", "-", "-", "-", "-", "-", "-", "-"],
+        awayTotals: GameCenterTeamLineTotals(runs: "3", hits: "7", errors: "0", walks: "4"),
+        homeTotals: GameCenterTeamLineTotals(runs: "1", hits: "5", errors: "1", walks: "2")
     )
 }
 
