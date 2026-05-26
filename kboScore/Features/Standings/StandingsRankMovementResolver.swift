@@ -8,8 +8,8 @@
 import Foundation
 
 enum RankingMovement: Equatable, Sendable {
-    case up
-    case down
+    case up(Int)
+    case down(Int)
     case unchanged
 
     var indicator: String? {
@@ -23,12 +23,23 @@ enum RankingMovement: Equatable, Sendable {
         }
     }
 
+    var displayText: String {
+        switch self {
+        case .up(let count):
+            "▲\(count)"
+        case .down(let count):
+            "▼\(count)"
+        case .unchanged:
+            "-"
+        }
+    }
+
     var accessibilityText: String? {
         switch self {
-        case .up:
-            "순위 상승"
-        case .down:
-            "순위 하락"
+        case .up(let count):
+            "순위 \(count)단계 상승"
+        case .down(let count):
+            "순위 \(count)단계 하락"
         case .unchanged:
             nil
         }
@@ -42,10 +53,10 @@ enum StandingsRankMovementResolver {
         }
 
         if currentRank < preGameRank {
-            return .up
+            return .up(preGameRank - currentRank)
         }
         if currentRank > preGameRank {
-            return .down
+            return .down(currentRank - preGameRank)
         }
         return .unchanged
     }
@@ -53,7 +64,6 @@ enum StandingsRankMovementResolver {
     static func preGameRanks(
         teams: [Team],
         games: [GameDetail],
-        currentDate: Date,
         previousRankProvider: (Team) -> Int?
     ) -> [String: Int] {
         let regularSeasonGames = games.filter(\.isRegularSeason)
@@ -61,12 +71,19 @@ enum StandingsRankMovementResolver {
             return [:]
         }
 
-        let startOfToday = kstCalendar.startOfDay(for: currentDate)
-        let completedGamesBeforeToday = regularSeasonGames
-            .filter(\.hasCompleteFinalScore)
-            .filter { $0.scheduledStart < startOfToday }
+        let completedGames = regularSeasonGames.filter(\.hasCompleteFinalScore)
+        guard let latestCompletedDay = latestCompletedGameDay(
+            games: completedGames,
+            calendar: kstCalendar
+        ) else {
+            return [:]
+        }
 
-        guard completedGamesBeforeToday.isEmpty == false else {
+        let completedGamesBeforeLatestDay = completedGames.filter {
+            kstCalendar.startOfDay(for: $0.scheduledStart) < latestCompletedDay
+        }
+
+        guard completedGamesBeforeLatestDay.isEmpty == false else {
             return [:]
         }
 
@@ -74,7 +91,7 @@ enum StandingsRankMovementResolver {
             .map { team in
                 StandingsCalculator.makeSnapshot(
                     for: team,
-                    completedGames: completedGamesBeforeToday.filter { $0.involves(teamID: team.id) },
+                    completedGames: completedGamesBeforeLatestDay.filter { $0.involves(teamID: team.id) },
                     seasonGames: regularSeasonGames
                 )
             }
@@ -85,6 +102,13 @@ enum StandingsRankMovementResolver {
         return Dictionary(uniqueKeysWithValues: rankedSnapshots.enumerated().map { index, snapshot in
             (snapshot.team.id, index + 1)
         })
+    }
+
+    static func latestCompletedGameDay(games: [GameDetail], calendar: Calendar) -> Date? {
+        games
+            .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+            .map { calendar.startOfDay(for: $0.scheduledStart) }
+            .max()
     }
 
     private static func hasUsableSeasonSchedule(_ games: [GameDetail], teams: [Team]) -> Bool {

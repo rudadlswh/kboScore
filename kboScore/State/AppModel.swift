@@ -1030,7 +1030,6 @@ final class AppModel {
         StandingsRankMovementResolver.preGameRanks(
             teams: teams,
             games: standingsSourceGamesBySeason[season] ?? games,
-            currentDate: currentDateProvider(),
             previousRankProvider: previousRegularSeasonRank
         )
     }

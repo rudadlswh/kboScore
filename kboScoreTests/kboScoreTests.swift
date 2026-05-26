@@ -3205,15 +3205,19 @@ struct kboScoreTests {
     @Test func standingsRankMovementMovedUpShowsUpIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: 5)
 
-        #expect(movement == .up)
+        #expect(movement == .up(1))
         #expect(movement.indicator == "▲")
+        #expect(movement.displayText == "▲1")
+        #expect(movement.accessibilityText == "순위 1단계 상승")
     }
 
     @Test func standingsRankMovementMovedDownShowsDownIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 5, preGameRank: 3)
 
-        #expect(movement == .down)
+        #expect(movement == .down(2))
         #expect(movement.indicator == "▼")
+        #expect(movement.displayText == "▼2")
+        #expect(movement.accessibilityText == "순위 2단계 하락")
     }
 
     @Test func standingsRankMovementUnchangedShowsNoIndicator() {
@@ -3221,6 +3225,7 @@ struct kboScoreTests {
 
         #expect(movement == .unchanged)
         #expect(movement.indicator == nil)
+        #expect(movement.displayText == "-")
     }
 
     @Test func standingsRankMovementMissingPreGameRankShowsNoIndicator() {
@@ -3228,6 +3233,7 @@ struct kboScoreTests {
 
         #expect(movement == .unchanged)
         #expect(movement.indicator == nil)
+        #expect(movement.displayText == "-")
     }
 
     @Test func standingsRankMovementMissingCurrentRankShowsNoIndicator() {
@@ -3235,6 +3241,199 @@ struct kboScoreTests {
 
         #expect(movement == .unchanged)
         #expect(movement.indicator == nil)
+    }
+
+    @Test func standingsSnapshotCarriesPreGameRankForDisplayedMovement() throws {
+        let team = try #require(MockKBOData.makeBootstrap().teams.first(where: { $0.id == "lg" }))
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 4,
+            wins: 10,
+            losses: 8,
+            ties: 1,
+            remainingRegularSeasonGames: 125,
+            recentResults: [],
+            preGameRank: 6
+        )
+
+        #expect(snapshot.preGameRank == 6)
+        #expect(StandingsRankMovementResolver.movement(currentRank: snapshot.rank, preGameRank: snapshot.preGameRank).displayText == "▲2")
+    }
+
+    @Test func standingsRankMovementUsesLatestCompletedDateInsteadOfCurrentDate() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let calendar = standingsMovementCalendar()
+
+        let latestDay = try #require(StandingsRankMovementResolver.latestCompletedGameDay(
+            games: fixture.games,
+            calendar: calendar
+        ))
+
+        #expect(scheduleTestDayKey(for: latestDay) == "2026-05-24")
+    }
+
+    @Test func standingsPreGameRanksUseGamesBeforeLatestCompletedDate() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let ranks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        #expect(ranks[fixture.leader.id] == 1)
+        #expect(ranks[fixture.falling.id] == 2)
+        #expect(ranks[fixture.rising.id] == 3)
+    }
+
+    @Test func standingsPreGameRanksExcludeGamesOnLatestCompletedDate() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let ranks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        #expect(ranks[fixture.rising.id] == 3)
+        #expect(ranks[fixture.falling.id] == 2)
+    }
+
+    @Test func standingsRankMovementShowsUpAfterLatestCompletedDateBatch() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let currentRanks = currentStandingsRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRanks: fixture.previousRanks
+        )
+        let preGameRanks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        let movement = StandingsRankMovementResolver.movement(
+            currentRank: currentRanks[fixture.rising.id],
+            preGameRank: preGameRanks[fixture.rising.id]
+        )
+
+        #expect(currentRanks[fixture.rising.id] == 2)
+        #expect(preGameRanks[fixture.rising.id] == 3)
+        #expect(movement.displayText == "▲1")
+    }
+
+    @Test func standingsRankMovementShowsDownAfterLatestCompletedDateBatch() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let currentRanks = currentStandingsRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRanks: fixture.previousRanks
+        )
+        let preGameRanks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        let movement = StandingsRankMovementResolver.movement(
+            currentRank: currentRanks[fixture.falling.id],
+            preGameRank: preGameRanks[fixture.falling.id]
+        )
+
+        #expect(currentRanks[fixture.falling.id] == 3)
+        #expect(preGameRanks[fixture.falling.id] == 2)
+        #expect(movement.displayText == "▼1")
+    }
+
+    @Test func standingsRankMovementShowsUnchangedWhenRankIsSame() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let currentRanks = currentStandingsRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRanks: fixture.previousRanks
+        )
+        let preGameRanks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        let movement = StandingsRankMovementResolver.movement(
+            currentRank: currentRanks[fixture.leader.id],
+            preGameRank: preGameRanks[fixture.leader.id]
+        )
+
+        #expect(movement.displayText == "-")
+    }
+
+    @Test func standingsRankMovementNoCompletedGamesReturnsNoPreGameRanks() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let upcomingOnly = fixture.games.map {
+            makeGameDetail(
+                id: $0.id,
+                scheduledStart: $0.scheduledStart,
+                venue: $0.venue,
+                awayTeam: $0.awayTeam,
+                homeTeam: $0.homeTeam,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .regularSeason
+            )
+        }
+
+        let ranks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: upcomingOnly,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+
+        #expect(ranks.isEmpty)
+    }
+
+    @Test func standingsRankMovementIgnoresCancelledAndNonFinalGamesForLatestCompletedDate() throws {
+        var fixture = try makeStandingsMovementFixture()
+        let cancelled = makeGameDetail(
+            id: UUID(uuidString: "97000000-0000-0000-0000-000000000099")!,
+            scheduledStart: isoDate("2026-05-25T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: fixture.leader,
+            homeTeam: fixture.rising,
+            awayScore: 0,
+            homeScore: 0,
+            status: .cancelled,
+            seasonClassification: .regularSeason
+        )
+        fixture.games.append(cancelled)
+
+        let latestDay = try #require(StandingsRankMovementResolver.latestCompletedGameDay(
+            games: fixture.games,
+            calendar: standingsMovementCalendar()
+        ))
+
+        #expect(scheduleTestDayKey(for: latestDay) == "2026-05-24")
+    }
+
+    @Test func standingsRankMovementPersistsWhenCurrentDateIsAfterLatestCompletedDate() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: fixture.teams,
+                games: fixture.games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-25T09:00:00+09:00") }
+        )
+
+        let risingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
+        let movement = StandingsRankMovementResolver.movement(
+            currentRank: risingSnapshot.rank,
+            preGameRank: risingSnapshot.preGameRank
+        )
+
+        #expect(risingSnapshot.rank == 2)
+        #expect(risingSnapshot.preGameRank == 3)
+        #expect(movement.displayText == "▲1")
     }
 
     @Test func standingsRecentResultsAreLimitedToFiveMostRecentFinalGames() async throws {
@@ -9331,6 +9530,145 @@ struct kboScoreTests {
         #expect(await reconciliationClient.calls == [["2026-03-12"]])
     }
 
+    @Test func scheduleMonthOverlayKeepsFullMonthWhenMergingTodayRefresh() async throws {
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let fullMonthGames = try makeScheduleMonthGames()
+        let todayRefreshGames = makeScheduleTodayRefreshGames(from: fullMonthGames)
+
+        let mergedGames = ScheduleMonthOverlayResolver.merge(
+            existingMonthGames: fullMonthGames,
+            incomingGames: todayRefreshGames,
+            monthKey: monthKey,
+            calendar: scheduleTestCalendar()
+        )
+
+        #expect(fullMonthGames.count == 135)
+        #expect(todayRefreshGames.count == 5)
+        #expect(mergedGames.count == 135)
+        #expect(Set(mergedGames.map(\.id)).count == 135)
+    }
+
+    @Test func scheduleMonthOverlayUpdatesMatchingGamesWithoutDroppingOtherDates() async throws {
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let fullMonthGames = try makeScheduleMonthGames()
+        let todayRefreshGames = makeScheduleTodayRefreshGames(from: fullMonthGames)
+        let untouchedGame = try #require(fullMonthGames.first {
+            scheduleTestDayKey(for: $0.scheduledStart) == "2026-05-01"
+        })
+        let updatedGameID = try #require(todayRefreshGames.first?.id)
+
+        let mergedGames = ScheduleMonthOverlayResolver.merge(
+            existingMonthGames: fullMonthGames,
+            incomingGames: todayRefreshGames,
+            monthKey: monthKey,
+            calendar: scheduleTestCalendar()
+        )
+
+        let updatedGame = try #require(mergedGames.first { $0.id == updatedGameID })
+        #expect(mergedGames.count == 135)
+        #expect(updatedGame.status == .final)
+        #expect(updatedGame.awayScore == 4)
+        #expect(updatedGame.homeScore == 2)
+        #expect(mergedGames.contains { $0.id == untouchedGame.id })
+    }
+
+    @Test func scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth() async throws {
+        let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
+        let mayKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let fullMonthGames = try makeScheduleMonthGames()
+        let todayRefreshGames = makeScheduleTodayRefreshGames(from: fullMonthGames)
+        let model = try makeSchedulePartialSyncModel(
+            fullMonthGames: fullMonthGames,
+            todayRefreshGames: todayRefreshGames,
+            currentDate: selectedDate
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = isoDate("2026-05-01T09:00:00+09:00")
+        viewModel.selectedDate = selectedDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await model.refreshScheduleDay(for: selectedDate)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(model.currentScheduleMonthSnapshot(for: mayKey).count == 5)
+        #expect(viewModel.monthGameCount == 135)
+    }
+
+    @Test func scheduleMonthCachePreservesMayWhenSwitchingAwayAndBackAfterPartialSync() async throws {
+        let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
+        let fullMayGames = try makeScheduleMonthGames()
+        let todayRefreshGames = makeScheduleTodayRefreshGames(from: fullMayGames)
+        let juneGames = try makeScheduleMonthGames(count: 20, year: 2026, month: 6)
+        let model = try makeSchedulePartialSyncModel(
+            fullMonthGames: fullMayGames,
+            todayRefreshGames: todayRefreshGames,
+            currentDate: selectedDate,
+            otherMonthGames: juneGames
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = isoDate("2026-05-01T09:00:00+09:00")
+        viewModel.selectedDate = selectedDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await model.refreshScheduleDay(for: selectedDate)
+        viewModel.changeDisplayedMonth(
+            to: isoDate("2026-06-01T09:00:00+09:00"),
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
+        await viewModel.loadDisplayedMonth(appModel: model)
+        #expect(viewModel.monthGameCount == 20)
+
+        viewModel.changeDisplayedMonth(
+            to: isoDate("2026-05-01T09:00:00+09:00"),
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
+        viewModel.selectedDate = selectedDate
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.monthGameCount == 135)
+        #expect(viewModel.selectedDateGames.count == 5)
+    }
+
+    @Test func scheduleSelectedDateGamesUseFullMonthAfterPartialRefresh() async throws {
+        let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
+        let fullMonthGames = try makeScheduleMonthGames()
+        let todayRefreshGames = makeScheduleTodayRefreshGames(from: fullMonthGames)
+        let model = try makeSchedulePartialSyncModel(
+            fullMonthGames: fullMonthGames,
+            todayRefreshGames: todayRefreshGames,
+            currentDate: selectedDate
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = isoDate("2026-05-01T09:00:00+09:00")
+        viewModel.selectedDate = selectedDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await model.refreshScheduleDay(for: selectedDate)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.monthGameCount == 135)
+        #expect(viewModel.selectedDateGames.count == 5)
+        #expect(viewModel.selectedDateGames.allSatisfy { $0.status == .final })
+    }
+
+    @Test func scheduleMonthOverlayIgnoresIncomingGamesOutsideSelectedMonth() async throws {
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let fullMonthGames = try makeScheduleMonthGames()
+        let juneGame = try #require(makeScheduleMonthGames(count: 1, year: 2026, month: 6).first)
+
+        let mergedGames = ScheduleMonthOverlayResolver.merge(
+            existingMonthGames: fullMonthGames,
+            incomingGames: [juneGame],
+            monthKey: monthKey,
+            calendar: scheduleTestCalendar()
+        )
+
+        #expect(mergedGames.count == 135)
+        #expect(mergedGames.contains { $0.id == juneGame.id } == false)
+    }
+
     @Test func backendScheduleStaleGameReconciliationClientPostsExpectedEndpoint() async throws {
         let session = makeStubSession()
         let client = BackendScheduleStaleGameReconciliationClient(baseURL: URL(string: "http://192.168.45.140:8088")!, session: session)
@@ -11303,6 +11641,225 @@ private func scheduleTestDayKey(for date: Date) -> String {
         components.year ?? 1970,
         components.month ?? 1,
         components.day ?? 1
+    )
+}
+
+private func standingsMovementCalendar() -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    return calendar
+}
+
+private func makeStandingsMovementFixture() throws -> (
+    teams: [Team],
+    leader: Team,
+    falling: Team,
+    rising: Team,
+    games: [GameDetail],
+    previousRanks: [String: Int]
+) {
+    let teams = MockKBOData.makeBootstrap().teams
+    let leader = try #require(teams.first(where: { $0.id == "lotte" }))
+    let falling = try #require(teams.first(where: { $0.id == "doosan" }))
+    let rising = try #require(teams.first(where: { $0.id == "kiwoom" }))
+    let fixtureTeams = [leader, falling, rising]
+    let games = [
+        makeStandingsMovementGame(
+            index: 1,
+            day: "2026-05-20",
+            awayTeam: falling,
+            homeTeam: leader,
+            awayScore: 2,
+            homeScore: 5
+        ),
+        makeStandingsMovementGame(
+            index: 2,
+            day: "2026-05-21",
+            awayTeam: rising,
+            homeTeam: leader,
+            awayScore: 1,
+            homeScore: 4
+        ),
+        makeStandingsMovementGame(
+            index: 3,
+            day: "2026-05-22",
+            awayTeam: rising,
+            homeTeam: falling,
+            awayScore: 2,
+            homeScore: 6
+        ),
+        makeStandingsMovementGame(
+            index: 4,
+            day: "2026-05-24",
+            awayTeam: falling,
+            homeTeam: rising,
+            awayScore: 1,
+            homeScore: 7
+        ),
+        makeStandingsMovementGame(
+            index: 5,
+            day: "2026-05-24",
+            awayTeam: falling,
+            homeTeam: rising,
+            awayScore: 3,
+            homeScore: 5
+        )
+    ]
+    return (
+        teams: fixtureTeams,
+        leader: leader,
+        falling: falling,
+        rising: rising,
+        games: games,
+        previousRanks: [leader.id: 1, falling.id: 2, rising.id: 3]
+    )
+}
+
+private func makeStandingsMovementGame(
+    index: Int,
+    day: String,
+    awayTeam: Team,
+    homeTeam: Team,
+    awayScore: Int,
+    homeScore: Int
+) -> GameDetail {
+    makeGameDetail(
+        id: UUID(uuidString: String(format: "97000000-0000-0000-0000-%012d", index))!,
+        scheduledStart: isoDate("\(day)T18:30:00+09:00"),
+        venue: "잠실",
+        awayTeam: awayTeam,
+        homeTeam: homeTeam,
+        awayScore: awayScore,
+        homeScore: homeScore,
+        status: .final,
+        seasonClassification: .regularSeason
+    )
+}
+
+private func currentStandingsRanks(
+    teams: [Team],
+    games: [GameDetail],
+    previousRanks: [String: Int]
+) -> [String: Int] {
+    let regularSeasonGames = games.filter(\.isRegularSeason)
+    let rankedSnapshots = teams
+        .map { team in
+            StandingsCalculator.makeSnapshot(
+                for: team,
+                completedGames: regularSeasonGames.filter {
+                    $0.hasCompleteFinalScore && $0.involves(teamID: team.id)
+                },
+                seasonGames: regularSeasonGames
+            )
+        }
+        .sorted {
+            StandingsSorter.compare($0, $1, previousRankProvider: { previousRanks[$0.id] })
+        }
+
+    return Dictionary(uniqueKeysWithValues: rankedSnapshots.enumerated().map { index, snapshot in
+        (snapshot.team.id, index + 1)
+    })
+}
+
+private func scheduleTestCalendar() -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+    return calendar
+}
+
+private func makeScheduleMonthGames(
+    count: Int = 135,
+    year: Int = 2026,
+    month: Int = 5
+) throws -> [GameDetail] {
+    let teams = MockKBOData.makeBootstrap().teams
+    let lg = try #require(teams.first(where: { $0.id == "lg" }))
+    let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
+    let samsung = try #require(teams.first(where: { $0.id == "samsung" }))
+    let lotte = try #require(teams.first(where: { $0.id == "lotte" }))
+    let kia = try #require(teams.first(where: { $0.id == "kia" }))
+    let ssg = try #require(teams.first(where: { $0.id == "ssg" }))
+    let kiwoom = try #require(teams.first(where: { $0.id == "kiwoom" }))
+    let hanwha = try #require(teams.first(where: { $0.id == "hanwha" }))
+    let nc = try #require(teams.first(where: { $0.id == "nc" }))
+    let kt = try #require(teams.first(where: { $0.id == "kt" }))
+    let fixtures: [(away: Team, home: Team, venue: String)] = [
+        (lg, doosan, "잠실"),
+        (samsung, lotte, "대구"),
+        (kia, ssg, "문학"),
+        (kiwoom, hanwha, "대전"),
+        (nc, kt, "창원")
+    ]
+
+    return (0..<count).map { index in
+        let day = index % 27 + 1
+        let slot = index / 27
+        let fixture = fixtures[index % fixtures.count]
+        let scheduledStart = isoDate(String(format: "%04d-%02d-%02dT%02d:00:00+09:00", year, month, day, 13 + slot))
+        let status: GameStatus = day < 26 ? .final : .upcoming
+        return makeGameDetail(
+            id: UUID(uuidString: String(format: "96000000-0000-0000-0000-%012d", index + 1))!,
+            scheduledStart: scheduledStart,
+            venue: fixture.venue,
+            awayTeam: fixture.away,
+            homeTeam: fixture.home,
+            awayScore: status == .final ? index % 10 : nil,
+            homeScore: status == .final ? (index + 3) % 10 : nil,
+            status: status,
+            seasonClassification: .regularSeason,
+            providerGameID: String(format: "%04d%02d%02d%03d", year, month, day, index)
+        )
+    }
+}
+
+private func makeScheduleTodayRefreshGames(
+    from fullMonthGames: [GameDetail],
+    dayKey: String = "2026-05-26"
+) -> [GameDetail] {
+    fullMonthGames
+        .filter { scheduleTestDayKey(for: $0.scheduledStart) == dayKey }
+        .map { game in
+            makeGameDetail(
+                id: game.id,
+                scheduledStart: game.scheduledStart,
+                venue: game.venue,
+                awayTeam: game.awayTeam,
+                homeTeam: game.homeTeam,
+                awayScore: 4,
+                homeScore: 2,
+                status: .final,
+                seasonClassification: .regularSeason,
+                providerGameID: game.providerGameID
+            )
+        }
+}
+
+@MainActor
+private func makeSchedulePartialSyncModel(
+    fullMonthGames: [GameDetail],
+    todayRefreshGames: [GameDetail],
+    currentDate: Date,
+    otherMonthGames: [GameDetail] = []
+) throws -> AppModel {
+    let teams = MockKBOData.makeBootstrap().teams
+    let mayKey = KBOMonthScheduleKey(year: 2026, month: 5)
+    let otherMonthLookup = Dictionary(grouping: otherMonthGames) {
+        KBOMonthScheduleKey(date: $0.scheduledStart, calendar: scheduleTestCalendar())
+    }
+    let repository = StubRepository(fetchMonthlySchedule: { key in
+        if key == mayKey {
+            return fullMonthGames
+        }
+        return otherMonthLookup[key] ?? []
+    }, fetchScheduleBypassingCache: { date, _ in
+        scheduleTestDayKey(for: date) == "2026-05-26" ? todayRefreshGames : []
+    })
+    return AppModel(
+        repository: repository,
+        scheduleStaleGameReconciliationClient: RecordingScheduleStaleGameReconciliationClient(),
+        bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+        usePersistedSettings: false,
+        currentDateProvider: { currentDate }
     )
 }
 
