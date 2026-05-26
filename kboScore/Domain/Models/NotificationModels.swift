@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum NotificationType: String, Codable, Hashable, Sendable {
+nonisolated enum NotificationType: String, Codable, Hashable, Sendable {
     case scoreChange
     case onBase
     case gameStart
@@ -45,7 +45,7 @@ enum NotificationType: String, Codable, Hashable, Sendable {
     }
 }
 
-struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let type: NotificationType
     let title: String
@@ -57,7 +57,7 @@ struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
     let publicGameID: String?
     let relatedTeamIDs: [String]
 
-    init(
+    nonisolated init(
         id: UUID,
         type: NotificationType,
         title: String,
@@ -94,7 +94,7 @@ struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         case relatedTeamIDs
     }
 
-    init(from decoder: any Decoder) throws {
+    nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         type = try container.decodeIfPresent(NotificationType.self, forKey: .type) ?? .scoreChange

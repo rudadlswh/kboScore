@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
+nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
     case gameStart
     case scoreChange
     case leadChange
@@ -15,7 +15,7 @@ enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
     case rainDelay
 }
 
-struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
+nonisolated struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
     let startHour: Int
     let endHour: Int
 
@@ -25,7 +25,7 @@ struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
     }
 }
 
-struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
+nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     let platform: String
     let environment: String
     let deviceToken: String
@@ -183,7 +183,7 @@ extension NotificationRegistrationPayload {
     }
 }
 
-struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
+nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
     let deviceToken: String
     let environment: String
     let favoriteTeamID: String?
@@ -268,13 +268,13 @@ struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible 
     }
 }
 
-enum NotificationRegistrationStartDecision: Equatable, Sendable {
+nonisolated enum NotificationRegistrationStartDecision: Equatable, Sendable {
     case start(keyChanged: Bool)
     case skipInFlight
     case skipAlreadyRegistered
 }
 
-struct NotificationRegistrationDeduplicationState: Sendable {
+nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
     private(set) var inFlightRegistrationKeys: Set<NotificationRegistrationKey> = []
     private(set) var lastSuccessfulRegistrationKey: NotificationRegistrationKey?
 
@@ -304,7 +304,7 @@ struct NotificationRegistrationDeduplicationState: Sendable {
     }
 }
 
-enum NotificationInstallationID {
+nonisolated enum NotificationInstallationID {
     nonisolated static var current: String {
         let storageKey = "notificationInstallationID"
         if let persisted = UserDefaults.standard.string(forKey: storageKey),
@@ -318,7 +318,7 @@ enum NotificationInstallationID {
     }
 }
 
-enum NotificationRegistrationEnvironment {
+nonisolated enum NotificationRegistrationEnvironment {
     nonisolated static var current: String {
         #if DEBUG
         "sandbox"
@@ -340,7 +340,7 @@ extension NotificationAlertType {
     }
 }
 
-enum NotificationRegistrationSyncStatus: String, Sendable {
+nonisolated enum NotificationRegistrationSyncStatus: String, Sendable {
     case idle = "대기"
     case waitingForToken = "토큰 대기"
     case skipped = "백엔드 미설정"

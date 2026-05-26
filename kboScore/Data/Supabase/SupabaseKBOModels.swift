@@ -7,14 +7,14 @@
 
 import Foundation
 
-struct SupabaseConfiguration: Sendable {
+nonisolated struct SupabaseConfiguration: Sendable {
     nonisolated static let exposedSchema = "kbo_crawler_api"
 
     let url: URL
     let publishableKey: String
 }
 
-struct SupabaseTeamRow: Decodable, Sendable {
+nonisolated struct SupabaseTeamRow: Decodable, Sendable {
     let id: UUID
     let code: String
     let name: String
@@ -49,7 +49,7 @@ struct SupabaseTeamRow: Decodable, Sendable {
     }
 }
 
-struct SupabaseGameRow: Codable, Sendable {
+nonisolated struct SupabaseGameRow: Codable, Sendable {
     let id: UUID
     let publicGameID: String?
     let provider: String?
@@ -136,7 +136,7 @@ struct SupabaseGameRow: Codable, Sendable {
     }
 }
 
-struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
+nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     nonisolated static let selectColumns = "*"
 
     let gameID: UUID
@@ -206,7 +206,7 @@ struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     }
 }
 
-private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
+nonisolated private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
     let stringValue: String
     let intValue: Int?
 
@@ -225,7 +225,7 @@ private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
     }
 }
 
-enum SupabaseKBOMapper {
+nonisolated enum SupabaseKBOMapper {
     nonisolated static func mapTeam(_ row: SupabaseTeamRow) -> Team {
         let normalizedCode = normalizeTeamCode(row.code)
         let identity = TeamIdentity.catalog[normalizedCode]
@@ -525,7 +525,7 @@ enum SupabaseKBOMapper {
     }
 #endif
 
-    private struct ClassifiedSupabaseGameRow: Sendable {
+    nonisolated private struct ClassifiedSupabaseGameRow: Sendable {
         let row: SupabaseGameRow
         let providerGameID: String?
         let seasonClassification: GameSeasonClassification
@@ -538,7 +538,7 @@ enum SupabaseKBOMapper {
     }
 }
 
-enum SupabaseDateParser {
+nonisolated enum SupabaseDateParser {
     nonisolated static func parseGameDate(_ value: String?) -> Date? {
         KBODateParser.parseGameDate(value)
     }

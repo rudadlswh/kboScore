@@ -11,7 +11,7 @@ protocol ScheduleStaleGameReconciliationClient: Sendable {
     func reconcileStaleGames(dates: [String]) async throws
 }
 
-enum ScheduleStaleGameReconciliationClientFactory {
+nonisolated enum ScheduleStaleGameReconciliationClientFactory {
     static func makeAppClient() -> any ScheduleStaleGameReconciliationClient {
         let backendProcessValue = ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -212,6 +212,6 @@ enum ScheduleStaleGameReconciliationClientError: Error, Sendable {
     case httpStatus(Int)
 }
 
-private struct ScheduleStaleGameReconciliationRequest: Encodable {
+nonisolated private struct ScheduleStaleGameReconciliationRequest: Encodable {
     let dates: [String]
 }

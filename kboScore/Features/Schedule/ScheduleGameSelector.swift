@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum ScheduleGameSelector {
+nonisolated enum ScheduleGameSelector {
     static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
         games.sorted { lhs, rhs in
             let lhsIsFavoriteTeam = favoriteTeamID.map { lhs.involves(teamID: $0) } ?? false

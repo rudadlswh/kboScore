@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum ScheduleDayStatusResolver {
+nonisolated enum ScheduleDayStatusResolver {
     static func dominantStatus(for games: [GameDetail]) -> GameStatus? {
         if games.contains(where: { $0.status == .live }) {
             return .live

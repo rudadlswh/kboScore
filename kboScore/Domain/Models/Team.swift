@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct Team: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct Team: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let name: String
     let shortName: String

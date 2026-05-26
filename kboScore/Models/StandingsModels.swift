@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
     let season: Int
     let teamID: UUID
     let teamCode: String?
@@ -148,7 +148,7 @@ struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
 }
 
 private extension KeyedDecodingContainer {
-    func decodeFlexibleDouble(forKey key: Key) throws -> Double {
+    nonisolated func decodeFlexibleDouble(forKey key: Key) throws -> Double {
         if let value = try? decode(Double.self, forKey: key) {
             return value
         }
@@ -160,12 +160,12 @@ private extension KeyedDecodingContainer {
     }
 }
 
-enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
+nonisolated enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
     case resolved
     case tiebreakGameRequired = "tiebreak_game_required"
 }
 
-enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable {
+nonisolated enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable {
     case unknownClassificationGames = "unknown_classification_games"
     case incompleteRegularSeasonSchedule = "incomplete_regular_season_schedule"
     case insufficientCompletedRegularSeasonGames = "insufficient_completed_regular_season_games"
@@ -185,12 +185,12 @@ enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable
     }
 }
 
-enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
+nonisolated enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
     case clinched
     case eliminated
 }
 
-enum StandingsMetrics {
+nonisolated enum StandingsMetrics {
     nonisolated static let pythagoreanExponent = 1.83
     nonisolated static let postseasonQualifierCount = 5
     nonisolated static let homeFieldAdvantageMultiplier = 1.02
@@ -241,7 +241,7 @@ enum StandingsMetrics {
     }
 }
 
-struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
+nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let team: Team
     let rank: Int
     let wins: Int
@@ -434,7 +434,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
 }
 
 extension TeamGameResult {
-    var shortLabel: String {
+    nonisolated var shortLabel: String {
         switch self {
         case .win:
             "승"

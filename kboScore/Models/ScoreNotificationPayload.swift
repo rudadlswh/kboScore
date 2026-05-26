@@ -8,7 +8,7 @@
 import Foundation
 import UserNotifications
 
-enum ScoreNotificationEventType: String, Codable, Sendable {
+nonisolated enum ScoreNotificationEventType: String, Codable, Sendable {
     case gameStart
     case scoreChange
     case onBase
