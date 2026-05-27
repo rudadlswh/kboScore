@@ -478,8 +478,11 @@ final class AppModel {
 
     func loadStandingsIfNeeded() async {
         let season = currentStandingsSeason()
-        guard standingsSnapshotCacheBySeason[season] == nil,
-              standingsSourceGamesBySeason[season] == nil else {
+        if standingsSourceGamesBySeason[season] != nil {
+            return
+        }
+        if standingsSnapshotCacheBySeason[season]?.isEmpty == false {
+            _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "cachedRankRows")
             return
         }
         let localRankCount = await loadLocalTeamRanks(season: season)
@@ -551,10 +554,10 @@ final class AppModel {
         #endif
         guard rows.isEmpty == false else { return 0 }
         standingsSnapshotCacheBySeason[season] = StandingsRowBuilder.makeSnapshots(from: rows, teams: teams)
-        standingsSourceGamesBySeason[season] = nil
         #if DEBUG
         print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
         #endif
+        _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "localRankRows")
         return rows.count
     }
 
@@ -591,11 +594,11 @@ final class AppModel {
                 _ = await loadLocalTeamRanks(season: season)
             } else {
                 standingsSnapshotCacheBySeason[season] = StandingsRowBuilder.makeSnapshots(from: rows, teams: teams)
-                standingsSourceGamesBySeason[season] = nil
                 #if DEBUG
                 print("[StandingsRank] remote cache write count=0 season=\(season)")
                 print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
                 #endif
+                _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "remoteRankRows")
             }
 
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
@@ -622,12 +625,7 @@ final class AppModel {
             print("[StandingsRank] fallback to games reason=\(reason)")
             #endif
 
-            let sourceGames = try await fetchStandingsSourceGames(season: season)
-            let snapshot = await repositoryRuntimeState?.snapshot()
-            let normalizedGames = await reconcileOfficialScheduleStartTimesIfNeeded(
-                in: sourceGames,
-                snapshot: snapshot
-            )
+            let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
             standingsSourceGamesBySeason[season] = normalizedGames
             standingsSnapshotCacheBySeason[season] = nil
             refreshLocalStandingsProbabilitySignals(for: normalizedGames)
@@ -683,6 +681,39 @@ final class AppModel {
 
         return try await repository.fetchGames()
             .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+    }
+
+    private func fetchNormalizedStandingsSourceGames(season: Int) async throws -> [GameDetail] {
+        let sourceGames = try await fetchStandingsSourceGames(season: season)
+        let snapshot = await repositoryRuntimeState?.snapshot()
+        return await reconcileOfficialScheduleStartTimesIfNeeded(
+            in: sourceGames,
+            snapshot: snapshot
+        )
+    }
+
+    private func loadStandingsSourceGamesIfAvailable(season: Int, reason: String) async -> Bool {
+        do {
+            let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
+            guard normalizedGames.isEmpty == false else {
+                #if DEBUG
+                print("[StandingsRankMovement] source=rankRows reason=\(reason) standingsSourceGames=0")
+                #endif
+                return false
+            }
+
+            standingsSourceGamesBySeason[season] = normalizedGames
+            refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            #if DEBUG
+            print("[StandingsRankMovement] source=games reason=\(reason) standingsSourceGames=\(normalizedGames.count)")
+            #endif
+            return true
+        } catch {
+            #if DEBUG
+            print("[StandingsRankMovement] source=rankRows reason=\(reason) standingsSourceLoadFailed error=\(error)")
+            #endif
+            return false
+        }
     }
 
     private func currentStandingsSeason() -> Int {
@@ -984,8 +1015,11 @@ final class AppModel {
     var standingsSnapshots: [TeamStandingsSnapshot] {
         let season = currentStandingsSeason()
         let preGameRanks = preGameRankByTeamID(for: season)
+        if standingsSourceGamesBySeason[season]?.isEmpty == false {
+            return gameCalculatedStandingsSnapshots(preGameRanks: preGameRanks)
+        }
         if let cached = standingsSnapshotCacheBySeason[season], cached.isEmpty == false {
-            return cached
+            let snapshots = cached
                 .map { $0.withPreGameRank(preGameRanks[$0.team.id]) }
                 .sorted { left, right in
                     if left.rank != right.rank {
@@ -993,13 +1027,22 @@ final class AppModel {
                     }
                     return left.team.name.localizedStandardCompare(right.team.name) == .orderedAscending
                 }
+            return logStandingsRankMovementDiagnostics(
+                snapshots,
+                season: season,
+                preGameRanks: preGameRanks
+            )
         }
 
+        return gameCalculatedStandingsSnapshots(preGameRanks: preGameRanks)
+    }
+
+    private func gameCalculatedStandingsSnapshots(preGameRanks: [String: Int]) -> [TeamStandingsSnapshot] {
         let rankedSnapshots = teams
             .map { makeStandingsSnapshot(for: $0, probabilitySignalsByTeamID: localStandingsProbabilitySignalsByTeamID) }
             .sorted(by: standingsComparator)
 
-        return rankedSnapshots.enumerated().map { index, snapshot in
+        let snapshots = rankedSnapshots.enumerated().map { index, snapshot in
             TeamStandingsSnapshot(
                 team: snapshot.team,
                 rank: index + 1,
@@ -1019,6 +1062,11 @@ final class AppModel {
                 preGameRank: preGameRanks[snapshot.team.id]
             )
         }
+        return logStandingsRankMovementDiagnostics(
+            snapshots,
+            season: currentStandingsSeason(),
+            preGameRanks: preGameRanks
+        )
     }
 
     private var standingsCalculationGames: [GameDetail] {
@@ -1032,6 +1080,44 @@ final class AppModel {
             games: standingsSourceGamesBySeason[season] ?? games,
             previousRankProvider: previousRegularSeasonRank
         )
+    }
+
+    private func logStandingsRankMovementDiagnostics(
+        _ snapshots: [TeamStandingsSnapshot],
+        season: Int,
+        preGameRanks: [String: Int]
+    ) -> [TeamStandingsSnapshot] {
+#if DEBUG
+        let sourceGames = standingsSourceGamesBySeason[season] ?? games
+        let finalGames = sourceGames
+            .filter(\.isRegularSeason)
+            .filter(\.hasCompleteFinalScore)
+        let latestFinalGameDate = StandingsRankMovementResolver.latestCompletedGameDay(
+            games: finalGames,
+            calendar: standingsMovementCalendar
+        )
+        let beforeGames = finalGames.filter { game in
+            guard let latestFinalGameDate else { return false }
+            return standingsMovementCalendar.startOfDay(for: game.scheduledStart) < latestFinalGameDate
+        }
+        let currentGames = finalGames.filter { game in
+            guard let latestFinalGameDate else { return true }
+            return standingsMovementCalendar.startOfDay(for: game.scheduledStart) <= latestFinalGameDate
+        }
+        let latestFinalGameDateText = latestFinalGameDate.map(scheduleDayKey(for:)) ?? "<nil>"
+        print("[StandingsRankMovement] latestFinalGameDate=\(latestFinalGameDateText) finalGames.count=\(finalGames.count) beforeGames.count=\(beforeGames.count) currentGames.count=\(currentGames.count)")
+        snapshots.forEach { snapshot in
+            let previousRankText = preGameRanks[snapshot.team.id].map(String.init) ?? "<nil>"
+            print("[StandingsRankMovement] teamId=\(snapshot.team.id) previousRank=\(previousRankText) currentRank=\(snapshot.rank) movement displayText=\(snapshot.rankMovement.displayText)")
+        }
+#endif
+        return snapshots
+    }
+
+    private var standingsMovementCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = scheduleTimeZone
+        return calendar
     }
 
 #if DEBUG

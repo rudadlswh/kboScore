@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum RankingMovement: Equatable, Sendable {
+nonisolated enum RankingMovement: Equatable, Sendable {
     case up(Int)
     case down(Int)
     case unchanged
@@ -46,7 +46,7 @@ enum RankingMovement: Equatable, Sendable {
     }
 }
 
-enum StandingsRankMovementResolver {
+nonisolated enum StandingsRankMovementResolver {
     static func movement(currentRank: Int?, preGameRank: Int?) -> RankingMovement {
         guard let currentRank, let preGameRank else {
             return .unchanged

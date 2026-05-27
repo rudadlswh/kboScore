@@ -97,8 +97,10 @@ private struct StandingsTableMetrics {
     var rowHeight: CGFloat { isCompact ? 48 : 52 }
     var horizontalPadding: CGFloat { isCompact ? 6 : 7 }
     var spacing: CGFloat { 4 }
-    var teamColumnWidth: CGFloat { isCompact ? 76 : 128 }
-    var rankWidth: CGFloat { isCompact ? 30 : 36 }
+    var teamColumnWidth: CGFloat { isCompact ? 54 : 80 }
+    var rankMovementWidth: CGFloat { isCompact ? 42 : 48 }
+    var rankWidth: CGFloat { isCompact ? 20 : 22 }
+    var movementWidth: CGFloat { isCompact ? 20 : 24 }
     var logoSize: CGFloat { isCompact ? 22 : 30 }
     var gamesWidth: CGFloat { isCompact ? 24 : 26 }
     var countWidth: CGFloat { isCompact ? 19 : 20 }
@@ -115,6 +117,8 @@ private struct StandingsTableHeader: View {
 
     var body: some View {
         HStack(spacing: metrics.spacing) {
+            Color.clear
+                .frame(width: metrics.rankMovementWidth)
             Text("팀")
                 .frame(width: metrics.teamColumnWidth, alignment: .leading)
             headerLabel("경기", width: metrics.gamesWidth)
@@ -156,6 +160,7 @@ private struct StandingsRowView: View {
             )
 
             HStack(spacing: metrics.spacing) {
+                rankCell
                 teamCell
                 StandingsColumnValue(value: "\(snapshot.gamesPlayed)", width: metrics.gamesWidth, isFavorite: isFavorite)
                 StandingsColumnValue(value: "\(snapshot.wins)", width: metrics.countWidth, isFavorite: isFavorite)
@@ -177,23 +182,27 @@ private struct StandingsRowView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    private var rankCell: some View {
+        HStack(spacing: 2) {
+            Text("\(snapshot.rank)")
+                .font(isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
+                .frame(width: metrics.rankWidth, alignment: .trailing)
+
+            Text(rankMovement.displayText)
+                .font(.caption2.weight(.black))
+                .monospacedDigit()
+                .foregroundStyle(rankMovementColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(width: metrics.movementWidth, alignment: .trailing)
+        }
+        .frame(width: metrics.rankMovementWidth, alignment: .trailing)
+    }
+
     private var teamCell: some View {
         HStack(spacing: metrics.isCompact ? 4 : 6) {
-            HStack(spacing: 2) {
-                Text("\(snapshot.rank)")
-                    .font((isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy)))
-                    .monospacedDigit()
-
-                if let indicator = rankMovement.indicator {
-                    Text(indicator)
-                        .font(.caption2.weight(.black))
-                }
-            }
-            .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
-            .lineLimit(1)
-            .minimumScaleFactor(0.82)
-            .frame(width: metrics.rankWidth, alignment: .trailing)
-
             if metrics.isCompact == false {
                 TeamMarkView(team: snapshot.team, size: metrics.logoSize)
                     .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
@@ -251,7 +260,18 @@ private struct StandingsRowView: View {
     }
 
     private var rankMovement: RankingMovement {
-        StandingsRankMovementResolver.movement(currentRank: snapshot.rank, preGameRank: snapshot.preGameRank)
+        snapshot.rankMovement
+    }
+
+    private var rankMovementColor: Color {
+        switch rankMovement {
+        case .up:
+            Color(red: 0.42, green: 1.0, blue: 0.62)
+        case .down:
+            Color(red: 1.0, green: 0.58, blue: 0.58)
+        case .unchanged:
+            Color.white.opacity(0.48)
+        }
     }
 
     private var accessibilityLabel: String {

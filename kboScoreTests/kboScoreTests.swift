@@ -3436,6 +3436,76 @@ struct kboScoreTests {
         #expect(movement.displayText == "▲1")
     }
 
+    @Test func latestFinalGameDateSplitProducesDifferentPreviousAndCurrentRanksAfterLatestResult() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let previousRanks = StandingsRankMovementResolver.preGameRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRankProvider: { fixture.previousRanks[$0.id] }
+        )
+        let currentRanks = currentStandingsRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRanks: fixture.previousRanks
+        )
+
+        #expect(previousRanks[fixture.rising.id] == 3)
+        #expect(currentRanks[fixture.rising.id] == 2)
+        #expect(previousRanks[fixture.falling.id] == 2)
+        #expect(currentRanks[fixture.falling.id] == 3)
+    }
+
+    @Test func appModelRowModelCarriesUpAndDownFromResolver() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: fixture.teams,
+                games: fixture.games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-25T09:00:00+09:00") }
+        )
+
+        let risingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
+        let fallingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
+
+        #expect(risingSnapshot.rankMovement == .up(1))
+        #expect(fallingSnapshot.rankMovement == .down(1))
+    }
+
+    @Test func standingsViewMovementDisplayTextUsesArrowCountAndDash() {
+        #expect(RankingMovement.up(1).displayText == "▲1")
+        #expect(RankingMovement.down(1).displayText == "▼1")
+        #expect(RankingMovement.unchanged.displayText == "-")
+    }
+
+    @Test func rowOrderingIsUnchangedByMovementDisplay() throws {
+        let fixture = try makeStandingsMovementFixture()
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: fixture.teams,
+                games: fixture.games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-25T09:00:00+09:00") }
+        )
+
+        #expect(model.standingsSnapshots.map(\.team.id) == [
+            fixture.leader.id,
+            fixture.rising.id,
+            fixture.falling.id
+        ])
+        #expect(model.standingsSnapshots.map(\.rankMovement) == [
+            .unchanged,
+            .up(1),
+            .down(1)
+        ])
+    }
+
     @Test func standingsRecentResultsAreLimitedToFiveMostRecentFinalGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-10T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -10260,6 +10330,47 @@ struct kboScoreTests {
         #expect(await state.remoteFetchCount == 0)
     }
 
+    @Test func standingsTabAlignsCurrentRanksWithGameSourceWhenRankRowsAreCached() async throws {
+        let fixture = try makeStandingsMovementFixture()
+        let staleRankRows = sampleTeamRankRows(
+            teams: fixture.teams,
+            ranks: [
+                fixture.leader.id: 1,
+                fixture.falling.id: 2,
+                fixture.rising.id: 3
+            ]
+        )
+        let state = TeamRankFlowState(localRanks: staleRankRows, standingsGames: fixture.games)
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: fixture.teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-25T09:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+
+        let risingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
+        let fallingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
+
+        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(model.standingsSnapshots.map(\.team.id) == [
+            fixture.leader.id,
+            fixture.rising.id,
+            fixture.falling.id
+        ])
+        #expect(risingSnapshot.rankMovement == .up(1))
+        #expect(risingSnapshot.rankMovement.displayText == "▲1")
+        #expect(fallingSnapshot.rankMovement == .down(1))
+        #expect(fallingSnapshot.rankMovement.displayText == "▼1")
+    }
+
     @Test func standingsTabAutoFetchesTeamRankViewWhenLocalRankCacheIsEmpty() async throws {
         let state = TeamRankFlowState(localRanks: [], remoteRanks: sampleTeamRankRows())
         let repository = TeamRankFlowRepository(state: state)
@@ -10540,6 +10651,30 @@ private func sampleTeamRankRows() -> [TeamRankRow] {
             streakText: "1패"
         )
     ]
+}
+
+private func sampleTeamRankRows(teams: [Team], ranks: [String: Int]) -> [TeamRankRow] {
+    teams
+        .compactMap { team -> TeamRankRow? in
+            guard let rank = ranks[team.id] else { return nil }
+            return TeamRankRow(
+                season: 2026,
+                teamID: UUID(uuidString: String(format: "11111111-1111-1111-1111-%012d", rank))!,
+                teamCode: team.id,
+                rank: rank,
+                teamName: team.name,
+                gamesPlayed: 40,
+                wins: max(0, 30 - rank),
+                losses: 10 + rank,
+                draws: 0,
+                winningPercentage: Double(30 - rank) / 40.0,
+                gamesBehind: Double(rank - 1),
+                streakType: "WIN",
+                streakCount: 1,
+                streakText: "1승"
+            )
+        }
+        .sorted { $0.rank < $1.rank }
 }
 
 private actor RankFetchGate {

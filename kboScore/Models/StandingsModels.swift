@@ -330,6 +330,10 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
 
     var id: String { team.id }
 
+    var rankMovement: RankingMovement {
+        StandingsRankMovementResolver.movement(currentRank: rank, preGameRank: preGameRank)
+    }
+
     var gamesPlayed: Int {
         wins + losses + ties
     }
