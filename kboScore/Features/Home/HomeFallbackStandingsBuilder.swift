@@ -51,7 +51,8 @@ enum HomeFallbackStandingsBuilder {
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
                 postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
-                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason
+                postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason,
+                precomputedStreakText: snapshot.precomputedStreakText
             )
         }
     }

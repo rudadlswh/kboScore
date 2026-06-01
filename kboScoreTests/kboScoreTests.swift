@@ -3639,6 +3639,273 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText == "승 패 승 패 승")
     }
 
+    @Test func standingsStreakUsesAllCompletedLossesBeyondRecentFormLimit() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let olderWin = makeGameDetail(
+            id: UUID(uuidString: "51000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-19T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: ssg,
+            homeTeam: lg,
+            awayScore: 6,
+            homeScore: 2,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let losses = (0..<12).map { index in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "51000000-0000-0000-0000-%012d", index + 2))!,
+                scheduledStart: isoDate(String(format: "2026-05-%02dT18:30:00+09:00", 31 - index)),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 5,
+                homeScore: 1,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        }
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [ssg, lg],
+                games: Array(losses.reversed()) + [olderWin],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let ssgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "ssg" }))
+
+        #expect(ssgSnapshot.currentStreakText == "12연패")
+        #expect(ssgSnapshot.recentResults.count == 5)
+        #expect(ssgSnapshot.recentResultsText == "패 패 패 패 패")
+    }
+
+    @Test func standingsSnapshotDisplaysTwelveGameLosingStreakText() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let snapshot = TeamStandingsSnapshot(
+            team: ssg,
+            rank: 8,
+            wins: 20,
+            losses: 32,
+            ties: 1,
+            remainingRegularSeasonGames: 91,
+            recentResults: Array(repeating: TeamGameResult.loss, count: 5),
+            precomputedStreakText: "12연패"
+        )
+
+        #expect(snapshot.currentStreakText == "12연패")
+    }
+
+    @Test func standingsStreakUsesAllCompletedWinsBeyondRecentFormLimit() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let olderLoss = makeGameDetail(
+            id: UUID(uuidString: "52000000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-24T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 7,
+            homeScore: 2,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+        let wins = (0..<6).map { index in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "52000000-0000-0000-0000-%012d", index + 2))!,
+                scheduledStart: isoDate(String(format: "2026-05-%02dT18:30:00+09:00", 31 - index)),
+                venue: "잠실",
+                awayTeam: doosan,
+                homeTeam: lg,
+                awayScore: 1,
+                homeScore: 5,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        }
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [olderLoss] + wins,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let lgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "lg" }))
+
+        #expect(lgSnapshot.currentStreakText == "6연승")
+        #expect(lgSnapshot.recentResults.count == 5)
+        #expect(lgSnapshot.recentResultsText == "승 승 승 승 승")
+    }
+
+    @Test func standingsStreakIgnoresIncompleteAndCancelledGames() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-07T22:00:00+09:00"))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let completedLosses = (1...3).map { day in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "53000000-0000-0000-0000-%012d", day))!,
+                scheduledStart: isoDate(String(format: "2026-05-%02dT18:30:00+09:00", day)),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 5,
+                homeScore: 1,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        }
+        let ignoredGames = [
+            makeGameDetail(
+                id: UUID(uuidString: "53000000-0000-0000-0000-000000000004")!,
+                scheduledStart: isoDate("2026-05-04T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: nil,
+                homeScore: nil,
+                status: .cancelled,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "53000000-0000-0000-0000-000000000005")!,
+                scheduledStart: isoDate("2026-05-05T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "53000000-0000-0000-0000-000000000006")!,
+                scheduledStart: isoDate("2026-05-06T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 1,
+                homeScore: 6,
+                status: .live,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "53000000-0000-0000-0000-000000000007")!,
+                scheduledStart: isoDate("2026-05-07T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 1,
+                homeScore: 6,
+                status: .rainDelay,
+                seasonClassification: .regularSeason
+            )
+        ]
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [ssg, lg],
+                games: completedLosses + ignoredGames,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let ssgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "ssg" }))
+
+        #expect(ssgSnapshot.currentStreakText == "3연패")
+        #expect(ssgSnapshot.gamesPlayed == 3)
+    }
+
+    @Test func standingsStreakSkipsTiesForContinuity() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-05T22:00:00+09:00"))
+        let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let games = [
+            makeGameDetail(
+                id: UUID(uuidString: "54000000-0000-0000-0000-000000000001")!,
+                scheduledStart: isoDate("2026-05-01T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 2,
+                homeScore: 5,
+                status: .final,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "54000000-0000-0000-0000-000000000002")!,
+                scheduledStart: isoDate("2026-05-02T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 5,
+                homeScore: 1,
+                status: .final,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "54000000-0000-0000-0000-000000000003")!,
+                scheduledStart: isoDate("2026-05-03T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 6,
+                homeScore: 2,
+                status: .final,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "54000000-0000-0000-0000-000000000004")!,
+                scheduledStart: isoDate("2026-05-04T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 3,
+                homeScore: 3,
+                status: .final,
+                seasonClassification: .regularSeason
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "54000000-0000-0000-0000-000000000005")!,
+                scheduledStart: isoDate("2026-05-05T18:30:00+09:00"),
+                venue: "문학",
+                awayTeam: lg,
+                homeTeam: ssg,
+                awayScore: 4,
+                homeScore: 1,
+                status: .final,
+                seasonClassification: .regularSeason
+            )
+        ]
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [ssg, lg],
+                games: games,
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        let ssgSnapshot = try #require(model.standingsSnapshots.first(where: { $0.team.id == "ssg" }))
+
+        #expect(ssgSnapshot.currentStreakText == "3연패")
+        #expect(ssgSnapshot.recentResultsText == "패 무 패 패 승")
+    }
+
     @Test func homeFallbackWeeklyStandingsUseFiveActualPlayedGamesAfterRainout() async throws {
         let base = MockKBOData.makeBootstrap(now: Date())
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))

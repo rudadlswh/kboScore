@@ -376,6 +376,22 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         return "최근 \(recentResults.count)"
     }
 
+    var currentStreakText: String {
+        if let precomputedStreakText,
+           precomputedStreakText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return precomputedStreakText
+        }
+        guard let firstResult = recentResults.first else { return "-" }
+
+        var count = 0
+        for result in recentResults {
+            guard result == firstResult else { break }
+            count += 1
+        }
+
+        return "\(count)\(firstResult.shortLabel)"
+    }
+
     var currentWinningStreakCount: Int {
         var streak = 0
         for result in recentResults {
@@ -434,6 +450,20 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
             return nil
         }
         return "공식 미편성 \(virtualUnscheduledRemainingGames)경기 포함 추정치"
+    }
+}
+
+nonisolated struct StandingsRowRenderIdentity: Hashable, Sendable {
+    let teamID: String
+    let rank: Int
+    let preGameRank: Int?
+    let movementDisplayText: String
+
+    nonisolated init(snapshot: TeamStandingsSnapshot) {
+        self.teamID = snapshot.team.id
+        self.rank = snapshot.rank
+        self.preGameRank = snapshot.preGameRank
+        self.movementDisplayText = snapshot.rankMovement.displayText
     }
 }
 

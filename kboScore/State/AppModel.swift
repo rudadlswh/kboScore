@@ -129,6 +129,8 @@ final class AppModel {
     var isShowingStaleData = false
     var teams: [Team] = []
     var games: [GameDetail] = []
+    private(set) var standingsSnapshots: [TeamStandingsSnapshot] = []
+    private(set) var standingsRowsRevision = 0
     private(set) var homeFavoriteTeamGames: [GameDetail] = []
     var notifications: [NotificationItem] = []
     var selectedTab: AppTab = .home
@@ -193,6 +195,8 @@ final class AppModel {
     private var standingsSnapshotCacheBySeason: [Int: [TeamStandingsSnapshot]] = [:]
     private var standingsSourceGamesBySeason: [Int: [GameDetail]] = [:]
     private var inFlightStandingsTasks: [Int: Task<Void, Never>] = [:]
+    private var inFlightStandingsSourceTasks: [Int: Task<Bool, Never>] = [:]
+    private var standingsSourcePrefetchTasks: [Int: Task<Void, Never>] = [:]
     private let isRunningTests: Bool
 
     init(
@@ -278,7 +282,10 @@ final class AppModel {
     }
 
     func loadIfNeeded() async {
-        guard !hasLoaded, !isLoading else { return }
+        guard !hasLoaded, !isLoading else {
+            scheduleStandingsSourcePrefetchIfNeeded(reason: "loadIfNeededAlreadyLoaded")
+            return
+        }
 
         isLoading = true
         loadErrorMessage = nil
@@ -287,6 +294,7 @@ final class AppModel {
             teams = Self.catalogTeams()
         }
         hasLoaded = true
+        scheduleStandingsSourcePrefetchIfNeeded(reason: "launch")
 
         guard settings.favoriteTeamID != nil else {
             #if DEBUG
@@ -320,6 +328,10 @@ final class AppModel {
             settings = bootstrap.settings
         }
         normalizeFavoriteTeamSelectionIfNeeded()
+        refreshPublishedStandingsRowsWithCurrentSource(
+            season: currentStandingsSeason(),
+            reason: "bootstrap"
+        )
     }
 
     private func normalizeFavoriteTeamSelectionIfNeeded() {
@@ -479,6 +491,10 @@ final class AppModel {
     func loadStandingsIfNeeded() async {
         let season = currentStandingsSeason()
         if standingsSourceGamesBySeason[season] != nil {
+            #if DEBUG
+            let sourceCount = standingsSourceGamesBySeason[season]?.count ?? 0
+            print("[StandingsRankMovement] source used from memory season=\(season) count=\(sourceCount)")
+            #endif
             return
         }
         if standingsSnapshotCacheBySeason[season]?.isEmpty == false {
@@ -493,6 +509,48 @@ final class AppModel {
     func refreshStandings() async {
         let season = currentStandingsSeason()
         await refreshStandings(season: season, logsBootstrapJoin: false)
+    }
+
+    func prefetchStandingsSourceIfNeeded(season requestedSeason: Int? = nil) async {
+        let season = requestedSeason ?? currentStandingsSeason()
+        _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "prefetch")
+    }
+
+    private func scheduleStandingsSourcePrefetchIfNeeded(reason: String) {
+        let season = currentStandingsSeason()
+        if let cachedGames = standingsSourceGamesBySeason[season], cachedGames.isEmpty == false {
+            #if DEBUG
+            print("[StandingsRankMovement] prefetch skip reason=memory season=\(season) count=\(cachedGames.count)")
+            #endif
+            return
+        }
+        if standingsSourcePrefetchTasks[season] != nil || inFlightStandingsSourceTasks[season] != nil {
+            #if DEBUG
+            print("[StandingsRankMovement] prefetch skip reason=inFlight season=\(season)")
+            #endif
+            return
+        }
+
+        #if DEBUG
+        print("[StandingsRankMovement] prefetch start season=\(season) reason=\(reason)")
+        #endif
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let startedAt = Date()
+            let loaded = await self.loadStandingsSourceGamesIfAvailable(
+                season: season,
+                reason: "prefetch:\(reason)"
+            )
+            let duration = Date().timeIntervalSince(startedAt)
+            let sourceCount = self.standingsSourceGamesBySeason[season]?.count ?? 0
+            #if DEBUG
+            print(
+                "[StandingsRankMovement] prefetch success=\(loaded) season=\(season) count=\(sourceCount) duration=\(String(format: "%.3f", duration))s officialRequestsAvoided=true"
+            )
+            #endif
+            self.standingsSourcePrefetchTasks[season] = nil
+        }
+        standingsSourcePrefetchTasks[season] = task
     }
 
     private func bootstrapStandingsRankIfNeeded(season: Int) async {
@@ -557,6 +615,10 @@ final class AppModel {
         #if DEBUG
         print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
         #endif
+        refreshPublishedStandingsRowsWithCurrentSource(
+            season: season,
+            reason: "localRankRowsInitial"
+        )
         _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "localRankRows")
         return rows.count
     }
@@ -598,6 +660,10 @@ final class AppModel {
                 print("[StandingsRank] remote cache write count=0 season=\(season)")
                 print("[StandingsRank] local render rows=\(standingsSnapshotCacheBySeason[season]?.count ?? 0) season=\(season)")
                 #endif
+                refreshPublishedStandingsRowsWithCurrentSource(
+                    season: season,
+                    reason: "remoteRankRowsInitial"
+                )
                 _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "remoteRankRows")
             }
 
@@ -626,9 +692,13 @@ final class AppModel {
             #endif
 
             let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
-            standingsSourceGamesBySeason[season] = normalizedGames
+            storeStandingsSourceGames(normalizedGames, season: season)
             standingsSnapshotCacheBySeason[season] = nil
             refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            refreshPublishedStandingsRowsWithCurrentSource(
+                season: season,
+                reason: reason
+            )
             let refreshedAt = Date()
             markRefreshSuccess(for: .games, at: refreshedAt, isStale: false)
             await refreshRepositoryDebugInfo(dataSets: [])
@@ -649,6 +719,25 @@ final class AppModel {
             await task.value
             guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
         }
+        if let sourceTask = inFlightStandingsSourceTasks[season] {
+            #if DEBUG
+            print("[HomeFallback] standings source joined rankMovementLoad reason=\(reason) season=\(season)")
+            #endif
+            let loaded = await sourceTask.value
+            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
+            if loaded {
+                return
+            }
+        } else if let prefetchTask = standingsSourcePrefetchTasks[season] {
+            #if DEBUG
+            print("[HomeFallback] standings source joined prefetch reason=\(reason) season=\(season)")
+            #endif
+            await prefetchTask.value
+            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
+            if standingsSourceGamesBySeason[season]?.isEmpty == false {
+                return
+            }
+        }
         guard standingsSourceGamesBySeason[season] == nil else { return }
 
         do {
@@ -659,8 +748,12 @@ final class AppModel {
                 in: sourceGames,
                 snapshot: snapshot
             )
-            standingsSourceGamesBySeason[season] = normalizedGames
+            storeStandingsSourceGames(normalizedGames, season: season)
             refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            refreshPublishedStandingsRowsWithCurrentSource(
+                season: season,
+                reason: reason
+            )
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
             await refreshRepositoryDebugInfo(dataSets: [])
             #if DEBUG
@@ -693,19 +786,56 @@ final class AppModel {
     }
 
     private func loadStandingsSourceGamesIfAvailable(season: Int, reason: String) async -> Bool {
+        if standingsSourceGamesBySeason[season]?.isEmpty == false {
+            return true
+        }
+
+        if let task = inFlightStandingsSourceTasks[season] {
+            #if DEBUG
+            print("[StandingsRankMovement] source=games reason=\(reason) standingsSourceLoadJoined=true")
+            #endif
+            let result = await task.value
+            if result {
+                refreshPublishedStandingsRowsWithCurrentSource(
+                    season: season,
+                    reason: "\(reason)Joined"
+                )
+            }
+            return result
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            return await self.performLoadStandingsSourceGamesIfAvailable(season: season, reason: reason)
+        }
+        inFlightStandingsSourceTasks[season] = task
+        let result = await task.value
+        inFlightStandingsSourceTasks[season] = nil
+        return result
+    }
+
+    private func performLoadStandingsSourceGamesIfAvailable(season: Int, reason: String) async -> Bool {
         do {
-            let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
-            guard normalizedGames.isEmpty == false else {
+            let startedAt = Date()
+            let sourceGames = try await fetchStandingsSourceGames(season: season)
+            guard sourceGames.isEmpty == false else {
                 #if DEBUG
                 print("[StandingsRankMovement] source=rankRows reason=\(reason) standingsSourceGames=0")
                 #endif
                 return false
             }
 
-            standingsSourceGamesBySeason[season] = normalizedGames
-            refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            storeStandingsSourceGames(sourceGames, season: season)
+            refreshLocalStandingsProbabilitySignals(for: sourceGames)
+            refreshPublishedStandingsRowsWithCurrentSource(
+                season: season,
+                reason: reason
+            )
             #if DEBUG
-            print("[StandingsRankMovement] source=games reason=\(reason) standingsSourceGames=\(normalizedGames.count)")
+            let duration = Date().timeIntervalSince(startedAt)
+            print(
+                "[StandingsRankMovement] source=games reason=\(reason) standingsSourceGames=\(sourceGames.count) duration=\(String(format: "%.3f", duration))s officialRequestsAvoided=true"
+            )
             #endif
             return true
         } catch {
@@ -714,6 +844,13 @@ final class AppModel {
             #endif
             return false
         }
+    }
+
+    private func storeStandingsSourceGames(_ games: [GameDetail], season: Int) {
+        standingsSourceGamesBySeason[season] = games
+        #if DEBUG
+        print("[StandingsRankMovement] source stored season=\(season) count=\(games.count)")
+        #endif
     }
 
     private func currentStandingsSeason() -> Int {
@@ -1012,11 +1149,23 @@ final class AppModel {
         standingsCalculationGames.filter(\.isRegularSeason)
     }
 
-    var standingsSnapshots: [TeamStandingsSnapshot] {
-        let season = currentStandingsSeason()
+    private func refreshPublishedStandingsRowsWithCurrentSource(season: Int, reason: String) {
+        let snapshots = makeStandingsSnapshotsForCurrentState(season: season)
+        standingsSnapshots = snapshots
+        standingsRowsRevision += 1
+#if DEBUG
+        let sourceGamesCount = standingsSourceGamesBySeason[season]?.count ?? 0
+        let movementCount = snapshots.filter { $0.rankMovement != .unchanged }.count
+        print("[StandingsRankMovement] published rows assigned season=\(season) rows=\(snapshots.count) movementCount=\(movementCount) revision=\(standingsRowsRevision)")
+        print("[StandingsRankMovement] republish rows season=\(season) rows=\(snapshots.count) sourceGames=\(sourceGamesCount) reason=\(reason)")
+        print("[StandingsRankMovement] republish complete movementCount=\(movementCount)")
+#endif
+    }
+
+    private func makeStandingsSnapshotsForCurrentState(season: Int) -> [TeamStandingsSnapshot] {
         let preGameRanks = preGameRankByTeamID(for: season)
         if standingsSourceGamesBySeason[season]?.isEmpty == false {
-            return gameCalculatedStandingsSnapshots(preGameRanks: preGameRanks)
+            return gameCalculatedStandingsSnapshots(season: season, preGameRanks: preGameRanks)
         }
         if let cached = standingsSnapshotCacheBySeason[season], cached.isEmpty == false {
             let snapshots = cached
@@ -1034,10 +1183,13 @@ final class AppModel {
             )
         }
 
-        return gameCalculatedStandingsSnapshots(preGameRanks: preGameRanks)
+        return gameCalculatedStandingsSnapshots(season: season, preGameRanks: preGameRanks)
     }
 
-    private func gameCalculatedStandingsSnapshots(preGameRanks: [String: Int]) -> [TeamStandingsSnapshot] {
+    private func gameCalculatedStandingsSnapshots(
+        season: Int,
+        preGameRanks: [String: Int]
+    ) -> [TeamStandingsSnapshot] {
         let rankedSnapshots = teams
             .map { makeStandingsSnapshot(for: $0, probabilitySignalsByTeamID: localStandingsProbabilitySignalsByTeamID) }
             .sorted(by: standingsComparator)
@@ -1054,17 +1206,19 @@ final class AppModel {
                 remainingRegularSeasonGames: snapshot.remainingRegularSeasonGames,
                 recentResults: snapshot.recentResults,
                 unknownClassificationGames: snapshot.unknownClassificationGames,
+                virtualUnscheduledRemainingGames: snapshot.virtualUnscheduledRemainingGames,
                 rankingResolution: snapshot.rankingResolution,
                 rankingResolutionPosition: snapshot.rankingResolutionPosition,
                 postseasonQualificationProbability: snapshot.postseasonQualificationProbability,
                 postseasonQualificationStatus: snapshot.postseasonQualificationStatus,
                 postseasonProbabilityUnavailableReason: snapshot.postseasonProbabilityUnavailableReason,
+                precomputedStreakText: snapshot.precomputedStreakText,
                 preGameRank: preGameRanks[snapshot.team.id]
             )
         }
         return logStandingsRankMovementDiagnostics(
             snapshots,
-            season: currentStandingsSeason(),
+            season: season,
             preGameRanks: preGameRanks
         )
     }
@@ -2488,6 +2642,10 @@ final class AppModel {
             games = mergedGames
             invalidateScheduleDerivedCaches()
             scheduleLocalStandingsProbabilityRefresh()
+            refreshPublishedStandingsRowsWithCurrentSource(
+                season: currentStandingsSeason(),
+                reason: "gamesMerge"
+            )
         }
         #if DEBUG
         print("[ScheduleSync] mergeSummary fetched=\(incomingGames.count) inserted=\(inserted) updated=\(updated) skipped=\(skippedExisting)")
@@ -2602,6 +2760,10 @@ final class AppModel {
                 await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: games)
                 await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: games)
                 scheduleLocalStandingsProbabilityRefresh()
+                refreshPublishedStandingsRowsWithCurrentSource(
+                    season: currentStandingsSeason(),
+                    reason: "gamesRefresh"
+                )
                 if repositoryRuntimeState == nil {
                     markRefreshSuccess(for: .games, at: Date(), isStale: false)
                 }
@@ -3324,6 +3486,10 @@ final class AppModel {
                 }
                 self.localStandingsProbabilitySignalsByTeamID = signals
                 self.localStandingsProbabilityRefreshTask = nil
+                self.refreshPublishedStandingsRowsWithCurrentSource(
+                    season: self.currentStandingsSeason(),
+                    reason: "probabilitySignals"
+                )
             }
         }
     }
