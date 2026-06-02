@@ -64,48 +64,86 @@ struct StandingsView: View {
     }
 
     private var standingsTable: some View {
-        GeometryReader { proxy in
+        let rows = appModel.standingsSnapshots
+        let rowsRevision = appModel.standingsRowsRevision
+#if DEBUG
+        let _ = Self.logVisibleRows(rows, revision: rowsRevision)
+#endif
+
+        return GeometryReader { proxy in
             let metrics = StandingsTableMetrics(width: proxy.size.width)
-            let leaderSnapshot = appModel.standingsSnapshots.first
+            let leaderSnapshot = rows.first
 
             VStack(spacing: 5) {
                 StandingsTableHeader(metrics: metrics)
 
                 LazyVStack(spacing: 5) {
-                    ForEach(appModel.standingsSnapshots) { snapshot in
+                    ForEach(rows) { snapshot in
                         StandingsRowView(
                             snapshot: snapshot,
                             leaderSnapshot: leaderSnapshot,
                             favoriteTeamID: appModel.settings.favoriteTeamID,
                             metrics: metrics
                         )
+                        .id(StandingsRowRenderIdentity(snapshot: snapshot))
                     }
                 }
             }
+            .id(rowsRevision)
         }
-        .frame(height: CGFloat(appModel.standingsSnapshots.count) * 57 + 18)
+        .frame(height: CGFloat(rows.count) * 57 + 18)
     }
+
+#if DEBUG
+    private static func logVisibleRows(_ rows: [TeamStandingsSnapshot], revision: Int) {
+        let movementCount = rows.filter { $0.rankMovement != .unchanged }.count
+        print("[StandingsRankMovement] visible rows source count=\(rows.count) movementCount=\(movementCount) revision=\(revision)")
+    }
+#endif
 }
 
 private struct StandingsTableMetrics {
+    let width: CGFloat
     let isCompact: Bool
+    let isNarrow: Bool
 
     init(width: CGFloat) {
+        self.width = width
         isCompact = width < 370
+        isNarrow = width < 350
     }
 
     var rowHeight: CGFloat { isCompact ? 48 : 52 }
-    var horizontalPadding: CGFloat { isCompact ? 6 : 7 }
-    var spacing: CGFloat { 4 }
-    var teamColumnWidth: CGFloat { isCompact ? 76 : 128 }
-    var rankWidth: CGFloat { isCompact ? 22 : 28 }
-    var logoSize: CGFloat { isCompact ? 22 : 30 }
-    var gamesWidth: CGFloat { isCompact ? 24 : 26 }
-    var countWidth: CGFloat { isCompact ? 19 : 20 }
-    var percentageWidth: CGFloat { isCompact ? 38 : 42 }
-    var gamesBehindWidth: CGFloat { isCompact ? 32 : 36 }
-    var streakWidth: CGFloat { isCompact ? 30 : 32 }
+    var horizontalPadding: CGFloat { isNarrow ? 4 : (isCompact ? 5 : 6) }
+    var spacing: CGFloat { isNarrow ? 2 : (isCompact ? 3 : 4) }
+    var rankMovementWidth: CGFloat { isNarrow ? 36 : (isCompact ? 40 : 42) }
+    var rankWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
+    var movementWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
+    var logoSize: CGFloat { isNarrow ? 18 : (isCompact ? 20 : 22) }
+    var gamesWidth: CGFloat { isNarrow ? 21 : (isCompact ? 22 : 24) }
+    var countWidth: CGFloat { isNarrow ? 17 : (isCompact ? 18 : 19) }
+    var percentageWidth: CGFloat { isNarrow ? 35 : (isCompact ? 37 : 39) }
+    var gamesBehindWidth: CGFloat { isNarrow ? 29 : (isCompact ? 31 : 33) }
+    var streakWidth: CGFloat { isNarrow ? 56 : 58 }
     var accentWidth: CGFloat { isCompact ? 78 : 120 }
+
+    var teamColumnWidth: CGFloat {
+        let maximumTeamWidth: CGFloat = isNarrow ? 64 : (isCompact ? 72 : 82)
+        let minimumTeamWidth: CGFloat = isNarrow ? 50 : (isCompact ? 58 : 64)
+        let remainingWidth = width - nonTeamColumnsWidth
+        return min(max(remainingWidth, minimumTeamWidth), maximumTeamWidth)
+    }
+
+    private var nonTeamColumnsWidth: CGFloat {
+        rankMovementWidth +
+            gamesWidth +
+            countWidth * 3 +
+            percentageWidth +
+            gamesBehindWidth +
+            streakWidth +
+            spacing * 8 +
+            horizontalPadding * 2
+    }
 }
 
 private struct StandingsTableHeader: View {
@@ -115,6 +153,8 @@ private struct StandingsTableHeader: View {
 
     var body: some View {
         HStack(spacing: metrics.spacing) {
+            Color.clear
+                .frame(width: metrics.rankMovementWidth)
             Text("팀")
                 .frame(width: metrics.teamColumnWidth, alignment: .leading)
             headerLabel("경기", width: metrics.gamesWidth)
@@ -146,6 +186,9 @@ private struct StandingsRowView: View {
     let metrics: StandingsTableMetrics
 
     var body: some View {
+#if DEBUG
+        let _ = logRender()
+#endif
         ZStack(alignment: .leading) {
             rowBackground
 
@@ -156,6 +199,7 @@ private struct StandingsRowView: View {
             )
 
             HStack(spacing: metrics.spacing) {
+                rankCell
                 teamCell
                 StandingsColumnValue(value: "\(snapshot.gamesPlayed)", width: metrics.gamesWidth, isFavorite: isFavorite)
                 StandingsColumnValue(value: "\(snapshot.wins)", width: metrics.countWidth, isFavorite: isFavorite)
@@ -177,18 +221,29 @@ private struct StandingsRowView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private var teamCell: some View {
-        HStack(spacing: metrics.isCompact ? 4 : 6) {
+    private var rankCell: some View {
+        HStack(spacing: 2) {
             Text("\(snapshot.rank)")
-                .font((isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy)))
+                .font(isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy))
                 .monospacedDigit()
                 .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
                 .frame(width: metrics.rankWidth, alignment: .trailing)
 
-            if metrics.isCompact == false {
-                TeamMarkView(team: snapshot.team, size: metrics.logoSize)
-                    .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
-            }
+            Text(rankMovement.displayText)
+                .font(.caption2.weight(.black))
+                .monospacedDigit()
+                .foregroundStyle(rankMovementColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(width: metrics.movementWidth, alignment: .trailing)
+        }
+        .frame(width: metrics.rankMovementWidth, alignment: .trailing)
+    }
+
+    private var teamCell: some View {
+        HStack(spacing: metrics.isCompact ? 4 : 6) {
+            TeamMarkView(team: snapshot.team, size: metrics.logoSize)
+                .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
 
             Text(teamName)
                 .font(.system(size: 15, weight: isFavorite ? .black : .bold, design: .default))
@@ -241,9 +296,32 @@ private struct StandingsRowView: View {
         isFavorite ? Color.white.opacity(0.28) : Color.white.opacity(0.08)
     }
 
-    private var accessibilityLabel: String {
-        "\(snapshot.rank)위 \(identity.standingsDisplayName), \(snapshot.wins)승 \(snapshot.losses)패 \(snapshot.ties)무, 승률 \(snapshot.winPercentageText), 게임차 \(snapshot.gamesBehindText(leader: leaderSnapshot)), 연속 \(snapshot.currentStreakText)"
+    private var rankMovement: RankingMovement {
+        snapshot.rankMovement
     }
+
+    private var rankMovementColor: Color {
+        switch rankMovement {
+        case .up:
+            Color(red: 0.42, green: 1.0, blue: 0.62)
+        case .down:
+            Color(red: 1.0, green: 0.58, blue: 0.58)
+        case .unchanged:
+            Color.white.opacity(0.48)
+        }
+    }
+
+    private var accessibilityLabel: String {
+        let movementText = rankMovement.accessibilityText.map { ", \($0)" } ?? ""
+        return "\(snapshot.rank)위 \(identity.standingsDisplayName)\(movementText), \(snapshot.wins)승 \(snapshot.losses)패 \(snapshot.ties)무, 승률 \(snapshot.winPercentageText), 게임차 \(snapshot.gamesBehindText(leader: leaderSnapshot)), 연속 \(snapshot.currentStreakText)"
+    }
+
+#if DEBUG
+    private func logRender() {
+        let preGameRankText = snapshot.preGameRank.map(String.init) ?? "<nil>"
+        print("[StandingsRankMovement] row render teamId=\(snapshot.team.id) rank=\(snapshot.rank) preGameRank=\(preGameRankText) movement displayText=\(rankMovement.displayText)")
+    }
+#endif
 }
 
 private struct StandingsColumnValue: View {
@@ -257,7 +335,8 @@ private struct StandingsColumnValue: View {
             .monospacedDigit()
             .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.92))
             .lineLimit(1)
-            .minimumScaleFactor(0.74)
+            .minimumScaleFactor(0.75)
+            .allowsTightening(true)
             .frame(width: width, alignment: .trailing)
     }
 }
@@ -333,22 +412,6 @@ private extension TeamStandingsSnapshot {
             return String(winPercentageText.dropFirst())
         }
         return winPercentageText
-    }
-
-    var currentStreakText: String {
-        if let precomputedStreakText,
-           precomputedStreakText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            return precomputedStreakText
-        }
-        guard let firstResult = recentResults.first else { return "-" }
-
-        var count = 0
-        for result in recentResults {
-            guard result == firstResult else { break }
-            count += 1
-        }
-
-        return "\(count)\(firstResult.shortLabel)"
     }
 
     func gamesBehindText(leader: TeamStandingsSnapshot?) -> String {

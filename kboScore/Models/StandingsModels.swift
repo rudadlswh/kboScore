@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
+nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
     let season: Int
     let teamID: UUID
     let teamCode: String?
@@ -106,13 +106,13 @@ struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
         streakType = try container.decode(String.self, forKey: .streakType)
         streakCount = try container.decode(Int.self, forKey: .streakCount)
         streakText = try container.decode(String.self, forKey: .streakText)
-        lastGameDate = SupabaseDateParser.parseGameDate(try? container.decodeIfPresent(String.self, forKey: .lastGameDate))
+        lastGameDate = KBODateParser.parseGameDate(try? container.decodeIfPresent(String.self, forKey: .lastGameDate))
         calculatedAt = (try? container.decodeIfPresent(Date.self, forKey: .calculatedAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .calculatedAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .calculatedAt))
         updatedAt = (try? container.decodeIfPresent(Date.self, forKey: .updatedAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .updatedAt))
         createdAt = (try? container.decodeIfPresent(Date.self, forKey: .createdAt)) ??
-            SupabaseDateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
+            KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
     }
 
     nonisolated func encode(to encoder: any Encoder) throws {
@@ -148,7 +148,7 @@ struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
 }
 
 private extension KeyedDecodingContainer {
-    func decodeFlexibleDouble(forKey key: Key) throws -> Double {
+    nonisolated func decodeFlexibleDouble(forKey key: Key) throws -> Double {
         if let value = try? decode(Double.self, forKey: key) {
             return value
         }
@@ -160,12 +160,12 @@ private extension KeyedDecodingContainer {
     }
 }
 
-enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
+nonisolated enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
     case resolved
     case tiebreakGameRequired = "tiebreak_game_required"
 }
 
-enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable {
+nonisolated enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable {
     case unknownClassificationGames = "unknown_classification_games"
     case incompleteRegularSeasonSchedule = "incomplete_regular_season_schedule"
     case insufficientCompletedRegularSeasonGames = "insufficient_completed_regular_season_games"
@@ -185,12 +185,12 @@ enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable
     }
 }
 
-enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
+nonisolated enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
     case clinched
     case eliminated
 }
 
-enum StandingsMetrics {
+nonisolated enum StandingsMetrics {
     nonisolated static let pythagoreanExponent = 1.83
     nonisolated static let postseasonQualifierCount = 5
     nonisolated static let homeFieldAdvantageMultiplier = 1.02
@@ -241,7 +241,7 @@ enum StandingsMetrics {
     }
 }
 
-struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
+nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let team: Team
     let rank: Int
     let wins: Int
@@ -260,6 +260,7 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason?
     let precomputedGamesBehind: Double?
     let precomputedStreakText: String?
+    let preGameRank: Int?
 
     nonisolated init(
         team: Team,
@@ -279,7 +280,8 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         postseasonQualificationStatus: PostseasonQualificationStatus? = nil,
         postseasonProbabilityUnavailableReason: PostseasonProbabilityUnavailableReason? = nil,
         precomputedGamesBehind: Double? = nil,
-        precomputedStreakText: String? = nil
+        precomputedStreakText: String? = nil,
+        preGameRank: Int? = nil
     ) {
         self.team = team
         self.rank = rank
@@ -299,9 +301,38 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.postseasonProbabilityUnavailableReason = postseasonProbabilityUnavailableReason
         self.precomputedGamesBehind = precomputedGamesBehind
         self.precomputedStreakText = precomputedStreakText
+        self.preGameRank = preGameRank
+    }
+
+    nonisolated func withPreGameRank(_ preGameRank: Int?) -> TeamStandingsSnapshot {
+        TeamStandingsSnapshot(
+            team: team,
+            rank: rank,
+            wins: wins,
+            losses: losses,
+            ties: ties,
+            runsScored: runsScored,
+            runsAllowed: runsAllowed,
+            remainingRegularSeasonGames: remainingRegularSeasonGames,
+            recentResults: recentResults,
+            unknownClassificationGames: unknownClassificationGames,
+            virtualUnscheduledRemainingGames: virtualUnscheduledRemainingGames,
+            rankingResolution: rankingResolution,
+            rankingResolutionPosition: rankingResolutionPosition,
+            postseasonQualificationProbability: postseasonQualificationProbability,
+            postseasonQualificationStatus: postseasonQualificationStatus,
+            postseasonProbabilityUnavailableReason: postseasonProbabilityUnavailableReason,
+            precomputedGamesBehind: precomputedGamesBehind,
+            precomputedStreakText: precomputedStreakText,
+            preGameRank: preGameRank
+        )
     }
 
     var id: String { team.id }
+
+    var rankMovement: RankingMovement {
+        StandingsRankMovementResolver.movement(currentRank: rank, preGameRank: preGameRank)
+    }
 
     var gamesPlayed: Int {
         wins + losses + ties
@@ -343,6 +374,22 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     var recentResultsMetricTitle: String {
         guard recentResults.isEmpty == false else { return "최근" }
         return "최근 \(recentResults.count)"
+    }
+
+    var currentStreakText: String {
+        if let precomputedStreakText,
+           precomputedStreakText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return precomputedStreakText
+        }
+        guard let firstResult = recentResults.first else { return "-" }
+
+        var count = 0
+        for result in recentResults {
+            guard result == firstResult else { break }
+            count += 1
+        }
+
+        return "\(count)\(firstResult.shortLabel)"
     }
 
     var currentWinningStreakCount: Int {
@@ -406,8 +453,22 @@ struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     }
 }
 
+nonisolated struct StandingsRowRenderIdentity: Hashable, Sendable {
+    let teamID: String
+    let rank: Int
+    let preGameRank: Int?
+    let movementDisplayText: String
+
+    nonisolated init(snapshot: TeamStandingsSnapshot) {
+        self.teamID = snapshot.team.id
+        self.rank = snapshot.rank
+        self.preGameRank = snapshot.preGameRank
+        self.movementDisplayText = snapshot.rankMovement.displayText
+    }
+}
+
 extension TeamGameResult {
-    var shortLabel: String {
+    nonisolated var shortLabel: String {
         switch self {
         case .win:
             "승"

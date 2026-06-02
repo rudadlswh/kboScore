@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum GameSeasonClassification: String, CaseIterable, Codable, Hashable, Sendable {
+nonisolated enum GameSeasonClassification: String, CaseIterable, Codable, Hashable, Sendable {
     case unknown
     case regularSeason = "regular_season"
     case exhibitionPreseason = "exhibition_preseason"
@@ -29,7 +29,7 @@ enum GameSeasonClassification: String, CaseIterable, Codable, Hashable, Sendable
     }
 }
 
-enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
+nonisolated enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
     case upcoming
     case live
     case final
@@ -70,7 +70,7 @@ enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
-struct RunnerState: Hashable, Codable, Sendable {
+nonisolated struct RunnerState: Hashable, Codable, Sendable {
     var first: Bool
     var second: Bool
     var third: Bool
@@ -78,7 +78,7 @@ struct RunnerState: Hashable, Codable, Sendable {
     nonisolated static let empty = RunnerState(first: false, second: false, third: false)
 }
 
-enum GameEventType: String, Codable, Hashable, Sendable {
+nonisolated enum GameEventType: String, Codable, Hashable, Sendable {
     case score
     case pitching
     case keyPlay
@@ -86,7 +86,7 @@ enum GameEventType: String, Codable, Hashable, Sendable {
     case note
 }
 
-struct GameEvent: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct GameEvent: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let type: GameEventType
     let headline: String
@@ -94,13 +94,13 @@ struct GameEvent: Identifiable, Hashable, Codable, Sendable {
     let timestamp: Date
 }
 
-enum TeamGameResult: Hashable, Sendable {
+nonisolated enum TeamGameResult: Hashable, Sendable {
     case win
     case loss
     case tie
 }
 
-struct GameDetail: Identifiable, Hashable, Codable, Sendable {
+nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let scheduledStart: Date
     let venue: String
@@ -377,13 +377,13 @@ struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
-struct GameBaseRunners: Hashable, Codable, Sendable {
+nonisolated struct GameBaseRunners: Hashable, Codable, Sendable {
     let first: String?
     let second: String?
     let third: String?
 }
 
-struct GameSummary: Identifiable, Hashable, Sendable {
+nonisolated struct GameSummary: Identifiable, Hashable, Sendable {
     let id: UUID
     let scheduledStart: Date
     let venue: String

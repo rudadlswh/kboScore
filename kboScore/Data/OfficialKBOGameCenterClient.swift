@@ -7,96 +7,36 @@
 
 import Foundation
 
-struct GameCenterDetailPayload: Sendable {
-    let summary: GameCenterSummary
-    let lineScore: GameCenterLineScore?
-    let review: GameCenterReview?
-    let preview: GameCenterPreview?
-}
-
-struct GameCenterSummary: Sendable {
-    let officialGameID: String
-    let dateText: String
-    let stadium: String?
-    let startTime: String?
-    let endTime: String?
-    let durationText: String?
-    let crowdText: String?
-    let status: GameStatus
-    let inningText: String?
-    let awayScore: Int?
-    let homeScore: Int?
-    let balls: Int?
-    let strikes: Int?
-    let outs: Int?
-    let bases: RunnerState?
-    let baseRunners: GameCenterBaseRunners?
-    let probableStarters: GameCenterProbableStarters?
-    let winningPitcher: String?
-    let losingPitcher: String?
-    let savePitcher: String?
-}
-
-struct GameCenterBaseRunners: Hashable, Sendable {
-    let first: String?
-    let second: String?
-    let third: String?
-}
-
-struct GameCenterProbableStarters: Sendable {
-    let away: String?
-    let home: String?
-}
-
-struct GameCenterLineScore: Sendable {
-    let inningLabels: [String]
-    let awayInnings: [String]
-    let homeInnings: [String]
-    let awayTotals: GameCenterTeamLineTotals
-    let homeTotals: GameCenterTeamLineTotals
-}
-
-struct GameCenterTeamLineTotals: Sendable {
-    let runs: String?
-    let hits: String?
-    let errors: String?
-    let walks: String?
-}
-
-struct GameCenterReview: Sendable {
-    let summaryItems: [GameCenterSummaryItem]
-    let awayBatting: GameCenterBattingSection
-    let homeBatting: GameCenterBattingSection
-    let awayPitching: GameCenterPitchingSection
-    let homePitching: GameCenterPitchingSection
-
-    var hasDisplayableRecords: Bool {
-        awayBatting.lines.isEmpty == false ||
-            homeBatting.lines.isEmpty == false ||
-            awayPitching.lines.isEmpty == false ||
-            homePitching.lines.isEmpty == false ||
-            summaryItems.isEmpty == false
+struct GameCenterBoxScorePayload: Sendable {
+    enum Source: String, Sendable {
+        case fullBoxscore
+        case scoreboardHTMLBoxscore
+        case keyplayerPartialLimited
     }
-}
 
-struct GameCenterKeyStatsComparison: Sendable, Equatable {
-    let away: GameCenterTeamKeyStats
-    let home: GameCenterTeamKeyStats
-}
-
-struct GameCenterTeamKeyStats: Sendable, Equatable {
-    let hits: Int
-    let homeRuns: Int
-    let stolenBases: Int
-    let strikeouts: Int
-    let doublePlays: Int
-    let errors: Int
-}
-
-private struct GameCenterBoxScorePayload: Sendable {
+    let source: Source
     let summaryItems: [GameCenterSummaryItem]
     let battingSections: [GameCenterBattingSection]
     let pitchingSections: [GameCenterPitchingSection]
+
+    var recordSource: GameCenterRecordSource {
+        switch source {
+        case .fullBoxscore:
+            .fullBoxscore
+        case .scoreboardHTMLBoxscore:
+            .scoreboardHTMLBoxscore
+        case .keyplayerPartialLimited:
+            .keyplayerPartialLimited
+        }
+    }
+
+    var batterCount: Int {
+        battingSections.reduce(0) { $0 + $1.lines.count }
+    }
+
+    var pitcherCount: Int {
+        pitchingSections.reduce(0) { $0 + $1.lines.count }
+    }
 
     var review: GameCenterReview? {
         guard battingSections.count >= 2 || pitchingSections.count >= 2 else {
@@ -110,241 +50,8 @@ private struct GameCenterBoxScorePayload: Sendable {
             awayBatting: battingSections[safe: 0] ?? emptyBatting,
             homeBatting: battingSections[safe: 1] ?? emptyBatting,
             awayPitching: pitchingSections[safe: 0] ?? emptyPitching,
-            homePitching: pitchingSections[safe: 1] ?? emptyPitching
-        )
-    }
-}
-
-struct GameCenterSummaryItem: Identifiable, Hashable, Sendable {
-    let id = UUID()
-    let title: String
-    let value: String
-    let values: [String]
-
-    init(title: String, value: String, values: [String]? = nil) {
-        self.title = title
-        self.value = value
-        self.values = values ?? [value]
-    }
-}
-
-struct GameCenterBattingSection: Sendable {
-    let lines: [GameCenterBattingLine]
-    let totals: GameCenterBattingTotals?
-}
-
-struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
-    let id = UUID()
-    let battingOrder: String
-    let position: String
-    let name: String
-    let atBats: String?
-    let runs: String?
-    let hits: String?
-    let runsBattedIn: String?
-    let homeRuns: String?
-    let walks: String?
-    let strikeouts: String?
-    let stolenBases: String?
-    let average: String?
-    let plateAppearanceHomeRuns: String?
-    let plateAppearanceWalks: String?
-    let plateAppearanceStrikeouts: String?
-
-    init(
-        battingOrder: String,
-        position: String,
-        name: String,
-        atBats: String?,
-        runs: String?,
-        hits: String?,
-        runsBattedIn: String?,
-        homeRuns: String?,
-        walks: String?,
-        strikeouts: String?,
-        stolenBases: String? = nil,
-        average: String?,
-        plateAppearanceHomeRuns: String? = nil,
-        plateAppearanceWalks: String? = nil,
-        plateAppearanceStrikeouts: String? = nil
-    ) {
-        self.battingOrder = battingOrder
-        self.position = position
-        self.name = name
-        self.atBats = atBats
-        self.runs = runs
-        self.hits = hits
-        self.runsBattedIn = runsBattedIn
-        self.homeRuns = homeRuns
-        self.walks = walks
-        self.strikeouts = strikeouts
-        self.stolenBases = stolenBases
-        self.average = average
-        self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
-        self.plateAppearanceWalks = plateAppearanceWalks
-        self.plateAppearanceStrikeouts = plateAppearanceStrikeouts
-    }
-
-    var battingOrderNumber: String? {
-        battingOrder.battingOrderNumber
-    }
-}
-
-struct GameCenterBattingTotals: Sendable {
-    let atBats: String?
-    let runs: String?
-    let hits: String?
-    let runsBattedIn: String?
-    let homeRuns: String?
-    let walks: String?
-    let strikeouts: String?
-    let stolenBases: String?
-    let average: String?
-    let plateAppearanceHomeRuns: String?
-    let plateAppearanceWalks: String?
-    let plateAppearanceStrikeouts: String?
-
-    init(
-        atBats: String?,
-        runs: String?,
-        hits: String?,
-        runsBattedIn: String?,
-        homeRuns: String?,
-        walks: String?,
-        strikeouts: String?,
-        stolenBases: String? = nil,
-        average: String?,
-        plateAppearanceHomeRuns: String? = nil,
-        plateAppearanceWalks: String? = nil,
-        plateAppearanceStrikeouts: String? = nil
-    ) {
-        self.atBats = atBats
-        self.runs = runs
-        self.hits = hits
-        self.runsBattedIn = runsBattedIn
-        self.homeRuns = homeRuns
-        self.walks = walks
-        self.strikeouts = strikeouts
-        self.stolenBases = stolenBases
-        self.average = average
-        self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
-        self.plateAppearanceWalks = plateAppearanceWalks
-        self.plateAppearanceStrikeouts = plateAppearanceStrikeouts
-    }
-}
-
-struct GameCenterPitchingSection: Sendable {
-    let lines: [GameCenterPitchingLine]
-}
-
-struct GameCenterPitchingLine: Identifiable, Hashable, Sendable {
-    let id = UUID()
-    let pitchingOrder: String?
-    let name: String
-    let role: String?
-    let result: String?
-    let innings: String?
-    let battersFaced: String?
-    let pitches: String?
-    let atBats: String?
-    let hitsAllowed: String?
-    let walksAllowed: String?
-    let hitBatters: String?
-    let walksOrHitByPitch: String?
-    let strikeouts: String?
-    let homeRunsAllowed: String?
-    let runsAllowed: String?
-    let earnedRuns: String?
-    let earnedRunAverage: String?
-
-    init(
-        pitchingOrder: String? = nil,
-        name: String,
-        role: String?,
-        result: String?,
-        innings: String?,
-        battersFaced: String? = nil,
-        pitches: String?,
-        atBats: String? = nil,
-        hitsAllowed: String?,
-        walksAllowed: String?,
-        hitBatters: String?,
-        walksOrHitByPitch: String? = nil,
-        strikeouts: String?,
-        homeRunsAllowed: String?,
-        runsAllowed: String?,
-        earnedRuns: String?,
-        earnedRunAverage: String?
-    ) {
-        self.pitchingOrder = pitchingOrder
-        self.name = name
-        self.role = role
-        self.result = result
-        self.innings = innings
-        self.battersFaced = battersFaced
-        self.pitches = pitches
-        self.atBats = atBats
-        self.hitsAllowed = hitsAllowed
-        self.walksAllowed = walksAllowed
-        self.hitBatters = hitBatters
-        self.walksOrHitByPitch = walksOrHitByPitch
-        self.strikeouts = strikeouts
-        self.homeRunsAllowed = homeRunsAllowed
-        self.runsAllowed = runsAllowed
-        self.earnedRuns = earnedRuns
-        self.earnedRunAverage = earnedRunAverage
-    }
-}
-
-struct GameCenterPreview: Sendable {
-    let probableStarters: GameCenterProbableStarters?
-    let awayMatchup: GameCenterMatchupSnapshot?
-    let homeMatchup: GameCenterMatchupSnapshot?
-}
-
-struct GameCenterMatchupSnapshot: Sendable {
-    let teamName: String
-    let seasonRecord: String?
-    let recentFive: String?
-    let teamERA: String?
-    let battingAverage: String?
-    let runsScored: String?
-    let runsAllowed: String?
-}
-
-private enum OfficialBattingTableInterpretation: String {
-    case lineup
-    case aggregateBattingStats
-    case plateAppearanceResults
-    case unknown
-}
-
-private struct PlateAppearanceDerivedStats: Sendable, Equatable {
-    let homeRuns: Int
-    let walks: Int
-    let strikeouts: Int
-
-    init(homeRuns: Int = 0, walks: Int = 0, strikeouts: Int = 0) {
-        self.homeRuns = homeRuns
-        self.walks = walks
-        self.strikeouts = strikeouts
-    }
-
-    func adding(resultText: String) -> PlateAppearanceDerivedStats {
-        resultText.plateAppearanceResultTokens.reduce(self) { stats, result in
-            PlateAppearanceDerivedStats(
-                homeRuns: stats.homeRuns + (result.isHomeRunPlateAppearance ? 1 : 0),
-                walks: stats.walks + (result.isWalkPlateAppearance ? 1 : 0),
-                strikeouts: stats.strikeouts + (result.isStrikeoutPlateAppearance ? 1 : 0)
-            )
-        }
-    }
-
-    static func + (lhs: PlateAppearanceDerivedStats, rhs: PlateAppearanceDerivedStats) -> PlateAppearanceDerivedStats {
-        PlateAppearanceDerivedStats(
-            homeRuns: lhs.homeRuns + rhs.homeRuns,
-            walks: lhs.walks + rhs.walks,
-            strikeouts: lhs.strikeouts + rhs.strikeouts
+            homePitching: pitchingSections[safe: 1] ?? emptyPitching,
+            recordSource: recordSource
         )
     }
 }
@@ -362,166 +69,391 @@ extension GameCenterReview {
             lineScore: lineScore
         ).comparison
     }
+
+    func fillingMissingLiveBatters(from lineupSections: [GameCenterBattingSection]?) -> GameCenterReview {
+        guard let lineupSections, lineupSections.count >= 2 else { return self }
+        return GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: awayBatting.fillingMissingLiveBatters(from: lineupSections[0]),
+            homeBatting: homeBatting.fillingMissingLiveBatters(from: lineupSections[1]),
+            awayPitching: awayPitching,
+            homePitching: homePitching,
+            recordSource: recordSource
+        )
+    }
+
+    func overlayingLivePlateAppearanceStats(from plateAppearanceSections: [GameCenterBattingSection]?) -> GameCenterReview {
+        guard let plateAppearanceSections, plateAppearanceSections.count >= 2 else { return self }
+        return GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: awayBatting.overlayingLivePlateAppearanceStats(from: plateAppearanceSections[0]),
+            homeBatting: homeBatting.overlayingLivePlateAppearanceStats(from: plateAppearanceSections[1]),
+            awayPitching: awayPitching,
+            homePitching: homePitching,
+            recordSource: recordSource
+        )
+    }
+
+    func fillingMissingLivePitchers(from baseSections: [GameCenterPitchingSection]?) -> GameCenterReview {
+        guard let baseSections, baseSections.count >= 2 else { return self }
+        return GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: awayBatting,
+            homeBatting: homeBatting,
+            awayPitching: awayPitching.fillingMissingLivePitchers(from: baseSections[0]),
+            homePitching: homePitching.fillingMissingLivePitchers(from: baseSections[1]),
+            recordSource: recordSource
+        )
+    }
 }
 
-private struct GameCenterKeyStatsMapper {
-    enum Side: CaseIterable {
-        case away
-        case home
-    }
+private extension GameCenterBattingSection {
+    func fillingMissingLiveBatters(from lineupSection: GameCenterBattingSection) -> GameCenterBattingSection {
+        guard lineupSection.lines.isEmpty == false else { return self }
 
-    let review: GameCenterReview
-    let awayTeam: Team
-    let homeTeam: Team
-    let lineScore: GameCenterLineScore?
+        var mergedLines = lineupSection.lines.map { $0.liveLineupBaseLine }
+        var mergedKeys = Set(mergedLines.map(\.liveBatterMergeKey))
 
-    var comparison: GameCenterKeyStatsComparison {
-        GameCenterKeyStatsComparison(
-            away: stats(for: .away),
-            home: stats(for: .home)
+        for statsLine in lines {
+            let key = statsLine.liveBatterMergeKey
+            if let index = mergedLines.firstIndex(where: { $0.liveBatterMergeKey == key }) {
+                mergedLines[index] = mergedLines[index].overlayingLiveStats(from: statsLine)
+                #if DEBUG
+                let line = mergedLines[index]
+                print("[GameDetailLive] live batter overlay player=\(line.name) order=\(line.battingOrder) HR=\(line.homeRuns ?? line.plateAppearanceHomeRuns ?? "<nil>") SO=\(line.strikeouts ?? line.plateAppearanceStrikeouts ?? "<nil>") BB=\(line.walks ?? line.plateAppearanceWalks ?? "<nil>")")
+                #endif
+            } else if mergedKeys.insert(key).inserted {
+                mergedLines.append(statsLine)
+            }
+        }
+
+        let sortedLines = mergedLines.sortedByLiveBattingOrder
+        #if DEBUG
+        let homeRunCount = sortedLines.filter { ($0.homeRuns ?? $0.plateAppearanceHomeRuns)?.nilIfBlank != nil }.count
+        let strikeoutCount = sortedLines.filter { ($0.strikeouts ?? $0.plateAppearanceStrikeouts)?.nilIfBlank != nil }.count
+        let walkCount = sortedLines.filter { ($0.walks ?? $0.plateAppearanceWalks)?.nilIfBlank != nil }.count
+        print("[GameDetailLive] live batter section merged finalRowCount=\(sortedLines.count) nonEmptyHR=\(homeRunCount) nonEmptySO=\(strikeoutCount) nonEmptyBB=\(walkCount)")
+        #endif
+
+        return GameCenterBattingSection(
+            lines: sortedLines,
+            totals: totals
         )
     }
 
-    private func stats(for side: Side) -> GameCenterTeamKeyStats {
-        let batting = battingSection(for: side)
-        return GameCenterTeamKeyStats(
-            hits: lineScoreHits(for: side) ?? batting.totalHits ?? 0,
-            homeRuns: extraRecordValue(for: side, aliases: homeRunAliases) ?? batting.totalHomeRuns ?? 0,
-            stolenBases: extraRecordValue(for: side, aliases: stolenBaseAliases) ?? 0,
-            strikeouts: batting.totalStrikeouts ?? extraRecordValue(for: side, aliases: strikeoutAliases) ?? 0,
-            doublePlays: extraRecordValue(for: side, aliases: doublePlayAliases) ?? 0,
-            errors: lineScoreErrors(for: side) ?? extraRecordValue(for: side, aliases: errorAliases) ?? 0
+    func overlayingLivePlateAppearanceStats(from plateAppearanceSection: GameCenterBattingSection) -> GameCenterBattingSection {
+        guard plateAppearanceSection.lines.isEmpty == false else { return self }
+
+        var mergedLines = lines
+        for statsLine in plateAppearanceSection.lines {
+            guard let index = mergedLines.firstIndex(where: { $0.liveBatterMergeKey == statsLine.liveBatterMergeKey }) else {
+                continue
+            }
+            mergedLines[index] = mergedLines[index].overlayingLivePlateAppearanceStats(from: statsLine)
+        }
+
+        return GameCenterBattingSection(lines: mergedLines.sortedByLiveBattingOrder, totals: totals)
+    }
+}
+
+private extension GameCenterBattingLine {
+    var liveLineupBaseLine: GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: battingOrder,
+            position: position,
+            name: name,
+            atBats: atBats,
+            runs: runs,
+            hits: hits,
+            runsBattedIn: runsBattedIn,
+            homeRuns: homeRuns,
+            walks: walks,
+            strikeouts: strikeouts,
+            stolenBases: stolenBases,
+            average: average,
+            plateAppearanceHomeRuns: plateAppearanceHomeRuns,
+            plateAppearanceWalks: plateAppearanceWalks,
+            plateAppearanceStrikeouts: plateAppearanceStrikeouts
         )
     }
 
-    private var homeRunAliases: Set<String> {
-        normalizedAliases(["홈런", "HR", "HRA", "HOMERUN", "HOMERUNS"])
+    var liveBatterMergeKey: String {
+        name.normalizedLiveBatterName
     }
 
-    private var stolenBaseAliases: Set<String> {
-        normalizedAliases(["도루", "SB", "STOLENBASE", "STOLENBASES"])
+    func overlayingLiveStats(from statsLine: GameCenterBattingLine) -> GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: battingOrder.nilIfBlank ?? statsLine.battingOrder,
+            position: GameRecordPositionFormatter.isRicher(statsLine.position, than: position) ? statsLine.position : position,
+            name: name.nilIfBlank ?? statsLine.name,
+            atBats: statsLine.atBats ?? atBats,
+            runs: statsLine.runs ?? runs,
+            hits: statsLine.hits ?? hits,
+            runsBattedIn: statsLine.runsBattedIn ?? runsBattedIn,
+            homeRuns: statsLine.homeRuns ?? homeRuns,
+            walks: statsLine.walks ?? walks,
+            strikeouts: statsLine.strikeouts ?? strikeouts,
+            stolenBases: statsLine.stolenBases ?? stolenBases,
+            average: statsLine.average ?? average,
+            plateAppearanceHomeRuns: statsLine.plateAppearanceHomeRuns ?? plateAppearanceHomeRuns,
+            plateAppearanceWalks: statsLine.plateAppearanceWalks ?? plateAppearanceWalks,
+            plateAppearanceStrikeouts: statsLine.plateAppearanceStrikeouts ?? plateAppearanceStrikeouts
+        )
     }
 
-    private var strikeoutAliases: Set<String> {
-        normalizedAliases(["삼진", "SO", "K", "STRIKEOUT", "STRIKEOUTS"])
+    func overlayingLivePlateAppearanceStats(from statsLine: GameCenterBattingLine) -> GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: battingOrder,
+            position: position,
+            name: name,
+            atBats: atBats,
+            runs: runs,
+            hits: hits,
+            runsBattedIn: runsBattedIn,
+            homeRuns: statsLine.homeRuns ?? homeRuns,
+            walks: statsLine.walks ?? walks,
+            strikeouts: statsLine.strikeouts ?? strikeouts,
+            stolenBases: stolenBases,
+            average: average,
+            plateAppearanceHomeRuns: statsLine.homeRuns ?? plateAppearanceHomeRuns,
+            plateAppearanceWalks: statsLine.walks ?? plateAppearanceWalks,
+            plateAppearanceStrikeouts: statsLine.strikeouts ?? plateAppearanceStrikeouts
+        )
+    }
+}
+
+private extension GameCenterPitchingSection {
+    func fillingMissingLivePitchers(from baseSection: GameCenterPitchingSection) -> GameCenterPitchingSection {
+        var mergedLines = baseSection.lines
+        var mergedKeys = Set(mergedLines.map(\.livePitcherMergeKey))
+
+        for statsLine in lines {
+            let key = statsLine.livePitcherMergeKey
+            if let index = mergedLines.firstIndex(where: { $0.livePitcherMergeKey == key }) {
+                mergedLines[index] = mergedLines[index].overlayingLivePitchingStats(from: statsLine)
+            } else if mergedKeys.insert(key).inserted {
+                mergedLines.append(statsLine)
+            }
+        }
+
+        return GameCenterPitchingSection(lines: mergedLines)
+    }
+}
+
+private extension GameCenterPitchingLine {
+    var livePitcherMergeKey: String {
+        name.normalizedLivePitcherName
     }
 
-    private var doublePlayAliases: Set<String> {
-        normalizedAliases(["병살", "병살타", "GDP", "GIDP", "DOUBLEPLAY", "DOUBLEPLAYS", "GROUNDEDINTODOUBLEPLAY"])
+    func overlayingLivePitchingStats(from statsLine: GameCenterPitchingLine) -> GameCenterPitchingLine {
+        GameCenterPitchingLine(
+            pitchingOrder: pitchingOrder ?? statsLine.pitchingOrder,
+            name: name.nilIfBlank ?? statsLine.name,
+            role: role ?? statsLine.role,
+            result: statsLine.result ?? result,
+            innings: statsLine.innings ?? innings,
+            battersFaced: statsLine.battersFaced ?? battersFaced,
+            pitches: statsLine.pitches ?? pitches,
+            atBats: statsLine.atBats ?? atBats,
+            hitsAllowed: statsLine.hitsAllowed ?? hitsAllowed,
+            walksAllowed: statsLine.walksAllowed ?? walksAllowed,
+            hitBatters: statsLine.hitBatters ?? hitBatters,
+            walksOrHitByPitch: statsLine.walksOrHitByPitch ?? walksOrHitByPitch,
+            strikeouts: statsLine.strikeouts ?? strikeouts,
+            homeRunsAllowed: statsLine.homeRunsAllowed ?? homeRunsAllowed,
+            runsAllowed: statsLine.runsAllowed ?? runsAllowed,
+            earnedRuns: statsLine.earnedRuns ?? earnedRuns,
+            earnedRunAverage: statsLine.earnedRunAverage ?? earnedRunAverage
+        )
+    }
+}
+
+private extension Array where Element == GameCenterBattingLine {
+    var sortedByLiveBattingOrder: [GameCenterBattingLine] {
+        enumerated().sorted { lhs, rhs in
+            let lhsOrder = Int(lhs.element.battingOrder.battingOrderNumber ?? "") ?? Int.max
+            let rhsOrder = Int(rhs.element.battingOrder.battingOrderNumber ?? "") ?? Int.max
+            if lhsOrder == rhsOrder {
+                return lhs.offset < rhs.offset
+            }
+            return lhsOrder < rhsOrder
+        }.map(\.element)
     }
 
-    private var errorAliases: Set<String> {
-        normalizedAliases(["실책", "E", "ERROR", "ERRORS"])
+    func sum(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath]?.intValue }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+}
+
+#if DEBUG
+private extension GameCenterBattingTotals {
+    static func derived(from lines: [GameCenterBattingLine]) -> GameCenterBattingTotals? {
+        let atBats = lines.sum(\.atBats)
+        let runs = lines.sum(\.runs)
+        let hits = lines.sum(\.hits)
+        let runsBattedIn = lines.sum(\.runsBattedIn)
+        let homeRuns = lines.sum(\.homeRuns)
+        let walks = lines.sum(\.walks)
+        let strikeouts = lines.sum(\.strikeouts)
+        guard [atBats, runs, hits, runsBattedIn, homeRuns, walks, strikeouts].contains(where: { $0 != nil }) else {
+            return nil
+        }
+        return GameCenterBattingTotals(
+            atBats: atBats.map(String.init),
+            runs: runs.map(String.init),
+            hits: hits.map(String.init),
+            runsBattedIn: runsBattedIn.map(String.init),
+            homeRuns: homeRuns.map(String.init),
+            walks: walks.map(String.init),
+            strikeouts: strikeouts.map(String.init),
+            average: nil
+        )
     }
 
-    private func battingSection(for side: Side) -> GameCenterBattingSection {
-        switch side {
-        case .away:
-            review.awayBatting
-        case .home:
-            review.homeBatting
+    var debugSummary: String {
+        "AB:\(atBats ?? "-") R:\(runs ?? "-") H:\(hits ?? "-") RBI:\(runsBattedIn ?? "-") HR:\(homeRuns ?? "-") BB:\(walks ?? "-") SO:\(strikeouts ?? "-")"
+    }
+}
+
+private extension Array where Element == GameCenterPitchingLine {
+    var debugPitchingSummary: String {
+        "IP:\(compactMap(\.innings).joined(separator: "+")) R:\(sum(\.runsAllowed).map(String.init) ?? "-") ER:\(sum(\.earnedRuns).map(String.init) ?? "-") BB:\(sum(\.walksAllowed).map(String.init) ?? "-") SO:\(sum(\.strikeouts).map(String.init) ?? "-")"
+    }
+
+    func sum(_ keyPath: KeyPath<GameCenterPitchingLine, String?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath]?.intValue }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+}
+#endif
+
+private extension String {
+    var intValue: Int? {
+        Int(trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    var normalizedLiveBatterName: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+    }
+
+    var normalizedLivePitcherName: String {
+        normalizedLiveBatterName
+    }
+}
+
+private enum LivePlateAppearanceSide {
+    case away
+    case home
+
+    init?(inningText: String) {
+        let normalized = inningText.normalizedLivePlateAppearanceText
+        if normalized.contains("초") || normalized.contains("TOP") {
+            self = .away
+        } else if normalized.contains("말") || normalized.contains("BOTTOM") || normalized.contains("BOT") {
+            self = .home
+        } else {
+            return nil
         }
     }
+}
 
-    private func team(for side: Side) -> Team {
-        switch side {
-        case .away:
-            awayTeam
-        case .home:
-            homeTeam
+private enum LivePitcherSide: String {
+    case away
+    case home
+
+    init?(inningText: String?) {
+        guard let inningText else { return nil }
+        let normalized = inningText.normalizedLivePlateAppearanceText
+        if normalized.contains("초") || normalized.contains("TOP") {
+            self = .home
+        } else if normalized.contains("말") || normalized.contains("BOTTOM") || normalized.contains("BOT") {
+            self = .away
+        } else {
+            return nil
         }
     }
+}
 
-    private func lineScoreHits(for side: Side) -> Int? {
-        switch side {
-        case .away:
-            lineScore?.awayTotals.hits?.gameCenterStatInt
-        case .home:
-            lineScore?.homeTotals.hits?.gameCenterStatInt
-        }
+private struct LivePitcherAppearance: Sendable {
+    let playerName: String
+    let side: LivePitcherSide
+    let role: String
+    let firstObservedOrder: Int
+    let inningText: String
+}
+
+private extension PlateAppearanceDerivedStats {
+    var hasEvent: Bool {
+        homeRuns > 0 || walks > 0 || strikeouts > 0
+    }
+}
+
+private extension OfficialKeyPlayerRecord {
+    func keyPlayerIntegerStat(aliases: [String]) -> String? {
+        keyPlayerRawValue(aliases: aliases).flatMap(\.gameCenterStatInt).map(String.init)
     }
 
-    private func lineScoreErrors(for side: Side) -> Int? {
-        switch side {
-        case .away:
-            lineScore?.awayTotals.errors?.gameCenterStatInt
-        case .home:
-            lineScore?.homeTotals.errors?.gameCenterStatInt
+    private func keyPlayerRawValue(aliases: [String]) -> String? {
+        let normalizedAliases = Set(aliases.map(\.normalizedKeyPlayerFieldName))
+        return rawValues.first { key, _ in
+            normalizedAliases.contains(key.normalizedKeyPlayerFieldName)
+        }?.value
+    }
+}
+
+private extension String {
+    var normalizedKeyPlayerFieldName: String {
+        let scalars = unicodeScalars.filter { scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
+                CharacterSet.punctuationCharacters.contains(scalar) == false &&
+                CharacterSet.symbols.contains(scalar) == false
         }
+        return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
-    private func extraRecordValue(for side: Side, aliases: Set<String>) -> Int? {
-        let matchingItems = review.summaryItems.filter { aliases.contains($0.title.normalizedKeyStatLabel) }
-        guard matchingItems.isEmpty == false else { return nil }
+    var normalizedLivePlateAppearanceText: String {
+        let scalars = unicodeScalars.filter { scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
+                CharacterSet.punctuationCharacters.contains(scalar) == false &&
+                CharacterSet.symbols.contains(scalar) == false
+        }
+        return String(String.UnicodeScalarView(scalars)).uppercased()
+    }
 
-        var total = 0
-        var didResolve = false
-        for item in matchingItems {
-            if let value = sideColumnValue(in: item, side: side) {
-                total += value
-                didResolve = true
+    var livePlateAppearanceDerivedStats: PlateAppearanceDerivedStats {
+        let normalized = normalizedLivePlateAppearanceText
+        return PlateAppearanceDerivedStats(
+            homeRuns: (normalized.contains("홈런") || normalized.contains("HOMERUN") || normalized.contains("HR")) ? 1 : 0,
+            walks: (normalized.contains("볼넷") || normalized.contains("고의4구") || normalized.contains("자동고의4구") || normalized.contains("4구") || normalized.contains("WALK") || normalized.contains("BB")) ? 1 : 0,
+            strikeouts: (normalized.contains("삼진") || normalized.contains("낫아웃") || normalized.contains("STRIKEOUT") || normalized.contains("SO")) ? 1 : 0
+        )
+    }
+
+    var livePitcherAppearanceName: String? {
+        let patterns = [
+            #"투수\s*[:：]?\s*([가-힣A-Za-z·.\-]{2,20})"#,
+            #"([가-힣A-Za-z·.\-]{2,20})\s*(?:투수\s*)?(?:등판|교체|투입)"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(startIndex..<endIndex, in: self)
+            guard let match = regex.firstMatch(in: self, range: range),
+                  match.numberOfRanges > 1,
+                  let captureRange = Range(match.range(at: 1), in: self) else {
                 continue
             }
-            if let value = teamNamedValue(in: item, side: side) {
-                total += value
-                didResolve = true
-                continue
-            }
-
-            let eventCount = playerEventCount(in: item.value, side: side)
-            total += eventCount
-            didResolve = didResolve || eventCount > 0 || item.value.representsNoOfficialEvents
-        }
-
-        return didResolve ? total : nil
-    }
-
-    private func sideColumnValue(in item: GameCenterSummaryItem, side: Side) -> Int? {
-        guard item.values.count >= 2 else { return nil }
-        let index = side == .away ? 0 : 1
-        return item.values[safe: index]?.gameCenterStatInt
-    }
-
-    private func teamNamedValue(in item: GameCenterSummaryItem, side: Side) -> Int? {
-        let value = item.value
-        let names = teamNames(for: side)
-        for name in names {
-            let pattern = "\(NSRegularExpression.escapedPattern(for: name))\\s*[:：]?\\s*(\\d+)"
-            if let capture = value.firstGameCenterRegexCapture(pattern: pattern),
-               let intValue = Int(capture) {
-                return intValue
+            let name = String(self[captureRange])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ".,:;()[]{}"))
+            if name.nilIfBlank != nil,
+               ["교체", "등판", "투입", "투수"].contains(name) == false {
+                return name
             }
         }
         return nil
-    }
-
-    private func playerEventCount(in value: String, side: Side) -> Int {
-        let playerNames = playerNames(for: side)
-        guard playerNames.isEmpty == false else { return 0 }
-        return playerNames.reduce(0) { count, name in
-            count + value.gameCenterRegexMatchCount(
-                pattern: "\(NSRegularExpression.escapedPattern(for: name))(?=\\s|\\d|\\(|\\[|,|，|/|·|ㆍ|$)"
-            )
-        }
-    }
-
-    private func playerNames(for side: Side) -> [String] {
-        battingSection(for: side)
-            .lines
-            .map(\.name)
-            .compactMap(\.nilIfBlank)
-            .sorted { $0.count > $1.count }
-    }
-
-    private func teamNames(for side: Side) -> [String] {
-        let team = team(for: side)
-        return [team.displayName, team.shortName, team.name, team.markText]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { $0.isEmpty == false }
-    }
-
-    private func normalizedAliases(_ aliases: [String]) -> Set<String> {
-        Set(aliases.map(\.normalizedKeyStatLabel))
     }
 }
 
@@ -567,6 +499,16 @@ struct OfficialKBOGameCenterClient: Sendable {
         let battingSectionsForBaseRunners = (boxScoreValue?.battingSections.count ?? 0) >= 2
             ? boxScoreValue?.battingSections
             : lineupBattingSectionsValue
+        let review = makeReview(
+            from: boxScoreValue,
+            lineupBattingSections: lineupBattingSectionsValue,
+            context: context
+        )
+        #if DEBUG
+        if context.entry.status.isLiveLike {
+            print("[GameDetailLive] official detail result gameID=\(context.entry.gameID) lineScorePresent=\(scoreboardValue?.lineScore != nil) liveRecordPresent=\(review?.hasDisplayableRecords == true) recordSource=\(boxScoreValue?.source.rawValue ?? "<none>") finalBatterCount=\(review.map { $0.awayBatting.lines.count + $0.homeBatting.lines.count } ?? 0) finalPitcherCount=\(review.map { $0.awayPitching.lines.count + $0.homePitching.lines.count } ?? 0) majorRecordCount=\(review?.summaryItems.count ?? 0)")
+        }
+        #endif
         return GameCenterDetailPayload(
             summary: GameCenterSummary(
                 officialGameID: context.entry.gameID,
@@ -591,7 +533,7 @@ struct OfficialKBOGameCenterClient: Sendable {
                 savePitcher: context.entry.savePitcherName
             ),
             lineScore: scoreboardValue?.lineScore,
-            review: boxScoreValue?.review?.enrichingBatterPositions(from: lineupBattingSectionsValue),
+            review: review,
             preview: try await preview
         )
     }
@@ -605,7 +547,11 @@ struct OfficialKBOGameCenterClient: Sendable {
         async let lineupBattingSections = fetchLineupBattingSectionsIfNeeded(for: context)
         let boxScoreValue = try await boxScore
         let lineupBattingSectionsValue = try await lineupBattingSections
-        return boxScoreValue?.review?.enrichingBatterPositions(from: lineupBattingSectionsValue)
+        return makeReview(
+            from: boxScoreValue,
+            lineupBattingSections: lineupBattingSectionsValue,
+            context: context
+        )
     }
 
     private func shouldFetchLineupBattingSections(
@@ -620,6 +566,316 @@ struct OfficialKBOGameCenterClient: Sendable {
             return false
         }
         return bases.first || bases.second || bases.third
+    }
+
+    private func makeReview(
+        from boxScore: GameCenterBoxScorePayload?,
+        lineupBattingSections: [GameCenterBattingSection]?,
+        context: OfficialGameLookupContext
+    ) -> GameCenterReview? {
+        guard context.entry.status.isLiveLike else {
+            return boxScore?.review?.enrichingBatterPositions(from: lineupBattingSections)
+        }
+
+        let sourceReview = boxScore?.review
+        guard sourceReview != nil || (lineupBattingSections?.count ?? 0) >= 2 else {
+            return nil
+        }
+
+        let emptyBatting = GameCenterBattingSection(lines: [], totals: nil)
+        let emptyPitching = GameCenterPitchingSection(lines: [])
+        let baseReview = sourceReview ?? GameCenterReview(
+            summaryItems: [],
+            awayBatting: emptyBatting,
+            homeBatting: emptyBatting,
+            awayPitching: emptyPitching,
+            homePitching: emptyPitching,
+            recordSource: .lineupLimited
+        )
+        let enrichedReview = baseReview.enrichingBatterPositions(from: lineupBattingSections)
+        let lineupMergedReview = enrichedReview.fillingMissingLiveBatters(from: lineupBattingSections)
+        if boxScore?.source == .fullBoxscore || boxScore?.source == .scoreboardHTMLBoxscore {
+            let fullReview = enrichedReview
+            #if DEBUG
+            logOfficialRecordConsistency(review: fullReview, source: boxScore?.source.rawValue ?? "<none>")
+            #endif
+            return fullReview
+        }
+
+        let plateAppearanceSections = makeLivePlateAppearanceBattingSections(
+            from: context.game.events,
+            lineupSections: lineupBattingSections
+        )
+        let pitcherBaseSections = makeLivePitchingBaseSections(context: context)
+        let mergedReview = lineupMergedReview
+            .overlayingLivePlateAppearanceStats(from: plateAppearanceSections)
+            .fillingMissingLivePitchers(from: pitcherBaseSections)
+
+        #if DEBUG
+        let lineupBaseBatterCount = lineupBattingSections?.reduce(0) { $0 + $1.lines.count } ?? 0
+        let fullBatterCount = (boxScore?.source == .fullBoxscore || boxScore?.source == .scoreboardHTMLBoxscore) ? boxScore?.batterCount ?? 0 : 0
+        let keyplayerBatterCount = boxScore?.source == .keyplayerPartialLimited ? boxScore?.batterCount ?? 0 : 0
+        let mergedBatterCount = mergedReview.awayBatting.lines.count + mergedReview.homeBatting.lines.count
+        let fullPitcherCount = (boxScore?.source == .fullBoxscore || boxScore?.source == .scoreboardHTMLBoxscore) ? boxScore?.pitcherCount ?? 0 : 0
+        let keyplayerPitcherCount = boxScore?.source == .keyplayerPartialLimited ? boxScore?.pitcherCount ?? 0 : 0
+        let mergedPitcherCount = mergedReview.awayPitching.lines.count + mergedReview.homePitching.lines.count
+        print("[GameDetailLive] live batter merge gameID=\(context.entry.gameID) lineupBaseBatterCount=\(lineupBaseBatterCount) keyplayerBatterCount=\(keyplayerBatterCount) fullBatterCount=\(fullBatterCount) mergedBatterCount=\(mergedBatterCount) recordSource=\(boxScore?.source.rawValue ?? "lineupBase")")
+        print("[GameDetailLive] pitcher keyplayer count=\(keyplayerPitcherCount)")
+        print("[GameDetailLive] pitcher full count=\(fullPitcherCount)")
+        print("[GameDetailLive] pitcher merged count=\(mergedPitcherCount)")
+        #endif
+
+        return mergedReview
+    }
+
+    #if DEBUG
+    private func logOfficialRecordConsistency(review: GameCenterReview, source: String) {
+        let awayOfficialBatting = review.awayBatting.totals
+        let homeOfficialBatting = review.homeBatting.totals
+        let awayRenderedBatting = GameCenterBattingTotals.derived(from: review.awayBatting.lines)
+        let homeRenderedBatting = GameCenterBattingTotals.derived(from: review.homeBatting.lines)
+        let battingPass = battingTotalsMatch(awayOfficialBatting, awayRenderedBatting) &&
+            battingTotalsMatch(homeOfficialBatting, homeRenderedBatting)
+
+        print("[GameDetailLive] official batting totals away=\(awayOfficialBatting?.debugSummary ?? "<nil>") home=\(homeOfficialBatting?.debugSummary ?? "<nil>") source=\(source)")
+        print("[GameDetailLive] rendered batting totals away=\(awayRenderedBatting?.debugSummary ?? "<nil>") home=\(homeRenderedBatting?.debugSummary ?? "<nil>") source=\(source)")
+        print("[GameDetailLive] official pitching totals away=<derived> home=<derived> source=\(source)")
+        print("[GameDetailLive] rendered pitching totals away=\(review.awayPitching.lines.debugPitchingSummary) home=\(review.homePitching.lines.debugPitchingSummary) source=\(source)")
+        print("[GameDetailLive] record consistency batting=\(battingPass ? "pass" : "fail") reason=\(battingPass ? "totalsMatchOrUnavailable" : "officialTotalsDifferFromRows")")
+        print("[GameDetailLive] record consistency pitching=pass reason=renderedFromOfficialRows")
+    }
+
+    private func battingTotalsMatch(_ official: GameCenterBattingTotals?, _ rendered: GameCenterBattingTotals?) -> Bool {
+        guard let official, let rendered else { return true }
+        return official.atBats == rendered.atBats &&
+            official.runs == rendered.runs &&
+            official.hits == rendered.hits &&
+            official.runsBattedIn == rendered.runsBattedIn
+    }
+    #endif
+
+    private func makeLivePitchingBaseSections(context: OfficialGameLookupContext) -> [GameCenterPitchingSection] {
+        var awayLines: [GameCenterPitchingLine] = []
+        var homeLines: [GameCenterPitchingLine] = []
+        let game = context.game
+
+        if let awayStarter = game.awayStartingPitcherName?.nilIfBlank {
+            awayLines.append(makeLivePitchingBaseLine(name: awayStarter, order: "1", role: "선발"))
+        }
+        if let homeStarter = game.homeStartingPitcherName?.nilIfBlank {
+            homeLines.append(makeLivePitchingBaseLine(name: homeStarter, order: "1", role: "선발"))
+        }
+
+        let inferredSide = LivePitcherSide(inningText: context.entry.inningText) ?? LivePitcherSide(inningText: game.inningText)
+        if let currentName = game.currentPitcherName?.nilIfBlank,
+           let inferredSide {
+            let currentLine = makeLivePitchingBaseLine(name: currentName, order: "2", role: "현재")
+            switch inferredSide {
+            case .away:
+                if awayLines.contains(where: { $0.livePitcherMergeKey == currentLine.livePitcherMergeKey }) == false {
+                    awayLines.append(currentLine)
+                }
+            case .home:
+                if homeLines.contains(where: { $0.livePitcherMergeKey == currentLine.livePitcherMergeKey }) == false {
+                    homeLines.append(currentLine)
+                }
+            }
+        }
+
+        let appearanceSections = makeLivePitcherAppearanceSections(from: game.events)
+        for line in appearanceSections[0].lines where awayLines.contains(where: { $0.livePitcherMergeKey == line.livePitcherMergeKey }) == false {
+            awayLines.append(line)
+        }
+        for line in appearanceSections[1].lines where homeLines.contains(where: { $0.livePitcherMergeKey == line.livePitcherMergeKey }) == false {
+            homeLines.append(line)
+        }
+
+        #if DEBUG
+        print("[GameDetailLive] pitcher base awayStarter=\(game.awayStartingPitcherName?.nilIfBlank ?? "<nil>") homeStarter=\(game.homeStartingPitcherName?.nilIfBlank ?? "<nil>")")
+        print("[GameDetailLive] pitcher current name=\(game.currentPitcherName?.nilIfBlank ?? "<nil>") inferredSide=\(inferredSide?.rawValue ?? "<nil>")")
+        for line in awayLines {
+            print("[GameDetailLive] pitcher row side=away player=\(line.name) source=base stats=IP:\(line.innings ?? "-") K:\(line.strikeouts ?? "-") R:\(line.runsAllowed ?? "-")")
+        }
+        for line in homeLines {
+            print("[GameDetailLive] pitcher row side=home player=\(line.name) source=base stats=IP:\(line.innings ?? "-") K:\(line.strikeouts ?? "-") R:\(line.runsAllowed ?? "-")")
+        }
+        #endif
+
+        return [
+            GameCenterPitchingSection(lines: awayLines),
+            GameCenterPitchingSection(lines: homeLines)
+        ]
+    }
+
+    private func makeLivePitcherAppearanceSections(from events: [GameEvent]) -> [GameCenterPitchingSection] {
+        guard events.isEmpty == false else {
+            #if DEBUG
+            print("[GameDetailLive] pitcher appearance source available=false reason=noEvents")
+            #endif
+            return [GameCenterPitchingSection(lines: []), GameCenterPitchingSection(lines: [])]
+        }
+
+        var appearances: [LivePitcherAppearance] = []
+        var seenKeys: Set<String> = []
+
+        for (index, event) in events.enumerated() {
+            guard let side = LivePitcherSide(inningText: event.inningText) else { continue }
+            guard event.type == .pitching || event.headline.normalizedLivePlateAppearanceText.contains("투수") || event.headline.normalizedLivePlateAppearanceText.contains("등판") || event.headline.normalizedLivePlateAppearanceText.contains("교체") || event.headline.normalizedLivePlateAppearanceText.contains("투입") else {
+                continue
+            }
+            guard let playerName = event.headline.livePitcherAppearanceName?.nilIfBlank else { continue }
+            let key = "\(side.rawValue)|\(playerName.normalizedLivePitcherName)"
+            guard seenKeys.insert(key).inserted else { continue }
+
+            appearances.append(
+                LivePitcherAppearance(
+                    playerName: playerName,
+                    side: side,
+                    role: "구원",
+                    firstObservedOrder: index,
+                    inningText: event.inningText
+                )
+            )
+        }
+
+        guard appearances.isEmpty == false else {
+            #if DEBUG
+            print("[GameDetailLive] pitcher appearance source available=false reason=noPitcherAppearanceEvents eventCount=\(events.count)")
+            #endif
+            return [GameCenterPitchingSection(lines: []), GameCenterPitchingSection(lines: [])]
+        }
+
+        let sortedAppearances = appearances.sorted { $0.firstObservedOrder < $1.firstObservedOrder }
+        #if DEBUG
+        print("[GameDetailLive] pitcher appearance source available=true reason=events")
+        print("[GameDetailLive] pitcher appearance parsed count=\(sortedAppearances.count)")
+        for appearance in sortedAppearances {
+            print("[GameDetailLive] pitcher appearance row side=\(appearance.side.rawValue) player=\(appearance.playerName) inning=\(appearance.inningText) source=events")
+        }
+        #endif
+
+        let awayLines = sortedAppearances
+            .filter { $0.side == .away }
+            .map { makeLivePitchingBaseLine(name: $0.playerName, order: String($0.firstObservedOrder + 2), role: $0.role) }
+        let homeLines = sortedAppearances
+            .filter { $0.side == .home }
+            .map { makeLivePitchingBaseLine(name: $0.playerName, order: String($0.firstObservedOrder + 2), role: $0.role) }
+        return [
+            GameCenterPitchingSection(lines: awayLines),
+            GameCenterPitchingSection(lines: homeLines)
+        ]
+    }
+
+    private func makeLivePitchingBaseLine(name: String, order: String, role: String) -> GameCenterPitchingLine {
+        GameCenterPitchingLine(
+            pitchingOrder: order,
+            name: name,
+            role: role,
+            result: nil,
+            innings: nil,
+            pitches: nil,
+            hitsAllowed: nil,
+            walksAllowed: nil,
+            hitBatters: nil,
+            strikeouts: nil,
+            homeRunsAllowed: nil,
+            runsAllowed: nil,
+            earnedRuns: nil,
+            earnedRunAverage: nil
+        )
+    }
+
+    private func makeLivePlateAppearanceBattingSections(
+        from events: [GameEvent],
+        lineupSections: [GameCenterBattingSection]?
+    ) -> [GameCenterBattingSection]? {
+        guard let lineupSections, lineupSections.count >= 2 else {
+            #if DEBUG
+            print("[GameDetailLive] plate appearance source available=false reason=missingLineup")
+            #endif
+            return nil
+        }
+        guard events.isEmpty == false else {
+            #if DEBUG
+            print("[GameDetailLive] plate appearance source available=false reason=noEvents")
+            #endif
+            return nil
+        }
+
+        let awaySection = lineupSections[0]
+        let homeSection = lineupSections[1]
+        var awayStats = Dictionary(uniqueKeysWithValues: awaySection.lines.map { ($0.liveBatterMergeKey, PlateAppearanceDerivedStats()) })
+        var homeStats = Dictionary(uniqueKeysWithValues: homeSection.lines.map { ($0.liveBatterMergeKey, PlateAppearanceDerivedStats()) })
+        var matchedEventCount = 0
+        var parsedCount = 0
+
+        for event in events {
+            guard let side = LivePlateAppearanceSide(inningText: event.inningText) else {
+                continue
+            }
+            let section = side == .away ? awaySection : homeSection
+            guard let player = section.lines.first(where: { event.headline.normalizedLivePlateAppearanceText.contains($0.name.normalizedLiveBatterName) }) else {
+                continue
+            }
+
+            matchedEventCount += 1
+            let eventStats = event.headline.livePlateAppearanceDerivedStats
+            if eventStats.hasEvent {
+                parsedCount += 1
+            }
+
+            let key = player.liveBatterMergeKey
+            if side == .away {
+                awayStats[key] = (awayStats[key] ?? PlateAppearanceDerivedStats()) + eventStats
+            } else {
+                homeStats[key] = (homeStats[key] ?? PlateAppearanceDerivedStats()) + eventStats
+            }
+        }
+
+        guard matchedEventCount > 0 else {
+            #if DEBUG
+            print("[GameDetailLive] plate appearance source available=false reason=noMatchedLineupEvents eventCount=\(events.count)")
+            #endif
+            return nil
+        }
+
+        #if DEBUG
+        print("[GameDetailLive] plate appearance source available=true eventCount=\(events.count) matchedEventCount=\(matchedEventCount)")
+        print("[GameDetailLive] plate appearance parsed count=\(parsedCount)")
+        #endif
+
+        let awayLines = makeLivePlateAppearanceLines(from: awaySection, statsByKey: awayStats)
+        let homeLines = makeLivePlateAppearanceLines(from: homeSection, statsByKey: homeStats)
+        return [
+            GameCenterBattingSection(lines: awayLines, totals: nil),
+            GameCenterBattingSection(lines: homeLines, totals: nil)
+        ]
+    }
+
+    private func makeLivePlateAppearanceLines(
+        from lineupSection: GameCenterBattingSection,
+        statsByKey: [String: PlateAppearanceDerivedStats]
+    ) -> [GameCenterBattingLine] {
+        lineupSection.lines.map { line in
+            let stats = statsByKey[line.liveBatterMergeKey] ?? PlateAppearanceDerivedStats()
+            #if DEBUG
+            print("[GameDetailLive] hitter aggregate player=\(line.name) HR=\(stats.homeRuns) SO=\(stats.strikeouts) BB=\(stats.walks)")
+            #endif
+            return GameCenterBattingLine(
+                battingOrder: line.battingOrder,
+                position: line.position,
+                name: line.name,
+                atBats: nil,
+                runs: nil,
+                hits: nil,
+                runsBattedIn: nil,
+                homeRuns: String(stats.homeRuns),
+                walks: String(stats.walks),
+                strikeouts: String(stats.strikeouts),
+                stolenBases: nil,
+                average: nil
+            )
+        }
     }
 
     func reconcileScheduledStartTimes(in games: [GameDetail]) async -> [GameDetail] {
@@ -645,20 +901,31 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 
     private func fetchContext(for game: GameDetail) async throws -> OfficialGameLookupContext? {
-        let payload = try await fetchGameList(for: officialDateText(for: game))
+        let requestContext = OfficialKBORequestDebugContext(game: game)
+        let payload = try await fetchGameList(
+            for: officialDateText(for: game),
+            requestContext: requestContext
+        )
 
         guard let entry = resolveEntry(in: payload.game, game: game) else {
             return nil
         }
 
-        return OfficialGameLookupContext(entry: entry)
+        return OfficialGameLookupContext(
+            game: game,
+            entry: entry,
+            requestContext: requestContext.with(officialGameID: entry.gameID)
+        )
     }
 
     private func fetchEntries(for dateText: String) async throws -> [OfficialGameEntry] {
-        try await fetchGameList(for: dateText).game
+        try await fetchGameList(for: dateText, requestContext: nil).game
     }
 
-    private func fetchGameList(for dateText: String) async throws -> OfficialGameListResponse {
+    private func fetchGameList(
+        for dateText: String,
+        requestContext: OfficialKBORequestDebugContext?
+    ) async throws -> OfficialGameListResponse {
         try await post(
             endpoint: "ws/Main.asmx/GetKboGameList",
             form: [
@@ -666,7 +933,8 @@ struct OfficialKBOGameCenterClient: Sendable {
                 "srId": "0,1,3,4,5,6,7,8,9",
                 "date": dateText
             ],
-            as: OfficialGameListResponse.self
+            as: OfficialGameListResponse.self,
+            requestContext: requestContext
         )
     }
 
@@ -675,24 +943,84 @@ struct OfficialKBOGameCenterClient: Sendable {
     ) async throws -> OfficialScoreboardPayload? {
         guard context.entry.status != .upcoming else { return nil }
 
-        let payload = try await post(
-            endpoint: "ws/Schedule.asmx/GetScoreBoardScroll",
-            form: [
-                "leId": String(context.entry.leagueID),
-                "srId": String(context.entry.seriesID),
-                "seasonId": String(context.entry.seasonID),
-                "gameId": context.entry.gameID
-            ],
-            as: OfficialScoreboardResponse.self
-        )
+        #if DEBUG
+        print("[GameDetailLive] scoreboard fetch start gameID=\(context.entry.gameID) status=\(context.entry.status.rawValue)")
+        #endif
 
+        do {
+            let payload = try await post(
+                endpoint: "ws/Schedule.asmx/GetScoreBoardScroll",
+                form: [
+                    "leId": String(context.entry.leagueID),
+                    "srId": String(context.entry.seriesID),
+                    "seasonId": String(context.entry.seasonID),
+                    "gameId": context.entry.gameID
+                ],
+                as: OfficialScoreboardResponse.self,
+                requestContext: context.requestContext
+            )
+            let lineScore = makeLineScore(from: payload)
+            #if DEBUG
+            print("[GameDetailLive] scoreboard fetch success gameID=\(context.entry.gameID) lineScorePresent=\(lineScore != nil)")
+            #endif
+            return OfficialScoreboardPayload(
+                stadium: payload.stadiumName?.nilIfBlank,
+                startTime: payload.startTime?.nilIfBlank,
+                endTime: payload.endTime?.nilIfBlank,
+                durationText: payload.durationText?.nilIfBlank,
+                crowdText: payload.crowdText?.nilIfBlank,
+                lineScore: lineScore
+            )
+        } catch {
+            #if DEBUG
+            print("[GameDetailLive] scoreboard fetch failed gameID=\(context.entry.gameID) error=\(error)")
+            #endif
+            do {
+                return try await fetchScoreboardPageLineScoreIfNeeded(for: context)
+            } catch {
+                #if DEBUG
+                print("[GameDetailLive] scoreboard html fallback failed gameID=\(context.entry.gameID) error=\(error)")
+                #endif
+                return nil
+            }
+        }
+    }
+
+    private func fetchScoreboardPageLineScoreIfNeeded(
+        for context: OfficialGameLookupContext
+    ) async throws -> OfficialScoreboardPayload? {
+        guard context.entry.status.isLiveLike else { return nil }
+        #if DEBUG
+        print("[GameDetailLive] scoreboard html fallback start gameID=\(context.entry.gameID)")
+        #endif
+        let html = try await getHTMLText(
+            endpoint: "Schedule/ScoreBoard.aspx",
+            queryItems: [
+                URLQueryItem(name: "date", value: context.entry.gameDate)
+            ],
+            requestContext: context.requestContext.with(referer: "https://www.koreabaseball.com/Schedule/ScoreBoard.aspx")
+        )
+        let containsProviderGameID = context.requestContext.providerGameID.map { html.contains($0) } ?? false
+        let lineScore = makeLineScoreFromScoreboardPageHTML(html, context: context)
+        #if DEBUG
+        print("[GameDetailLive] scoreboard html fallback parsed gameID=\(context.entry.gameID) containsProviderGameID=\(containsProviderGameID) parsedLineScorePresent=\(lineScore != nil) parsedInningCount=\(lineScore?.inningLabels.count ?? 0)")
+        #endif
+        guard let lineScore else {
+            #if DEBUG
+            print("[GameDetailLive] scoreboard page fallback empty gameID=\(context.entry.gameID)")
+            #endif
+            return nil
+        }
+        #if DEBUG
+        print("[GameDetailLive] scoreboard page fallback success gameID=\(context.entry.gameID) lineScorePresent=true")
+        #endif
         return OfficialScoreboardPayload(
-            stadium: payload.stadiumName?.nilIfBlank,
-            startTime: payload.startTime?.nilIfBlank,
-            endTime: payload.endTime?.nilIfBlank,
-            durationText: payload.durationText?.nilIfBlank,
-            crowdText: payload.crowdText?.nilIfBlank,
-            lineScore: makeLineScore(from: payload)
+            stadium: context.entry.stadiumName,
+            startTime: context.entry.startTime,
+            endTime: nil,
+            durationText: nil,
+            crowdText: nil,
+            lineScore: lineScore
         )
     }
 
@@ -704,19 +1032,35 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
 
         do {
-            let data = try await postData(
+            #if DEBUG
+            if context.entry.status.isLiveLike {
+                print("[GameDetailLive] full record source attempted source=fullBoxscore gameID=\(context.entry.gameID)")
+            }
+            #endif
+            let payload = try await postPayload(
                 endpoint: "ws/Schedule.asmx/GetBoxScoreScroll",
                 form: [
                     "leId": String(context.entry.leagueID),
                     "srId": String(context.entry.seriesID),
                     "seasonId": String(context.entry.seasonID),
                     "gameId": context.entry.gameID
-                ]
+                ],
+                requestContext: context.requestContext.with(
+                    referer: "https://www.koreabaseball.com/Schedule/GameCenter/ReviewNew.aspx?leId=\(context.entry.leagueID)&srId=\(context.entry.seriesID)&seasonId=\(context.entry.seasonID)&gameId=\(context.entry.gameID)"
+                )
             )
+            let data = payload.data
             debugLogOfficialBoxScoreStructure(data)
-            let payload = try JSONDecoder().decode(OfficialBoxScoreResponse.self, from: data)
+            let response: OfficialBoxScoreResponse
+            do {
+                response = try JSONDecoder().decode(OfficialBoxScoreResponse.self, from: data)
+            } catch {
+                throw OfficialKBOGameCenterError.decodingFailed(
+                    payload.diagnostic.with(parseFailureReason: String(describing: error))
+                )
+            }
 
-            let summaryItems: [GameCenterSummaryItem] = decodeGridTable(from: payload.summaryTable)?.rows.compactMap { row in
+            let summaryItems: [GameCenterSummaryItem] = decodeGridTable(from: response.summaryTable)?.rows.compactMap { row in
                 guard row.cells.count >= 2,
                       let title = row.cells[0].text.nilIfBlank else {
                     return nil
@@ -730,8 +1074,8 @@ struct OfficialKBOGameCenterClient: Sendable {
                 )
             } ?? []
 
-            let battingSections = payload.battingTables.compactMap(makeBattingSection(from:))
-            let pitchingSections = payload.pitchingTables.compactMap(makePitchingSection(from:))
+            let battingSections = response.battingTables.compactMap(makeBattingSection(from:))
+            let pitchingSections = response.pitchingTables.compactMap(makePitchingSection(from:))
 
             guard battingSections.count >= 2 || pitchingSections.count >= 2 else {
                 #if DEBUG
@@ -740,17 +1084,254 @@ struct OfficialKBOGameCenterClient: Sendable {
                 return nil
             }
 
-            return GameCenterBoxScorePayload(
+            let fullPayload = GameCenterBoxScorePayload(
+                source: .fullBoxscore,
                 summaryItems: summaryItems,
                 battingSections: battingSections,
                 pitchingSections: pitchingSections
             )
+            #if DEBUG
+            if context.entry.status.isLiveLike {
+                print("[GameDetailLive] full record source parsed source=fullBoxscore gameID=\(context.entry.gameID) fullRecordAvailable=true parsedFullBatterCount=\(fullPayload.batterCount) parsedFullPitcherCount=\(fullPayload.pitcherCount) parsedKeyBatterCount=0 parsedKeyPitcherCount=0 finalBatterCount=\(fullPayload.batterCount) finalPitcherCount=\(fullPayload.pitcherCount) majorRecordCount=\(fullPayload.summaryItems.count)")
+            }
+            #endif
+            return fullPayload
         } catch {
             if context.entry.status == .final {
                 throw error
             }
-            return nil
+            #if DEBUG
+            print("[GameDetailLive] full record source failed source=fullBoxscore gameID=\(context.entry.gameID) fullRecordAvailable=false reason=\(error)")
+            #endif
+            if let htmlPayload = try await fetchScoreboardHTMLBoxScoreIfNeeded(for: context) {
+                return htmlPayload
+            }
+            return try await fetchLiveKeyPlayerRecordsIfNeeded(for: context)
         }
+    }
+
+    private func fetchScoreboardHTMLBoxScoreIfNeeded(
+        for context: OfficialGameLookupContext
+    ) async throws -> GameCenterBoxScorePayload? {
+        guard context.entry.status.isLiveLike else { return nil }
+        #if DEBUG
+        print("[GameDetailLive] full boxscore source=scoreboardHTMLBoxscore available=attempt gameID=\(context.entry.gameID)")
+        #endif
+
+        let candidates: [(endpoint: String, queryItems: [URLQueryItem], referer: String)] = [
+            (
+                "Schedule/ScoreBoard.aspx",
+                [URLQueryItem(name: "date", value: context.entry.gameDate)],
+                "https://www.koreabaseball.com/Schedule/ScoreBoard.aspx"
+            ),
+            (
+                "Schedule/GameCenter/ReviewNew.aspx",
+                [
+                    URLQueryItem(name: "leId", value: String(context.entry.leagueID)),
+                    URLQueryItem(name: "srId", value: String(context.entry.seriesID)),
+                    URLQueryItem(name: "seasonId", value: String(context.entry.seasonID)),
+                    URLQueryItem(name: "gameId", value: context.entry.gameID)
+                ],
+                "https://www.koreabaseball.com/Schedule/GameCenter/Main.aspx?gameId=\(context.entry.gameID)&section=REVIEW"
+            )
+        ]
+
+        for candidate in candidates {
+            let html = try await getHTMLText(
+                endpoint: candidate.endpoint,
+                queryItems: candidate.queryItems,
+                requestContext: context.requestContext.with(referer: candidate.referer)
+            )
+            guard let payload = makeBoxScoreFromScoreboardPageHTML(html, context: context) else {
+                #if DEBUG
+                print("[GameDetailLive] full boxscore source=scoreboardHTMLBoxscore available=false endpoint=\(candidate.endpoint) reason=noFullRecordTables")
+                #endif
+                continue
+            }
+            #if DEBUG
+            print("[GameDetailLive] full boxscore source=scoreboardHTMLBoxscore available=true endpoint=\(candidate.endpoint) battersAway=\(payload.battingSections[safe: 0]?.lines.count ?? 0) battersHome=\(payload.battingSections[safe: 1]?.lines.count ?? 0) pitchersAway=\(payload.pitchingSections[safe: 0]?.lines.count ?? 0) pitchersHome=\(payload.pitchingSections[safe: 1]?.lines.count ?? 0)")
+            #endif
+            return payload
+        }
+
+        return nil
+    }
+
+    private func fetchLiveKeyPlayerRecordsIfNeeded(
+        for context: OfficialGameLookupContext
+    ) async throws -> GameCenterBoxScorePayload? {
+        guard context.entry.status.isLiveLike else { return nil }
+        #if DEBUG
+        print("[GameDetailLive] live keyplayer fallback start gameID=\(context.entry.gameID)")
+        #endif
+
+        async let hitterResponse = fetchKeyPlayerRecords(
+            endpoint: "ws/Schedule.asmx/GetKeyPlayerHitter",
+            section: "KEY_HIT",
+            context: context
+        )
+        async let pitcherResponse = fetchKeyPlayerRecords(
+            endpoint: "ws/Schedule.asmx/GetKeyPlayerPitcher",
+            section: "KEY_PIT",
+            context: context
+        )
+
+        let hitterRecords: [OfficialKeyPlayerRecord]
+        do {
+            hitterRecords = try await hitterResponse
+        } catch {
+            #if DEBUG
+            print("[GameDetailLive] live keyplayer request failed source=keyplayerPartialLimited section=hitter gameID=\(context.entry.gameID) error=\(error)")
+            #endif
+            hitterRecords = []
+        }
+        let pitcherRecords: [OfficialKeyPlayerRecord]
+        do {
+            pitcherRecords = try await pitcherResponse
+        } catch {
+            #if DEBUG
+            print("[GameDetailLive] live keyplayer request failed source=keyplayerPartialLimited section=pitcher gameID=\(context.entry.gameID) error=\(error)")
+            #endif
+            pitcherRecords = []
+        }
+        let payload = makeLiveKeyPlayerPayload(
+            hitterRecords: hitterRecords,
+            pitcherRecords: pitcherRecords,
+            context: context
+        )
+
+        #if DEBUG
+        print("[GameDetailLive] live keyplayer parsed source=keyplayerPartialLimited gameID=\(context.entry.gameID) fullRecordAvailable=false parsedFullBatterCount=0 parsedFullPitcherCount=0 parsedKeyBatterCount=\(payload.batterCount) parsedKeyPitcherCount=\(payload.pitcherCount) finalBatterCount=\(payload.batterCount) finalPitcherCount=\(payload.pitcherCount) parsedMajorRecordCount=\(payload.summaryItems.count) liveRecordPresent=\(payload.review?.hasDisplayableRecords == true)")
+        #endif
+        return payload.review?.hasDisplayableRecords == true ? payload : nil
+    }
+
+    private func fetchKeyPlayerRecords(
+        endpoint: String,
+        section: String,
+        context: OfficialGameLookupContext
+    ) async throws -> [OfficialKeyPlayerRecord] {
+        let response = try await post(
+            endpoint: endpoint,
+            form: [
+                "leId": String(context.entry.leagueID),
+                "srId": String(context.entry.seriesID),
+                "gameId": context.entry.gameID,
+                "groupSc": "GAME_WPA_RT",
+                "sort": "DESC"
+            ],
+            as: OfficialKeyPlayerResponse.self,
+            requestContext: context.requestContext.with(
+                referer: "https://www.koreabaseball.com/Schedule/GameCenter/Main.aspx?gameId=\(context.entry.gameID)&section=\(section)"
+            )
+        )
+        return response.records
+    }
+
+    private func makeLiveKeyPlayerPayload(
+        hitterRecords: [OfficialKeyPlayerRecord],
+        pitcherRecords: [OfficialKeyPlayerRecord],
+        context: OfficialGameLookupContext
+    ) -> GameCenterBoxScorePayload {
+        let awayCode = context.entry.awayTeamCode.uppercased()
+        let homeCode = context.entry.homeTeamCode.uppercased()
+        let awayBatters = hitterRecords
+            .filter { $0.teamID.uppercased() == awayCode }
+            .compactMap(makeLiveKeyPlayerBattingLine(from:))
+        let homeBatters = hitterRecords
+            .filter { $0.teamID.uppercased() == homeCode }
+            .compactMap(makeLiveKeyPlayerBattingLine(from:))
+        let awayPitchers = pitcherRecords
+            .filter { $0.teamID.uppercased() == awayCode }
+            .compactMap(makeLiveKeyPlayerPitchingLine(from:))
+        let homePitchers = pitcherRecords
+            .filter { $0.teamID.uppercased() == homeCode }
+            .compactMap(makeLiveKeyPlayerPitchingLine(from:))
+        let summaryItems = makeLiveKeyPlayerSummaryItems(
+            hitterRecords: hitterRecords,
+            pitcherRecords: pitcherRecords
+        )
+
+        return GameCenterBoxScorePayload(
+            source: .keyplayerPartialLimited,
+            summaryItems: summaryItems,
+            battingSections: [
+                GameCenterBattingSection(lines: awayBatters, totals: nil),
+                GameCenterBattingSection(lines: homeBatters, totals: nil)
+            ],
+            pitchingSections: [
+                GameCenterPitchingSection(lines: awayPitchers),
+                GameCenterPitchingSection(lines: homePitchers)
+            ]
+        )
+    }
+
+    private func makeLiveKeyPlayerSummaryItems(
+        hitterRecords: [OfficialKeyPlayerRecord],
+        pitcherRecords: [OfficialKeyPlayerRecord]
+    ) -> [GameCenterSummaryItem] {
+        let hitterItems = hitterRecords.map {
+            GameCenterSummaryItem(
+                title: "타자 WPA \($0.rank)위",
+                value: "\($0.playerName) \($0.recordInfo.gameCenterPlainRecordText)"
+            )
+        }
+        let pitcherItems = pitcherRecords.map {
+            GameCenterSummaryItem(
+                title: "투수 WPA \($0.rank)위",
+                value: "\($0.playerName) \($0.recordInfo.gameCenterPlainRecordText)"
+            )
+        }
+        return hitterItems + pitcherItems
+    }
+
+    private func makeLiveKeyPlayerBattingLine(
+        from record: OfficialKeyPlayerRecord
+    ) -> GameCenterBattingLine? {
+        guard record.playerName.nilIfBlank != nil else { return nil }
+        let stats = record.recordInfo.gameCenterParenthesizedRecordText
+        let line = GameCenterBattingLine(
+            battingOrder: record.rank,
+            position: "",
+            name: record.playerName,
+            atBats: record.keyPlayerIntegerStat(aliases: ["AB", "PA_AB", "TASU", "AT_BATS", "ATBAT", "타수"]) ?? stats.gameCenterFirstCapture(#"(\d+)\s*(?:타수|AB)"#),
+            runs: record.keyPlayerIntegerStat(aliases: ["R", "RUN", "RUNS", "득점"]) ?? stats.gameCenterFirstCapture(#"(\d+)\s*(?:득점|R)"#),
+            hits: record.keyPlayerIntegerStat(aliases: ["H", "HIT", "HITS", "안타"]) ?? stats.gameCenterFirstCapture(#"(\d+)\s*(?:안타|H)"#),
+            runsBattedIn: record.keyPlayerIntegerStat(aliases: ["RBI", "타점"]) ?? stats.gameCenterFirstCapture(#"(\d+)\s*(?:타점|RBI)"#),
+            homeRuns: nil,
+            walks: nil,
+            strikeouts: nil,
+            stolenBases: record.keyPlayerIntegerStat(aliases: ["SB", "STEAL", "STOLEN_BASE", "STOLEN_BASES", "도루"]) ?? stats.gameCenterFirstCapture(#"(\d+)\s*(?:도루|SB)"#),
+            average: nil
+        )
+        #if DEBUG
+        let rawKeys = record.rawValues.keys.sorted().joined(separator: ",")
+        print("[GameDetailLive] keyplayer hitter raw player=\(record.playerName) team=\(record.teamID) keys=\(rawKeys) recordInfo=\(record.recordInfo.gameCenterPlainRecordText) parsedHR=\(line.homeRuns ?? "<nil>") parsedSO=\(line.strikeouts ?? "<nil>") parsedBB=\(line.walks ?? "<nil>")")
+        #endif
+        return line
+    }
+
+    private func makeLiveKeyPlayerPitchingLine(
+        from record: OfficialKeyPlayerRecord
+    ) -> GameCenterPitchingLine? {
+        guard record.playerName.nilIfBlank != nil else { return nil }
+        let stats = record.recordInfo.gameCenterParenthesizedRecordText
+        return GameCenterPitchingLine(
+            pitchingOrder: record.rank,
+            name: record.playerName,
+            role: nil,
+            result: nil,
+            innings: stats.gameCenterFirstCapture(#"(\d+(?:\s+\d/\d|/\d)?)이닝"#),
+            pitches: nil,
+            hitsAllowed: stats.gameCenterFirstCapture(#"(\d+)피안타"#),
+            walksAllowed: stats.gameCenterFirstCapture(#"(\d+)볼넷"#),
+            hitBatters: stats.gameCenterFirstCapture(#"(\d+)사구"#),
+            strikeouts: stats.gameCenterFirstCapture(#"(\d+)삼진"#),
+            homeRunsAllowed: stats.gameCenterFirstCapture(#"(\d+)피홈런"#),
+            runsAllowed: stats.gameCenterFirstCapture(#"(\d+)실점"#),
+            earnedRuns: stats.gameCenterFirstCapture(#"(\d+)자책"#),
+            earnedRunAverage: nil
+        )
     }
 
     private func fetchLineupBattingSectionsIfNeeded(
@@ -768,7 +1349,8 @@ struct OfficialKBOGameCenterClient: Sendable {
                     "srId": String(context.entry.seriesID),
                     "seasonId": String(context.entry.seasonID),
                     "gameId": context.entry.gameID
-                ]
+                ],
+                requestContext: context.requestContext
             )
             debugLogOfficialLineupStructure(data)
             let sections = makeLineupBattingSections(from: data)
@@ -801,7 +1383,8 @@ struct OfficialKBOGameCenterClient: Sendable {
                 "gameId": context.entry.gameID,
                 "groupSc": "SEASON"
             ],
-            as: OfficialPreviewRecordResponse.self
+            as: OfficialPreviewRecordResponse.self,
+            requestContext: context.requestContext
         )
 
         let awayMatchup: GameCenterMatchupSnapshot?
@@ -936,36 +1519,6 @@ struct OfficialKBOGameCenterClient: Sendable {
         return formatter.date(from: String(format: "%04d-%02d-%02d %@", year, month, day, trimmedStartTime))
     }
 
-    private func makeLineScore(from payload: OfficialScoreboardResponse) -> GameCenterLineScore? {
-        guard let inningTable = decodeGridTable(from: payload.inningTable),
-              let totalsTable = decodeGridTable(from: payload.totalsTable),
-              inningTable.rows.count >= 2,
-              totalsTable.rows.count >= 2 else {
-            return nil
-        }
-
-        let inningLabels = inningTable.headers.first?.cells.map(\.text) ?? []
-        let awayInnings = inningTable.rows[0].cells.map(\.text)
-        let homeInnings = inningTable.rows[1].cells.map(\.text)
-
-        return GameCenterLineScore(
-            inningLabels: inningLabels,
-            awayInnings: awayInnings,
-            homeInnings: homeInnings,
-            awayTotals: makeTotals(from: totalsTable.rows[0]),
-            homeTotals: makeTotals(from: totalsTable.rows[1])
-        )
-    }
-
-    private func makeTotals(from row: OfficialGridRow) -> GameCenterTeamLineTotals {
-        GameCenterTeamLineTotals(
-            runs: row.cells[safe: 0]?.text.nilIfBlank,
-            hits: row.cells[safe: 1]?.text.nilIfBlank,
-            errors: row.cells[safe: 2]?.text.nilIfBlank,
-            walks: row.cells[safe: 3]?.text.nilIfBlank
-        )
-    }
-
     private func makeBattingSection(from tableGroup: OfficialBattingTableGroup) -> GameCenterBattingSection? {
         guard let orderTable = decodeGridTable(from: tableGroup.orderTable) else {
             return nil
@@ -976,187 +1529,6 @@ struct OfficialKBOGameCenterClient: Sendable {
             detailTable: tableGroup.detailTable.flatMap(decodeGridTable(from:)),
             summaryTable: tableGroup.summaryTable.flatMap(decodeGridTable(from:))
         )
-    }
-
-    private func makeBattingSection(fromRawTable rawTable: String) -> GameCenterBattingSection? {
-        guard let orderTable = decodeGridTable(from: rawTable) else {
-            return nil
-        }
-        return makeBattingSection(orderTable: orderTable, detailTable: nil, summaryTable: nil)
-    }
-
-    private func makeBattingSection(
-        orderTable: OfficialGridTable,
-        detailTable: OfficialGridTable?,
-        summaryTable: OfficialGridTable?
-    ) -> GameCenterBattingSection? {
-        let lines = orderTable.rows.indices.compactMap { index -> GameCenterBattingLine? in
-            let orderRow = orderTable.rows[index]
-            let detailRow = detailTable?.rows[safe: index]
-            let summaryRow = summaryTable?.rows[safe: index]
-            let plateAppearanceStats = plateAppearanceDerivedStats(table: detailTable, row: detailRow)
-            guard orderRow.cells.count >= 3,
-                  orderRow.cells[0].text.battingOrderNumber != nil,
-                  orderRow.cells[2].text.nilIfBlank != nil else {
-                return nil
-            }
-
-            logPlateAppearanceDiagnosticsIfNeeded(table: detailTable, row: detailRow, stats: plateAppearanceStats, rowIndex: index)
-
-            return GameCenterBattingLine(
-                battingOrder: orderRow.cells[0].text,
-                position: orderRow.cells[1].text,
-                name: orderRow.cells[2].text,
-                atBats: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["타수", "AB"], summaryFallbackIndex: 0),
-                runs: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["득점", "R"], summaryFallbackIndex: 3),
-                hits: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["안타", "H"], summaryFallbackIndex: 1),
-                runsBattedIn: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["타점", "RBI"], summaryFallbackIndex: 2),
-                homeRuns: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["홈런", "HR", "HRA"], summaryFallbackIndex: nil),
-                walks: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["볼넷", "BB", "4구"], summaryFallbackIndex: nil),
-                strikeouts: battingIntegerStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow, labels: ["삼진", "SO", "K"], summaryFallbackIndex: nil),
-                average: battingAverageStat(detailTable: detailTable, detailRow: detailRow, summaryTable: summaryTable, summaryRow: summaryRow),
-                plateAppearanceHomeRuns: plateAppearanceStats?.homeRuns.stringValue,
-                plateAppearanceWalks: plateAppearanceStats?.walks.stringValue,
-                plateAppearanceStrikeouts: plateAppearanceStats?.strikeouts.stringValue
-            )
-        }
-
-        let detailFooter = detailTable?.tfoot.first
-        let summaryFooter = summaryTable?.tfoot.first
-        let plateAppearanceTotals = plateAppearanceTotals(table: detailTable)
-        let totals = (detailFooter != nil || summaryFooter != nil) ? GameCenterBattingTotals(
-            atBats: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["타수", "AB"], summaryFallbackIndex: 0),
-            runs: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["득점", "R"], summaryFallbackIndex: 3),
-            hits: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["안타", "H"], summaryFallbackIndex: 1),
-            runsBattedIn: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["타점", "RBI"], summaryFallbackIndex: 2),
-            homeRuns: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["홈런", "HR", "HRA"], summaryFallbackIndex: nil),
-            walks: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["볼넷", "BB", "4구"], summaryFallbackIndex: nil),
-            strikeouts: battingIntegerStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter, labels: ["삼진", "SO", "K"], summaryFallbackIndex: nil),
-            average: battingAverageStat(detailTable: detailTable, detailRow: detailFooter, summaryTable: summaryTable, summaryRow: summaryFooter),
-            plateAppearanceHomeRuns: plateAppearanceTotals?.homeRuns.stringValue,
-            plateAppearanceWalks: plateAppearanceTotals?.walks.stringValue,
-            plateAppearanceStrikeouts: plateAppearanceTotals?.strikeouts.stringValue
-        ) : nil
-
-        return GameCenterBattingSection(lines: lines, totals: totals)
-    }
-
-    private func plateAppearanceDerivedStats(
-        table: OfficialGridTable?,
-        row: OfficialGridRow?
-    ) -> PlateAppearanceDerivedStats? {
-        guard table?.battingTableInterpretation == .plateAppearanceResults,
-              let row else {
-            return nil
-        }
-
-        return row.cells.reduce(PlateAppearanceDerivedStats()) { stats, cell in
-            stats.adding(resultText: cell.text)
-        }
-    }
-
-    private func plateAppearanceTotals(table: OfficialGridTable?) -> PlateAppearanceDerivedStats? {
-        guard table?.battingTableInterpretation == .plateAppearanceResults,
-              let rows = table?.rows,
-              rows.isEmpty == false else {
-            return nil
-        }
-
-        return rows
-            .compactMap { plateAppearanceDerivedStats(table: table, row: $0) }
-            .reduce(PlateAppearanceDerivedStats()) { $0 + $1 }
-    }
-
-    private func logPlateAppearanceDiagnosticsIfNeeded(
-        table: OfficialGridTable?,
-        row: OfficialGridRow?,
-        stats: PlateAppearanceDerivedStats?,
-        rowIndex: Int
-    ) {
-        #if DEBUG
-        guard rowIndex == 0,
-              table?.battingTableInterpretation == .plateAppearanceResults,
-              let row,
-              let stats else { return }
-        let sample = row.cells.prefix(4).map(\.text).joined(separator: ",")
-        print("[GameDetailStats] arrHitter.table2 interpretedAs=plateAppearanceResults row0=\(sample) derivedHR=\(stats.homeRuns) BB=\(stats.walks) SO=\(stats.strikeouts)")
-        #endif
-    }
-
-    private func battingIntegerStat(
-        detailTable: OfficialGridTable?,
-        detailRow: OfficialGridRow?,
-        summaryTable: OfficialGridTable?,
-        summaryRow: OfficialGridRow?,
-        labels: [String],
-        summaryFallbackIndex: Int?
-    ) -> String? {
-        if let value = battingStatByLabel(
-            detailTable: detailTable,
-            detailRow: detailRow,
-            summaryTable: summaryTable,
-            summaryRow: summaryRow,
-            labels: labels,
-            requireInteger: true
-        ) {
-            return value
-        }
-
-        guard let summaryFallbackIndex,
-              summaryTable?.battingTableInterpretation == .aggregateBattingStats,
-              let value = summaryRow?.cells[safe: summaryFallbackIndex]?.text.nilIfBlank,
-              value.isIntegerStatValue else {
-            return nil
-        }
-        return value
-    }
-
-    private func battingAverageStat(
-        detailTable: OfficialGridTable?,
-        detailRow: OfficialGridRow?,
-        summaryTable: OfficialGridTable?,
-        summaryRow: OfficialGridRow?
-    ) -> String? {
-        if let value = battingStatByLabel(
-            detailTable: detailTable,
-            detailRow: detailRow,
-            summaryTable: summaryTable,
-            summaryRow: summaryRow,
-            labels: ["타율", "AVG"],
-            requireInteger: false
-        ) {
-            return value
-        }
-
-        guard summaryTable?.battingTableInterpretation == .aggregateBattingStats,
-              let value = summaryRow?.cells[safe: 4]?.text.nilIfBlank,
-              value.isDecimalStatValue else {
-            return nil
-        }
-        return value
-    }
-
-    private func battingStatByLabel(
-        detailTable: OfficialGridTable?,
-        detailRow: OfficialGridRow?,
-        summaryTable: OfficialGridTable?,
-        summaryRow: OfficialGridRow?,
-        labels: [String],
-        requireInteger: Bool
-    ) -> String? {
-        [
-            (detailTable, detailRow),
-            (summaryTable, summaryRow)
-        ].lazy.compactMap { table, row -> String? in
-            guard let index = columnIndex(in: table, labels: labels),
-                  let value = row?.cells[safe: index]?.text.nilIfBlank else {
-                return nil
-            }
-            guard requireInteger == false || value.isIntegerStatValue else {
-                return nil
-            }
-            return value
-        }.first
     }
 
     private func battingStat(
@@ -1179,76 +1551,12 @@ struct OfficialKBOGameCenterClient: Sendable {
         return nil
     }
 
-    private func makeLineupBattingSections(from data: Data) -> [GameCenterBattingSection] {
-        guard let json = try? JSONSerialization.jsonObject(with: data) else {
-            return []
-        }
-
-        if let outer = json as? [Any] {
-            let homeTable = ((outer[safe: 3] as? [Any])?.first as? String).flatMap(makeBattingSection(fromRawTable:))
-            let awayTable = ((outer[safe: 4] as? [Any])?.first as? String).flatMap(makeBattingSection(fromRawTable:))
-            let orderedSections = [awayTable, homeTable].compactMap { $0 }
-            if orderedSections.count == 2 {
-                return orderedSections
-            }
-        }
-
-        let candidates = battingSectionCandidates(in: json)
-        #if DEBUG
-        print("[BaseRunners] candidate batting section keys=\(candidates.prefix(6).map(\.path).joined(separator: ",")) count=\(candidates.count)")
-        #endif
-        return Array(candidates.prefix(2).map(\.section))
-    }
-
     private func makePitchingSection(from tableGroup: OfficialPitchingTableGroup) -> GameCenterPitchingSection? {
         guard let table = decodeGridTable(from: tableGroup.table) else {
             return nil
         }
 
-        logPitcherDiagnosticsIfNeeded(table)
-
-        let lines = table.rows.compactMap { row -> GameCenterPitchingLine? in
-            guard let name = row.cells[safe: 0]?.text.nilIfBlank else {
-                return nil
-            }
-
-            // Current official unlabeled pitcher shape: 9 피홈런, 10 피안타, 11 볼넷, 12 사구, 13 삼진.
-            return GameCenterPitchingLine(
-                name: name,
-                role: row.cells[safe: 1]?.text.nilIfBlank,
-                result: row.cells[safe: 2]?.text.nilIfBlank,
-                innings: pitchingStat(table, row: row, labels: ["이닝", "IP"], fallbackIndex: 6),
-                pitches: pitchingStat(table, row: row, labels: ["투구수", "투구", "NP", "P"], fallbackIndex: 8),
-                hitsAllowed: pitchingStat(table, row: row, labels: ["피안타", "H"], fallbackIndex: 10),
-                walksAllowed: pitchingStat(table, row: row, labels: ["볼넷", "BB", "4구"], fallbackIndex: 11),
-                hitBatters: pitchingStat(table, row: row, labels: ["사구", "HBP"], fallbackIndex: 12),
-                strikeouts: pitchingStat(table, row: row, labels: ["삼진", "SO", "K"], fallbackIndex: 13),
-                homeRunsAllowed: pitchingStat(table, row: row, labels: ["피홈런", "홈런", "HR"], fallbackIndex: 9),
-                runsAllowed: pitchingStat(table, row: row, labels: ["실점", "R"], fallbackIndex: 14),
-                earnedRuns: pitchingStat(table, row: row, labels: ["자책", "ER"], fallbackIndex: 15),
-                earnedRunAverage: pitchingStat(table, row: row, labels: ["평균자책점", "ERA"], fallbackIndex: 16)
-            )
-        }
-
-        return GameCenterPitchingSection(lines: lines)
-    }
-
-    private func logPitcherDiagnosticsIfNeeded(_ table: OfficialGridTable) {
-        #if DEBUG
-        let labels = table.headers.first?.cells.map { normalizeStatLabel($0.text) }.joined(separator: ",") ?? "<none>"
-        let rowSample = table.rows.first?.cells.prefix(17).map(\.text).joined(separator: ",") ?? "<none>"
-        let hbpColumn = columnIndex(in: table, labels: ["사구", "HBP"]) ?? 12
-        print("[GameDetailStats] arrPitcher labels=\(labels) row0=\(rowSample) hbpColumn=\(hbpColumn)")
-        #endif
-    }
-
-    private func pitchingStat(_ table: OfficialGridTable, row: OfficialGridRow, labels: [String], fallbackIndex: Int?) -> String? {
-        if let index = columnIndex(in: table, labels: labels),
-           let value = row.cells[safe: index]?.text.nilIfBlank {
-            return value
-        }
-        guard let fallbackIndex else { return nil }
-        return row.cells[safe: fallbackIndex]?.text.nilIfBlank
+        return makePitchingSection(from: table)
     }
 
     private func columnIndex(in table: OfficialGridTable?, labels: [String]) -> Int? {
@@ -1268,29 +1576,8 @@ struct OfficialKBOGameCenterClient: Sendable {
         return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
-    private func makeMatchupSnapshot(from row: OfficialPreviewRecordRow) -> GameCenterMatchupSnapshot? {
-        guard row.row.count >= 7 else { return nil }
-
-        let cells = row.row.map { $0.normalizedText }
-        guard let teamName = cells[safe: 0]?.nilIfBlank else {
-            return nil
-        }
-
-        return GameCenterMatchupSnapshot(
-            teamName: teamName,
-            seasonRecord: cells[safe: 1]?.nilIfBlank,
-            recentFive: cells[safe: 2]?.nilIfBlank,
-            teamERA: cells[safe: 3]?.nilIfBlank,
-            battingAverage: cells[safe: 4]?.nilIfBlank,
-            runsScored: cells[safe: 5]?.nilIfBlank,
-            runsAllowed: cells[safe: 6]?.nilIfBlank
-        )
-    }
-
-    private func decodeGridTable(from rawValue: String) -> OfficialGridTable? {
-        guard let data = rawValue.data(using: .utf8) else { return nil }
-        let decoder = JSONDecoder()
-        return try? decoder.decode(OfficialGridTableDTO.self, from: data).table
+    func decodeLineupFallbackGridTable(from rawValue: String) -> OfficialGridTable? {
+        decodeGridTable(from: rawValue)
     }
 
     private func gridRowCount(in rawTable: String?) -> Int {
@@ -1327,137 +1614,221 @@ struct OfficialKBOGameCenterClient: Sendable {
         #endif
     }
 
-    private func battingSectionCandidates(in value: Any, path: String = "$") -> [BattingSectionCandidate] {
-        var candidates: [BattingSectionCandidate] = []
-
-        if let object = value as? [String: Any] {
-            for key in ["table1", "TABLE1", "batters", "hitters", "rows"] {
-                if let rawTable = object[key] as? String,
-                   let section = makeBattingSection(fromRawTable: rawTable),
-                   section.lines.isEmpty == false {
-                    candidates.append(BattingSectionCandidate(path: "\(path).\(key)", section: section))
-                }
-            }
-
-            if let section = makeFieldBasedBattingSection(from: object) {
-                candidates.append(BattingSectionCandidate(path: path, section: section))
-            }
-
-            for key in object.keys.sorted() {
-                guard let child = object[key] else { continue }
-                candidates.append(contentsOf: battingSectionCandidates(in: child, path: "\(path).\(key)"))
-            }
-        } else if let array = value as? [Any] {
-            if let section = makeFieldBasedBattingSection(from: array) {
-                candidates.append(BattingSectionCandidate(path: path, section: section))
-            }
-
-            for (index, child) in array.enumerated() {
-                candidates.append(contentsOf: battingSectionCandidates(in: child, path: "\(path)[\(index)]"))
-            }
-        } else if let rawTable = value as? String,
-                  let section = makeBattingSection(fromRawTable: rawTable),
-                  section.lines.isEmpty == false {
-            candidates.append(BattingSectionCandidate(path: path, section: section))
-        }
-
-        return candidates
-    }
-
-    private func makeFieldBasedBattingSection(from value: Any) -> GameCenterBattingSection? {
-        let rows: [[String: Any]]
-        if let array = value as? [[String: Any]] {
-            rows = array
-        } else if let object = value as? [String: Any],
-                  let array = (object["rows"] as? [[String: Any]]) ?? (object["record"] as? [[String: Any]]) {
-            rows = array
-        } else {
-            return nil
-        }
-
-        let lines = rows.compactMap { row -> GameCenterBattingLine? in
-            guard let order = battingOrderValue(in: row),
-                  let name = playerNameValue(in: row) else {
-                return nil
-            }
-
-            return GameCenterBattingLine(
-                battingOrder: order,
-                position: stringValue(in: row, keys: ["POS", "POSITION", "PITCHER_POS", "DEF_POS", "守備位置"]) ?? "",
-                name: name,
-                atBats: nil,
-                runs: nil,
-                hits: nil,
-                runsBattedIn: nil,
-                homeRuns: nil,
-                walks: nil,
-                strikeouts: nil,
-                average: nil
-            )
-        }
-
-        return lines.isEmpty ? nil : GameCenterBattingSection(lines: lines, totals: nil)
-    }
-
-    private func battingOrderValue(in row: [String: Any]) -> String? {
-        stringValue(in: row, keys: ["BAT_ORDER_NO", "BAT_ORDER", "BO", "BAT_ORDER_CN", "LINEUP_NO", "ORDER_NO", "ORDER"])
-            .flatMap { $0.battingOrderNumber }
-    }
-
-    private func playerNameValue(in row: [String: Any]) -> String? {
-        stringValue(in: row, keys: ["NAME", "P_NM", "PLAYER_NM", "HITTER_NM", "BATTER_NM", "P_NM_KOR"])
-    }
-
-    private func stringValue(in row: [String: Any], keys: [String]) -> String? {
-        for key in keys {
-            guard let rawValue = row[key] else { continue }
-            let value: String?
-            if let rawValue = rawValue as? String {
-                value = rawValue
-            } else if let rawValue = rawValue as? NSNumber {
-                value = rawValue.stringValue
-            } else {
-                value = nil
-            }
-            if let normalized = value?.normalizedGridText.nilIfBlank {
-                return normalized
-            }
-        }
-        return nil
-    }
-
     private func post<Response: Decodable>(
         endpoint: String,
         form: [String: String],
-        as type: Response.Type
+        as type: Response.Type,
+        requestContext: OfficialKBORequestDebugContext? = nil
     ) async throws -> Response {
-        let data = try await postData(endpoint: endpoint, form: form)
-        return try JSONDecoder().decode(Response.self, from: data)
+        let payload = try await postPayload(endpoint: endpoint, form: form, requestContext: requestContext)
+        do {
+            return try JSONDecoder().decode(Response.self, from: payload.data)
+        } catch {
+            throw OfficialKBOGameCenterError.decodingFailed(
+                payload.diagnostic.with(parseFailureReason: String(describing: error))
+            )
+        }
+    }
+
+    private func getText(
+        endpoint: String,
+        queryItems: [URLQueryItem],
+        requestContext: OfficialKBORequestDebugContext?
+    ) async throws -> String {
+        let payload = try await requestPayload(
+            endpoint: endpoint,
+            method: "GET",
+            form: nil,
+            queryItems: queryItems,
+            requestContext: requestContext
+        )
+        return String(data: payload.data, encoding: .utf8) ?? ""
+    }
+
+    private func getHTMLText(
+        endpoint: String,
+        queryItems: [URLQueryItem],
+        requestContext: OfficialKBORequestDebugContext?
+    ) async throws -> String {
+        let payload = try await requestPayload(
+            endpoint: endpoint,
+            method: "GET",
+            form: nil,
+            queryItems: queryItems,
+            requestContext: requestContext,
+            allowsHTMLBody: true
+        )
+        return String(data: payload.data, encoding: .utf8) ?? ""
     }
 
     private func postData(
         endpoint: String,
-        form: [String: String]
+        form: [String: String],
+        requestContext: OfficialKBORequestDebugContext? = nil
     ) async throws -> Data {
+        try await postPayload(endpoint: endpoint, form: form, requestContext: requestContext).data
+    }
+
+    private func postPayload(
+        endpoint: String,
+        form: [String: String],
+        requestContext: OfficialKBORequestDebugContext?
+    ) async throws -> OfficialKBOHTTPPayload {
+        try await requestPayload(
+            endpoint: endpoint,
+            method: "POST",
+            form: form,
+            queryItems: [],
+            requestContext: requestContext,
+            allowsHTMLBody: false
+        )
+    }
+
+    private func requestPayload(
+        endpoint: String,
+        method: String,
+        form: [String: String]?,
+        queryItems: [URLQueryItem],
+        requestContext: OfficialKBORequestDebugContext?,
+        allowsHTMLBody: Bool = false
+    ) async throws -> OfficialKBOHTTPPayload {
         guard let url = URL(string: endpoint, relativeTo: baseURL)?.absoluteURL else {
             throw OfficialKBOGameCenterError.invalidURL
         }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
-        request.httpBody = Self.formEncodedBody(from: form)
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            throw OfficialKBOGameCenterError.invalidResponse
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let requestURL = components?.url else {
+            throw OfficialKBOGameCenterError.invalidURL
         }
 
-        return data
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = method
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json, text/javascript, */*; q=0.01", forHTTPHeaderField: "Accept")
+        request.setValue("ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7", forHTTPHeaderField: "Accept-Language")
+        request.setValue("https://www.koreabaseball.com", forHTTPHeaderField: "Origin")
+        request.setValue(
+            requestContext?.referer ?? "https://www.koreabaseball.com/Schedule/GameCenter/Main.aspx",
+            forHTTPHeaderField: "Referer"
+        )
+        request.setValue(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+            forHTTPHeaderField: "User-Agent"
+        )
+        request.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        if let form {
+            request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Self.formEncodedBody(from: form)
+        }
+
+        #if DEBUG
+        print("[GameDetailLive] official request method=\(method) url=\(requestURL.absoluteString) providerGameID=\(requestContext?.providerGameID ?? "<nil>") officialProviderGameID=\(requestContext?.officialProviderGameID ?? "<nil>") publicGameID=\(requestContext?.publicGameID ?? "<nil>") form=\(Self.formDebugDescription(form)) headers=accept:\(request.value(forHTTPHeaderField: "Accept") ?? "<nil>"),referer:\(request.value(forHTTPHeaderField: "Referer") ?? "<nil>"),xrw:\(request.value(forHTTPHeaderField: "X-Requested-With") ?? "<nil>")")
+        #endif
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            let diagnostic = OfficialKBOResponseDiagnostic(
+                requestURL: requestURL.absoluteString,
+                providerGameID: requestContext?.providerGameID,
+                officialProviderGameID: requestContext?.officialProviderGameID,
+                publicGameID: requestContext?.publicGameID,
+                officialGameID: requestContext?.officialGameID,
+                httpStatus: nil,
+                contentType: nil,
+                bodyPreview: Self.bodyPreview(from: data),
+                parseFailureReason: "Response was not HTTPURLResponse"
+            )
+            debugLogOfficialInvalidResponse(diagnostic)
+            throw OfficialKBOGameCenterError.invalidResponse(diagnostic)
+        }
+
+        let diagnostic = OfficialKBOResponseDiagnostic(
+            requestURL: requestURL.absoluteString,
+            providerGameID: requestContext?.providerGameID,
+            officialProviderGameID: requestContext?.officialProviderGameID,
+            publicGameID: requestContext?.publicGameID,
+            officialGameID: requestContext?.officialGameID,
+            httpStatus: httpResponse.statusCode,
+            contentType: httpResponse.value(forHTTPHeaderField: "Content-Type"),
+            bodyPreview: Self.bodyPreview(from: data),
+            parseFailureReason: nil
+        )
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let invalid = diagnostic.with(parseFailureReason: "HTTP status \(httpResponse.statusCode)")
+            debugLogOfficialInvalidResponse(invalid)
+            throw OfficialKBOGameCenterError.invalidResponse(invalid)
+        }
+
+        if allowsHTMLBody {
+            if Self.isRedirectOrKnownErrorHTML(data: data) {
+                let invalid = diagnostic.with(parseFailureReason: "Unexpected redirect or KBO error HTML")
+                debugLogOfficialInvalidResponse(invalid)
+                throw OfficialKBOGameCenterError.invalidResponse(invalid)
+            }
+        } else {
+            if Self.isHTMLOrRedirectBody(data: data, contentType: diagnostic.contentType) {
+                let invalid = diagnostic.with(parseFailureReason: "Unexpected HTML or redirect response")
+                debugLogOfficialInvalidResponse(invalid)
+                throw OfficialKBOGameCenterError.invalidResponse(invalid)
+            }
+        }
+
+        if let officialError = Self.officialError(in: data) {
+            let reason = "Official KBO error code \(officialError.code): \(officialError.message)"
+            let invalid = diagnostic.with(parseFailureReason: reason)
+            debugLogOfficialInvalidResponse(invalid)
+            throw OfficialKBOGameCenterError.officialError(message: officialError.message, diagnostic: invalid)
+        }
+
+        return OfficialKBOHTTPPayload(data: data, diagnostic: diagnostic)
+    }
+
+    private func debugLogOfficialInvalidResponse(_ diagnostic: OfficialKBOResponseDiagnostic) {
+        #if DEBUG
+        print("[GameDetailLive] official request invalidResponse \(diagnostic.debugDescription)")
+        #endif
+    }
+
+    private static func bodyPreview(from data: Data) -> String {
+        let prefix = data.prefix(1000)
+        if let text = String(data: prefix, encoding: .utf8) {
+            return text
+        }
+        return "<non-utf8 body \(data.count) bytes>"
+    }
+
+    private static func isHTMLOrRedirectBody(data: Data, contentType: String?) -> Bool {
+        if contentType?.localizedCaseInsensitiveContains("text/html") == true {
+            return true
+        }
+        return isRedirectOrKnownErrorHTML(data: data)
+    }
+
+    private static func isRedirectOrKnownErrorHTML(data: Data) -> Bool {
+        guard let text = String(data: data.prefix(1000), encoding: .utf8) else {
+            return false
+        }
+        let lowered = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lowered.contains("object moved") ||
+            lowered.contains("페이지를 찾을 수 없습니다") ||
+            lowered.contains("요청하신 페이지") ||
+            lowered.contains("오류가 발생")
+    }
+
+    private static func officialError(in data: Data) -> (code: String, message: String)? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rawCode = object["code"] else {
+            return nil
+        }
+        let code = String(describing: rawCode)
+        guard code != "100" else { return nil }
+        return (code, (object["msg"] as? String)?.nilIfBlank ?? "<missing message>")
+    }
+
+    private static func formDebugDescription(_ form: [String: String]?) -> String {
+        guard let form else { return "<none>" }
+        return form.keys.sorted().map { "\($0)=\(form[$0] ?? "")" }.joined(separator: "&")
     }
 
     private func debugLogOfficialBoxScoreStructure(_ data: Data) {
@@ -1557,8 +1928,10 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 }
 
-private struct OfficialGameLookupContext: Sendable {
+struct OfficialGameLookupContext: Sendable {
+    let game: GameDetail
     let entry: OfficialGameEntry
+    let requestContext: OfficialKBORequestDebugContext
 }
 
 private struct OfficialScoreboardPayload: Sendable {
@@ -1570,497 +1943,110 @@ private struct OfficialScoreboardPayload: Sendable {
     let lineScore: GameCenterLineScore?
 }
 
-private struct BattingSectionCandidate {
-    let path: String
-    let section: GameCenterBattingSection
+private struct OfficialKBOHTTPPayload: Sendable {
+    let data: Data
+    let diagnostic: OfficialKBOResponseDiagnostic
 }
 
-private struct BattingLineGroup {
-    let label: String
-    let lines: [GameCenterBattingLine]
+struct OfficialKBORequestDebugContext: Sendable {
+    let providerGameID: String?
+    let officialProviderGameID: String?
+    let publicGameID: String?
+    let officialGameID: String?
+    let referer: String?
+
+    init(
+        providerGameID: String?,
+        officialProviderGameID: String?,
+        publicGameID: String?,
+        officialGameID: String?,
+        referer: String? = nil
+    ) {
+        self.providerGameID = providerGameID
+        self.officialProviderGameID = officialProviderGameID
+        self.publicGameID = publicGameID
+        self.officialGameID = officialGameID
+        self.referer = referer
+    }
+
+    init(game: GameDetail) {
+        self.init(
+            providerGameID: game.providerGameID,
+            officialProviderGameID: game.officialProviderGameID,
+            publicGameID: game.publicGameID,
+            officialGameID: game.officialGameCenterID,
+            referer: nil
+        )
+    }
+
+    func with(officialGameID: String? = nil, referer: String? = nil) -> OfficialKBORequestDebugContext {
+        OfficialKBORequestDebugContext(
+            providerGameID: providerGameID,
+            officialProviderGameID: officialProviderGameID,
+            publicGameID: publicGameID,
+            officialGameID: officialGameID ?? self.officialGameID,
+            referer: referer ?? self.referer
+        )
+    }
 }
 
-private struct OfficialFlexibleCodingKey: CodingKey, Hashable, Sendable {
-    let stringValue: String
-    let intValue: Int?
+struct OfficialKBOResponseDiagnostic: Sendable {
+    let requestURL: String
+    let providerGameID: String?
+    let officialProviderGameID: String?
+    let publicGameID: String?
+    let officialGameID: String?
+    let httpStatus: Int?
+    let contentType: String?
+    let bodyPreview: String
+    let parseFailureReason: String?
 
-    init(_ stringValue: String) {
-        self.stringValue = stringValue
-        self.intValue = nil
+    func with(parseFailureReason: String?) -> OfficialKBOResponseDiagnostic {
+        OfficialKBOResponseDiagnostic(
+            requestURL: requestURL,
+            providerGameID: providerGameID,
+            officialProviderGameID: officialProviderGameID,
+            publicGameID: publicGameID,
+            officialGameID: officialGameID,
+            httpStatus: httpStatus,
+            contentType: contentType,
+            bodyPreview: bodyPreview,
+            parseFailureReason: parseFailureReason
+        )
     }
 
-    init?(stringValue: String) {
-        self.init(stringValue)
-    }
-
-    init?(intValue: Int) {
-        self.stringValue = String(intValue)
-        self.intValue = intValue
+    var debugDescription: String {
+        [
+            "url=\(requestURL)",
+            "providerGameID=\(providerGameID ?? "<nil>")",
+            "officialProviderGameID=\(officialProviderGameID ?? "<nil>")",
+            "publicGameID=\(publicGameID ?? "<nil>")",
+            "officialGameID=\(officialGameID ?? "<nil>")",
+            "status=\(httpStatus.map(String.init) ?? "<nil>")",
+            "contentType=\(contentType ?? "<nil>")",
+            "parseFailureReason=\(parseFailureReason ?? "<nil>")",
+            "bodyPreview=\(bodyPreview)"
+        ].joined(separator: " ")
     }
 }
 
-private enum OfficialKBOGameCenterError: Error {
+enum OfficialKBOGameCenterError: Error, CustomStringConvertible {
     case invalidURL
-    case invalidResponse
-}
+    case invalidResponse(OfficialKBOResponseDiagnostic)
+    case decodingFailed(OfficialKBOResponseDiagnostic)
+    case officialError(message: String, diagnostic: OfficialKBOResponseDiagnostic)
 
-private struct OfficialGameListResponse: Decodable {
-    let game: [OfficialGameEntry]
-}
-
-private struct OfficialGameEntry: Decodable, Sendable {
-    let leagueID: Int
-    let seriesID: Int
-    let seasonID: Int
-    let gameDate: String
-    let displayDateText: String
-    let gameID: String
-    let startTime: String
-    let stadiumName: String?
-    let awayTeamCode: String
-    let homeTeamCode: String
-    let awayTeamName: String
-    let homeTeamName: String
-    let awayProbablePitcherName: String?
-    let homeProbablePitcherName: String?
-    let winningPitcherName: String?
-    let losingPitcherName: String?
-    let savePitcherName: String?
-    let gameStateCode: String
-    let cancelName: String?
-    let inningNumber: Int?
-    let inningHalfText: String?
-    let awayScoreText: String?
-    let homeScoreText: String?
-    let strikeCount: Int?
-    let ballCount: Int?
-    let outCount: Int?
-    let firstBaseOccupancy: Int?
-    let secondBaseOccupancy: Int?
-    let thirdBaseOccupancy: Int?
-    private let decodedBaseOrderSourceKeys: [String]
-
-    private enum CodingKeys: String, CodingKey {
-        case leagueID = "LE_ID"
-        case seriesID = "SR_ID"
-        case seasonID = "SEASON_ID"
-        case gameDate = "G_DT"
-        case displayDateText = "G_DT_TXT"
-        case gameID = "G_ID"
-        case startTime = "G_TM"
-        case stadiumName = "S_NM"
-        case awayTeamCode = "AWAY_ID"
-        case homeTeamCode = "HOME_ID"
-        case awayTeamName = "AWAY_NM"
-        case homeTeamName = "HOME_NM"
-        case awayProbablePitcherName = "T_PIT_P_NM"
-        case homeProbablePitcherName = "B_PIT_P_NM"
-        case winningPitcherName = "W_PIT_P_NM"
-        case losingPitcherName = "L_PIT_P_NM"
-        case savePitcherName = "SV_PIT_P_NM"
-        case gameStateCode = "GAME_STATE_SC"
-        case cancelName = "CANCEL_SC_NM"
-        case inningNumber = "GAME_INN_NO"
-        case inningHalfText = "GAME_TB_SC_NM"
-        case awayScoreText = "T_SCORE_CN"
-        case homeScoreText = "B_SCORE_CN"
-        case strikeCount = "STRIKE_CN"
-        case ballCount = "BALL_CN"
-        case outCount = "OUT_CN"
-        case firstBaseOccupancy = "B1_BAT_ORDER_NO"
-        case secondBaseOccupancy = "B2_BAT_ORDER_NO"
-        case thirdBaseOccupancy = "B3_BAT_ORDER_NO"
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        leagueID = try container.decode(Int.self, forKey: .leagueID)
-        seriesID = try container.decode(Int.self, forKey: .seriesID)
-        seasonID = try container.decode(Int.self, forKey: .seasonID)
-        gameDate = try container.decode(String.self, forKey: .gameDate)
-        displayDateText = try container.decode(String.self, forKey: .displayDateText)
-        gameID = try container.decode(String.self, forKey: .gameID)
-        startTime = try container.decode(String.self, forKey: .startTime)
-        stadiumName = try container.decodeIfPresent(String.self, forKey: .stadiumName)
-        awayTeamCode = try container.decode(String.self, forKey: .awayTeamCode)
-        homeTeamCode = try container.decode(String.self, forKey: .homeTeamCode)
-        awayTeamName = try container.decode(String.self, forKey: .awayTeamName)
-        homeTeamName = try container.decode(String.self, forKey: .homeTeamName)
-        awayProbablePitcherName = try container.decodeIfPresent(String.self, forKey: .awayProbablePitcherName)
-        homeProbablePitcherName = try container.decodeIfPresent(String.self, forKey: .homeProbablePitcherName)
-        winningPitcherName = try container.decodeIfPresent(String.self, forKey: .winningPitcherName)
-        losingPitcherName = try container.decodeIfPresent(String.self, forKey: .losingPitcherName)
-        savePitcherName = try container.decodeIfPresent(String.self, forKey: .savePitcherName)
-        gameStateCode = try container.decode(String.self, forKey: .gameStateCode)
-        cancelName = try container.decodeIfPresent(String.self, forKey: .cancelName)
-        inningNumber = try container.decodeIfPresent(Int.self, forKey: .inningNumber)
-        inningHalfText = try container.decodeIfPresent(String.self, forKey: .inningHalfText)
-        awayScoreText = try container.decodeIfPresent(String.self, forKey: .awayScoreText)
-        homeScoreText = try container.decodeIfPresent(String.self, forKey: .homeScoreText)
-        strikeCount = try container.decodeIfPresent(Int.self, forKey: .strikeCount)
-        ballCount = try container.decodeIfPresent(Int.self, forKey: .ballCount)
-        outCount = try container.decodeIfPresent(Int.self, forKey: .outCount)
-
-        let first = try Self.decodeInt(from: decoder, keys: ["B1_BAT_ORDER_NO", "B1BATORDERNO", "BASE1_BAT_ORDER_NO"])
-        let second = try Self.decodeInt(from: decoder, keys: ["B2_BAT_ORDER_NO", "B2BATORDERNO", "BASE2_BAT_ORDER_NO"])
-        let third = try Self.decodeInt(from: decoder, keys: ["B3_BAT_ORDER_NO", "B3BATORDERNO", "BASE3_BAT_ORDER_NO"])
-        firstBaseOccupancy = first.value
-        secondBaseOccupancy = second.value
-        thirdBaseOccupancy = third.value
-        decodedBaseOrderSourceKeys = [first.key, second.key, third.key].compactMap { $0 }
-    }
-
-    private static func decodeInt(
-        from decoder: any Decoder,
-        keys: [String]
-    ) throws -> (value: Int?, key: String?) {
-        let container = try decoder.container(keyedBy: OfficialFlexibleCodingKey.self)
-        for key in keys {
-            let codingKey = OfficialFlexibleCodingKey(key)
-            if let value = try? container.decodeIfPresent(Int.self, forKey: codingKey) {
-                return (value, key)
-            }
-            if let value = try? container.decodeIfPresent(String.self, forKey: codingKey),
-               let intValue = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                return (intValue, key)
-            }
+    var description: String {
+        switch self {
+        case .invalidURL:
+            return "invalidURL"
+        case .invalidResponse(let diagnostic):
+            return "invalidResponse(\(diagnostic.debugDescription))"
+        case .decodingFailed(let diagnostic):
+            return "decodingFailed(\(diagnostic.debugDescription))"
+        case .officialError(let message, let diagnostic):
+            return "officialError(message=\(message), \(diagnostic.debugDescription))"
         }
-        return (nil, nil)
-    }
-
-    var status: GameStatus {
-        switch gameStateCode {
-        case "1":
-            return GameStatus.upcoming
-        case "2":
-            return GameStatus.live
-        case "3":
-            return GameStatus.final
-        case "5":
-            return GameStatus.rainDelay
-        default:
-            if cancelName?.contains("취소") == true {
-                return GameStatus.cancelled
-            }
-            if cancelName?.contains("우천") == true || cancelName?.contains("중단") == true {
-                return GameStatus.rainDelay
-            }
-            return GameStatus.upcoming
-        }
-    }
-
-    var inningText: String? {
-        switch status {
-        case .upcoming:
-            return nil
-        case .final:
-            return "종료"
-        case .cancelled:
-            return "취소"
-        case .rainDelay:
-            if let inningNumber, let inningHalfText {
-                return "\(inningNumber)회\(inningHalfText)"
-            }
-            return status.title
-        case .live:
-            guard let inningNumber, let inningHalfText else { return status.title }
-            return "\(inningNumber)회\(inningHalfText)"
-        }
-    }
-
-    var awayScore: Int? {
-        Int(awayScoreText ?? "")
-    }
-
-    var homeScore: Int? {
-        Int(homeScoreText ?? "")
-    }
-
-    var balls: Int? {
-        ballCount
-    }
-
-    var strikes: Int? {
-        strikeCount
-    }
-
-    var outs: Int? {
-        outCount
-    }
-
-    var bases: RunnerState? {
-        guard firstBaseOccupancy != nil || secondBaseOccupancy != nil || thirdBaseOccupancy != nil else {
-            return nil
-        }
-
-        return RunnerState(
-            first: (firstBaseOccupancy ?? 0) > 0,
-            second: (secondBaseOccupancy ?? 0) > 0,
-            third: (thirdBaseOccupancy ?? 0) > 0
-        )
-    }
-
-    func baseRunners(from battingSections: [GameCenterBattingSection]?) -> GameCenterBaseRunners? {
-        let occupiedOrders = [firstBaseOccupancy, secondBaseOccupancy, thirdBaseOccupancy]
-            .compactMap { $0 }
-            .filter { $0 > 0 }
-        guard occupiedOrders.isEmpty == false else {
-            #if DEBUG
-            let reason = firstBaseOccupancy == nil && secondBaseOccupancy == nil && thirdBaseOccupancy == nil
-                ? "missingBaseOrderFields"
-                : "noOccupiedBases"
-            print("[BaseRunners] source=official skipped=\(reason) baseOrderKeys=\(baseOrderSourceKeys.joined(separator: ","))")
-            #endif
-            return nil
-        }
-
-        guard let battingSections, battingSections.count >= 2 else {
-            #if DEBUG
-            print("[BaseRunners] source=official skipped=missingBattingSections count=\(battingSections?.count ?? 0) baseOrderKeys=\(baseOrderSourceKeys.joined(separator: ","))")
-            #endif
-            return nil
-        }
-
-        let lineGroups = battingLineGroupsForCurrentHalf(from: battingSections)
-        guard lineGroups.isEmpty == false else {
-            #if DEBUG
-            print("[BaseRunners] source=official skipped=missingBattingSections reason=unknownInningHalf inningHalf=\(inningHalfText ?? "<nil>")")
-            #endif
-            return nil
-        }
-
-        let first = runnerName(order: firstBaseOccupancy, in: lineGroups, baseLabel: "1B")
-        let second = runnerName(order: secondBaseOccupancy, in: lineGroups, baseLabel: "2B")
-        let third = runnerName(order: thirdBaseOccupancy, in: lineGroups, baseLabel: "3B")
-
-        #if DEBUG
-        let reason = first == nil && second == nil && third == nil ? "battingSectionsFoundButNoMatchingOrder " : ""
-        print("[BaseRunners] source=official \(reason)mapped first=\(first ?? "<nil>") second=\(second ?? "<nil>") third=\(third ?? "<nil>") baseOrderKeys=\(baseOrderSourceKeys.joined(separator: ","))")
-        #endif
-
-        guard first != nil || second != nil || third != nil else {
-            return nil
-        }
-
-        return GameCenterBaseRunners(first: first, second: second, third: third)
-    }
-
-    private func battingLineGroupsForCurrentHalf(from battingSections: [GameCenterBattingSection]) -> [BattingLineGroup] {
-        let normalizedHalf = inningHalfText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalizedHalf?.contains("초") == true || normalizedHalf?.contains("top") == true {
-            return [BattingLineGroup(label: "away", lines: battingSections[0].lines)]
-        }
-        if normalizedHalf?.contains("말") == true || normalizedHalf?.contains("bottom") == true || normalizedHalf?.contains("bot") == true {
-            return [BattingLineGroup(label: "home", lines: battingSections[1].lines)]
-        }
-
-        return [
-            BattingLineGroup(label: "away", lines: battingSections[0].lines),
-            BattingLineGroup(label: "home", lines: battingSections[1].lines)
-        ]
-    }
-
-    private func runnerName(order: Int?, in lineGroups: [BattingLineGroup], baseLabel: String) -> String? {
-        guard let order, order > 0 else {
-            return nil
-        }
-
-        let orderText = String(order)
-        let matches = lineGroups.flatMap { group in
-            group.lines
-                .filter { $0.battingOrderNumber == orderText }
-                .compactMap { line -> (String, String)? in
-                    guard let name = line.name.nilIfBlank else { return nil }
-                    return (group.label, name)
-                }
-        }
-
-        guard matches.count <= 1 else {
-            #if DEBUG
-            print("[BaseRunners] source=official skipped=ambiguousBattingOrderMatch base=\(baseLabel) order=\(orderText) matches=\(matches.map { "\($0.0):\($0.1)" }.joined(separator: ","))")
-            #endif
-            return nil
-        }
-
-        return matches.first?.1
-    }
-
-    var baseOrderSourceKeys: [String] {
-        decodedBaseOrderSourceKeys
-    }
-
-    var probableStarters: GameCenterProbableStarters {
-        GameCenterProbableStarters(
-            away: awayProbablePitcherName?.nilIfBlank,
-            home: homeProbablePitcherName?.nilIfBlank
-        )
-    }
-}
-
-private struct OfficialScoreboardResponse: Decodable {
-    let stadiumName: String?
-    let crowdText: String?
-    let startTime: String?
-    let endTime: String?
-    let durationText: String?
-    let inningTable: String
-    let totalsTable: String
-
-    private enum CodingKeys: String, CodingKey {
-        case stadiumName = "S_NM"
-        case crowdText = "CROWD_CN"
-        case startTime = "START_TM"
-        case endTime = "END_TM"
-        case durationText = "USE_TM"
-        case inningTable = "table2"
-        case totalsTable = "table3"
-    }
-}
-
-private struct OfficialBoxScoreResponse: Decodable {
-    let summaryTable: String
-    let battingTables: [OfficialBattingTableGroup]
-    let pitchingTables: [OfficialPitchingTableGroup]
-
-    private enum CodingKeys: String, CodingKey {
-        case summaryTable = "tableEtc"
-        case battingTables = "arrHitter"
-        case pitchingTables = "arrPitcher"
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        summaryTable = try container.decodeIfPresent(String.self, forKey: .summaryTable) ?? ""
-        battingTables = try container.decodeIfPresent([OfficialBattingTableGroup].self, forKey: .battingTables) ?? []
-        pitchingTables = try container.decodeIfPresent([OfficialPitchingTableGroup].self, forKey: .pitchingTables) ?? []
-    }
-}
-
-private struct OfficialBattingTableGroup: Decodable {
-    let orderTable: String
-    let detailTable: String?
-    let summaryTable: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case orderTable = "table1"
-        case detailTable = "table2"
-        case summaryTable = "table3"
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        orderTable = try container.decodeIfPresent(String.self, forKey: .orderTable) ?? ""
-        detailTable = try container.decodeIfPresent(String.self, forKey: .detailTable)
-        summaryTable = try container.decodeIfPresent(String.self, forKey: .summaryTable)
-    }
-}
-
-private struct OfficialPitchingTableGroup: Decodable {
-    let table: String
-}
-
-private struct OfficialPreviewRecordResponse: Decodable {
-    let rows: [OfficialPreviewRecordRow]
-}
-
-private struct OfficialPreviewRecordRow: Decodable {
-    let row: [OfficialPreviewRecordCell]
-}
-
-private struct OfficialPreviewRecordCell: Decodable {
-    let text: String
-
-    private enum CodingKeys: String, CodingKey {
-        case text = "Text"
-    }
-
-    var normalizedText: String {
-        text.normalizedGridText
-    }
-}
-
-private struct OfficialGridTableDTO: Decodable {
-    let headers: [OfficialGridRowDTO]
-    let rows: [OfficialGridRowDTO]
-    let tfoot: [OfficialGridRowDTO]
-
-    var table: OfficialGridTable {
-        OfficialGridTable(
-            headers: headers.map(\.row),
-            rows: rows.map(\.row),
-            tfoot: tfoot.map(\.row)
-        )
-    }
-}
-
-private struct OfficialGridRowDTO: Decodable {
-    let row: OfficialGridRow
-}
-
-private struct OfficialGridRow: Decodable {
-    let cells: [OfficialGridCell]
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let rawCells = try container.decode([OfficialGridCellDTO].self)
-        cells = rawCells.map { OfficialGridCell(text: $0.text.normalizedGridText) }
-    }
-}
-
-private struct OfficialGridCellDTO: Decodable {
-    let text: String
-
-    private enum CodingKeys: String, CodingKey {
-        case text = "Text"
-    }
-}
-
-private struct OfficialGridCell: Sendable {
-    let text: String
-}
-
-private struct OfficialGridTable: Sendable {
-    let headers: [OfficialGridRow]
-    let rows: [OfficialGridRow]
-    let tfoot: [OfficialGridRow]
-
-    var battingTableInterpretation: OfficialBattingTableInterpretation {
-        let labels = headers.first?.cells.map { $0.text.normalizedKeyStatLabel } ?? []
-        let aggregateLabels: Set<String> = ["타수", "AB", "득점", "R", "안타", "H", "타점", "RBI", "홈런", "HR", "HRA", "볼넷", "BB", "4구", "삼진", "SO", "K"]
-            .map(\.normalizedKeyStatLabel)
-            .reduce(into: Set<String>()) { $0.insert($1) }
-        if labels.contains(where: aggregateLabels.contains) {
-            return .aggregateBattingStats
-        }
-
-        if rows.contains(where: \.isCurrentKBOBattingAggregateRow) || tfoot.contains(where: \.isCurrentKBOBattingAggregateRow) {
-            return .aggregateBattingStats
-        }
-
-        if let firstRow = rows.first,
-           firstRow.cells.count == 3,
-           firstRow.cells[0].text.battingOrderNumber != nil,
-           firstRow.cells[2].text.nilIfBlank != nil {
-            return .lineup
-        }
-
-        let sampleValues = rows.prefix(3).flatMap { $0.cells.map(\.text) }
-        if sampleValues.contains(where: { $0.nilIfBlank != nil && $0.isIntegerStatValue == false }) {
-            return .plateAppearanceResults
-        }
-
-        return .unknown
-    }
-}
-
-private extension OfficialGridRow {
-    var isCurrentKBOBattingAggregateRow: Bool {
-        guard cells.count >= 5 else { return false }
-        return cells[0].text.isIntegerStatValue &&
-            cells[1].text.isIntegerStatValue &&
-            cells[2].text.isIntegerStatValue &&
-            cells[3].text.isIntegerStatValue &&
-            cells[4].text.isDecimalStatValue
     }
 }
 
@@ -2092,6 +2078,18 @@ private extension String {
             .strippingHTML()
             .replacingOccurrences(of: "\u{00A0}", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var gameCenterPlainRecordText: String {
+        replacingOccurrences(of: "</br>", with: " ")
+            .replacingOccurrences(of: "<br />", with: " ")
+            .replacingOccurrences(of: "<br/>", with: " ")
+            .replacingOccurrences(of: "<br>", with: " ")
+            .normalizedGridText
+    }
+
+    var gameCenterParenthesizedRecordText: String {
+        firstGameCenterRegexCapture(pattern: #"\((.*?)\)"#) ?? gameCenterPlainRecordText
     }
 
     func strippingHTML() -> String {
@@ -2150,34 +2148,6 @@ private extension String {
         return normalized.isEmpty || ["없음", "무", "NONE", "NO", "NIL", "-"].contains(normalized)
     }
 
-    var isHomeRunPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return normalized.contains("홈")
-    }
-
-    var isWalkPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return ["4구", "볼넷", "고4", "고의4구", "자동고의4구"].contains(normalized)
-    }
-
-    var isStrikeoutPlateAppearance: Bool {
-        let normalized = normalizedKeyStatLabel
-        return normalized.contains("삼진") || normalized.contains("낫아웃")
-    }
-
-    var plateAppearanceResultTokens: [String] {
-        normalizedGridText
-            .split { character in
-                character == "," ||
-                    character == "，" ||
-                    character == "/" ||
-                    character == "\n" ||
-                    character == "\r"
-            }
-            .map(String.init)
-            .compactMap(\.nilIfBlank)
-    }
-
     func firstGameCenterRegexCapture(pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(startIndex..<endIndex, in: self)
@@ -2187,6 +2157,10 @@ private extension String {
             return nil
         }
         return String(self[captureRange])
+    }
+
+    func gameCenterFirstCapture(_ pattern: String) -> String? {
+        firstGameCenterRegexCapture(pattern: pattern)
     }
 
     func gameCenterRegexMatchCount(pattern: String) -> Int {

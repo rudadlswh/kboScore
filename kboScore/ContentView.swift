@@ -46,6 +46,12 @@ struct ContentView: View {
                             Label("일정", systemImage: "calendar")
                         }
 
+                    AttendanceView()
+                        .tag(AppTab.attendance)
+                        .tabItem {
+                            Label("직관", systemImage: "checkmark.circle.fill")
+                        }
+
                     SettingsView()
                         .tag(AppTab.settings)
                         .tabItem {
@@ -78,7 +84,7 @@ struct ContentView: View {
         }
         .sheet(
             isPresented: Binding(
-                get: { appModel.presentedGameID != nil },
+                get: { appModel.presentedGameIdentity != nil },
                 set: { isPresented in
                     if !isPresented {
                         appModel.dismissPresentedGameDetail()
@@ -86,9 +92,9 @@ struct ContentView: View {
                 }
             )
         ) {
-            if let gameID = appModel.presentedGameID {
+            if let gameIdentity = appModel.presentedGameIdentity {
                 NavigationStack {
-                    GameDetailView(gameID: gameID)
+                    GameDetailView(gameIdentity: gameIdentity)
                 }
             }
         }
@@ -140,6 +146,7 @@ private struct StadiumBottomNavigationBar: View {
         StadiumBottomNavigationItem(tab: .home, title: "홈", systemImage: "house.fill"),
         StadiumBottomNavigationItem(tab: .standings, title: "순위", systemImage: "list.number"),
         StadiumBottomNavigationItem(tab: .schedule, title: "일정", systemImage: "calendar"),
+        StadiumBottomNavigationItem(tab: .attendance, title: "직관", systemImage: "checkmark.circle.fill"),
         StadiumBottomNavigationItem(tab: .settings, title: "설정", systemImage: "gearshape.fill")
     ]
 

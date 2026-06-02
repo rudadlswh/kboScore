@@ -12,7 +12,7 @@ protocol GameBoxscoreFetching: Sendable {
     nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse
 }
 
-struct GameBoxscoreResponse: Codable, Equatable, Sendable {
+nonisolated struct GameBoxscoreResponse: Codable, Equatable, Sendable {
     let gameId: String
     let awayBatters: [GameBatterRecord]
     let homeBatters: [GameBatterRecord]
@@ -53,7 +53,7 @@ struct GameBoxscoreResponse: Codable, Equatable, Sendable {
     }
 }
 
-struct GameBatterRecord: Codable, Equatable, Sendable {
+nonisolated struct GameBatterRecord: Codable, Equatable, Sendable {
     let sourceOrder: Int
     let battingOrder: Int?
     let position: String?
@@ -69,7 +69,7 @@ struct GameBatterRecord: Codable, Equatable, Sendable {
     let battingAverage: String?
 }
 
-struct GamePitcherRecord: Codable, Equatable, Sendable {
+nonisolated struct GamePitcherRecord: Codable, Equatable, Sendable {
     let sourceOrder: Int
     let pitchingOrder: Int?
     let playerName: String
@@ -91,7 +91,7 @@ struct GamePitcherRecord: Codable, Equatable, Sendable {
     let era: String?
 }
 
-enum GameBoxscoreClientFactory {
+nonisolated enum GameBoxscoreClientFactory {
     static func makeAppClient() -> any GameBoxscoreFetching {
         let processValue = ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -238,7 +238,8 @@ extension GameBoxscoreResponse {
             awayBatting: GameCenterBattingSection(lines: awayBatters.map(\.gameCenterLine), totals: nil),
             homeBatting: GameCenterBattingSection(lines: homeBatters.map(\.gameCenterLine), totals: nil),
             awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(\.gameCenterLine)),
-            homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine))
+            homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine)),
+            recordSource: .fullBoxscore
         )
     }
 }
@@ -290,7 +291,7 @@ private extension GamePitcherRecord {
 }
 
 private extension Array where Element == GameBatterRecord {
-    func sortedBySourceOrder() -> [GameBatterRecord] {
+    nonisolated func sortedBySourceOrder() -> [GameBatterRecord] {
         sorted { lhs, rhs in
             if lhs.sourceOrder == rhs.sourceOrder {
                 return lhs.playerName < rhs.playerName
@@ -301,7 +302,7 @@ private extension Array where Element == GameBatterRecord {
 }
 
 private extension Array where Element == GamePitcherRecord {
-    func sortedBySourceOrder() -> [GamePitcherRecord] {
+    nonisolated func sortedBySourceOrder() -> [GamePitcherRecord] {
         sorted { lhs, rhs in
             if lhs.sourceOrder == rhs.sourceOrder {
                 return lhs.playerName < rhs.playerName

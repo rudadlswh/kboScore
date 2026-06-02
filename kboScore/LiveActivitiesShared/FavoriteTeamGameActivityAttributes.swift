@@ -7,7 +7,7 @@
 
 import Foundation
 
-public enum KBOCountDisplay {
+nonisolated public enum KBOCountDisplay {
     public static func balls(_ value: Int?) -> Int? {
         normalized(value, upperBound: 3)
     }
@@ -26,7 +26,7 @@ public enum KBOCountDisplay {
     }
 }
 
-public enum KBOInningFormatter {
+nonisolated public enum KBOInningFormatter {
     public static func korean(_ rawValue: String?) -> String? {
         guard let rawValue else { return nil }
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)

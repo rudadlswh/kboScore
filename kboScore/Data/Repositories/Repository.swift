@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct KBOMonthScheduleKey: Hashable, Sendable, Codable {
+nonisolated struct KBOMonthScheduleKey: Hashable, Sendable, Codable {
     let year: Int
     let month: Int
 
@@ -142,7 +142,7 @@ protocol KBOLocalGameCacheUpserting: Sendable {
     nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int)
 }
 
-struct KBOBootstrapData: Sendable {
+nonisolated struct KBOBootstrapData: Sendable {
     let teams: [Team]
     let games: [GameDetail]
     let notifications: [NotificationItem]

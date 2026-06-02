@@ -8,7 +8,7 @@
 import Foundation
 import UserNotifications
 
-enum ScoreNotificationEventType: String, Codable, Sendable {
+nonisolated enum ScoreNotificationEventType: String, Codable, Sendable {
     case gameStart
     case scoreChange
     case onBase
@@ -87,6 +87,9 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     let title: String
     let body: String
     let publicGameID: String?
+    let providerGameID: String?
+    let gameDatabaseID: String?
+    let stableGameIdentity: String?
     let teamIDs: [String]
     let routeHint: NotificationRouteHint
 
@@ -96,6 +99,9 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         title: String,
         body: String,
         publicGameID: String? = nil,
+        providerGameID: String? = nil,
+        gameDatabaseID: String? = nil,
+        stableGameIdentity: String? = nil,
         teamIDs: [String] = [],
         routeHint: NotificationRouteHint = .gameDetail
     ) {
@@ -104,6 +110,9 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         self.title = title
         self.body = body
         self.publicGameID = publicGameID
+        self.providerGameID = providerGameID
+        self.gameDatabaseID = gameDatabaseID
+        self.stableGameIdentity = stableGameIdentity
         self.teamIDs = teamIDs
         self.routeHint = routeHint
     }
@@ -116,6 +125,9 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
                 "title": title,
                 "body": body,
                 "publicGameId": publicGameID as Any,
+                "providerGameId": providerGameID as Any,
+                "gameDatabaseId": gameDatabaseID as Any,
+                "stableGameIdentity": stableGameIdentity as Any,
                 "teamIds": teamIDs,
                 "routeHint": routeHint.rawValue
             ]
@@ -124,7 +136,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
 }
 
 enum AppNotificationRoute: Equatable, Sendable {
-    case gameDetail(UUID)
+    case gameDetail(String)
     case notifications
     case home
 }
@@ -150,10 +162,10 @@ enum ScoreNotificationPayloadExtractor {
     nonisolated static func route(from payload: ScoreNotificationPayload) -> AppNotificationRoute? {
         switch payload.routeHint {
         case .gameDetail:
-            guard let gameID = GameIdentifier.uuid(from: payload.gameID) else {
+            guard let identity = payload.preferredGameNavigationIdentity else {
                 return .notifications
             }
-            return .gameDetail(gameID)
+            return .gameDetail(identity)
         case .notifications:
             return .notifications
         case .home:
@@ -177,10 +189,24 @@ enum ScoreNotificationPayloadExtractor {
             eventType: eventType,
             title: title,
             body: body,
-            publicGameID: dictionary["publicGameId"] as? String,
+            publicGameID: stringValue(for: ["publicGameId", "publicGameID", "gamePublicId", "gamePublicID"], in: dictionary),
+            providerGameID: stringValue(for: ["providerGameId", "providerGameID", "gameProviderId", "gameProviderID"], in: dictionary),
+            gameDatabaseID: stringValue(for: ["gameDatabaseId", "gameDatabaseID", "databaseGameId", "databaseGameID"], in: dictionary),
+            stableGameIdentity: stringValue(for: ["stableGameIdentity", "gameStableIdentity"], in: dictionary),
             teamIDs: teamIDs,
             routeHint: routeHint
         )
+    }
+
+    nonisolated private static func stringValue(for keys: [String], in dictionary: [String: Any]) -> String? {
+        for key in keys {
+            guard let value = dictionary[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty == false {
+                return trimmed
+            }
+        }
+        return nil
     }
 
     nonisolated private static func notificationTeamIDs(from dictionary: [String: Any]) -> [String] {
@@ -196,5 +222,54 @@ enum ScoreNotificationPayloadExtractor {
                     result.append(teamID)
                 }
             }
+    }
+}
+
+extension ScoreNotificationPayload {
+    nonisolated var preferredGameNavigationIdentity: String? {
+        if let publicGameID = nonBlank(publicGameID) {
+            return publicGameID
+        }
+        if let providerGameID = nonBlank(providerGameID) {
+            return GameIdentifier.providerKey(providerGameID)
+        }
+        if let databaseIdentity = databaseIdentity(from: gameDatabaseID) {
+            return databaseIdentity
+        }
+        if let stableIdentity = realStableIdentity(stableGameIdentity) {
+            return stableIdentity
+        }
+        guard let gameID = nonBlank(gameID) else { return nil }
+        if let databaseIdentity = databaseIdentity(from: gameID) {
+            return databaseIdentity
+        }
+        return gameID
+    }
+
+    nonisolated private func databaseIdentity(from value: String?) -> String? {
+        guard let value = nonBlank(value) else { return nil }
+        if value.hasPrefix("id:") {
+            let rawID = String(value.dropFirst("id:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return UUID(uuidString: rawID).map { GameIdentifier.idKey($0) }
+        }
+        return UUID(uuidString: value).map { GameIdentifier.idKey($0) }
+    }
+
+    nonisolated private func realStableIdentity(_ value: String?) -> String? {
+        guard let value = nonBlank(value) else { return nil }
+        if value.hasPrefix("public:") || value.hasPrefix("provider:") {
+            return value
+        }
+        if value.hasPrefix("id:") {
+            return databaseIdentity(from: value)
+        }
+        return nil
+    }
+
+    nonisolated private func nonBlank(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.isEmpty == false else { return nil }
+        return value
     }
 }

@@ -14,10 +14,12 @@ struct kboScoreApp: App {
     @State private var appModel: AppModel = {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle()
         let notificationRegistrationClient = NotificationRegistrationClientFactory.makeAppClient()
+        let scheduleStaleGameReconciliationClient = ScheduleStaleGameReconciliationClientFactory.makeAppClient()
         return AppModel(
             repository: bundle.repository,
             repositoryRuntimeState: bundle.runtimeState,
-            notificationRegistrationClient: notificationRegistrationClient
+            notificationRegistrationClient: notificationRegistrationClient,
+            scheduleStaleGameReconciliationClient: scheduleStaleGameReconciliationClient
         )
     }()
 
