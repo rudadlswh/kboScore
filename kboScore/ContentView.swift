@@ -84,7 +84,7 @@ struct ContentView: View {
         }
         .sheet(
             isPresented: Binding(
-                get: { appModel.presentedGameID != nil },
+                get: { appModel.presentedGameIdentity != nil },
                 set: { isPresented in
                     if !isPresented {
                         appModel.dismissPresentedGameDetail()
@@ -92,9 +92,9 @@ struct ContentView: View {
                 }
             )
         ) {
-            if let gameID = appModel.presentedGameID {
+            if let gameIdentity = appModel.presentedGameIdentity {
                 NavigationStack {
-                    GameDetailView(gameID: gameID)
+                    GameDetailView(gameIdentity: gameIdentity)
                 }
             }
         }

@@ -55,6 +55,10 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
     var isRead: Bool
     let relatedGameID: UUID?
     let publicGameID: String?
+    let gamePublicID: String?
+    let gameProviderID: String?
+    let gameDatabaseID: String?
+    let gameStableIdentity: String?
     let relatedTeamIDs: [String]
 
     nonisolated init(
@@ -67,6 +71,10 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         isRead: Bool,
         relatedGameID: UUID?,
         publicGameID: String? = nil,
+        gamePublicID: String? = nil,
+        gameProviderID: String? = nil,
+        gameDatabaseID: String? = nil,
+        gameStableIdentity: String? = nil,
         relatedTeamIDs: [String]
     ) {
         self.id = id
@@ -77,7 +85,11 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         self.receivedAt = receivedAt
         self.isRead = isRead
         self.relatedGameID = relatedGameID
-        self.publicGameID = publicGameID
+        self.publicGameID = Self.nonBlank(publicGameID) ?? Self.nonBlank(gamePublicID)
+        self.gamePublicID = Self.nonBlank(gamePublicID) ?? Self.nonBlank(publicGameID)
+        self.gameProviderID = Self.nonBlank(gameProviderID)
+        self.gameDatabaseID = Self.nonBlank(gameDatabaseID) ?? relatedGameID.map { GameIdentifier.idKey($0) }
+        self.gameStableIdentity = Self.nonBlank(gameStableIdentity)
         self.relatedTeamIDs = relatedTeamIDs
     }
 
@@ -91,6 +103,10 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         case isRead
         case relatedGameID
         case publicGameID
+        case gamePublicID
+        case gameProviderID
+        case gameDatabaseID
+        case gameStableIdentity
         case relatedTeamIDs
     }
 
@@ -105,7 +121,60 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         receivedAt = decodedReceivedAt
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
         relatedGameID = try container.decodeIfPresent(UUID.self, forKey: .relatedGameID)
-        publicGameID = try container.decodeIfPresent(String.self, forKey: .publicGameID)
+        let decodedPublicGameID = Self.nonBlank(try container.decodeIfPresent(String.self, forKey: .publicGameID))
+        let decodedGamePublicID = Self.nonBlank(try container.decodeIfPresent(String.self, forKey: .gamePublicID))
+        publicGameID = decodedPublicGameID ?? decodedGamePublicID
+        gamePublicID = decodedGamePublicID ?? decodedPublicGameID
+        gameProviderID = Self.nonBlank(try container.decodeIfPresent(String.self, forKey: .gameProviderID))
+        gameDatabaseID = Self.nonBlank(try container.decodeIfPresent(String.self, forKey: .gameDatabaseID)) ??
+            relatedGameID.map { GameIdentifier.idKey($0) }
+        gameStableIdentity = Self.nonBlank(try container.decodeIfPresent(String.self, forKey: .gameStableIdentity))
         relatedTeamIDs = try container.decodeIfPresent([String].self, forKey: .relatedTeamIDs) ?? []
+    }
+
+    nonisolated var preferredGameNavigationIdentity: String? {
+        if let gamePublicID = Self.nonBlank(gamePublicID) ?? Self.nonBlank(publicGameID) {
+            return gamePublicID
+        }
+        if let gameProviderID = Self.nonBlank(gameProviderID) {
+            return GameIdentifier.providerKey(gameProviderID)
+        }
+        if let gameDatabaseID = Self.databaseIdentity(from: gameDatabaseID), gameDatabaseID != GameIdentifier.idKey(id) {
+            return gameDatabaseID
+        }
+        if let relatedGameID, relatedGameID != id {
+            return GameIdentifier.idKey(relatedGameID)
+        }
+        if let gameStableIdentity = Self.realStableIdentity(gameStableIdentity) {
+            return gameStableIdentity
+        }
+        return nil
+    }
+
+    nonisolated private static func databaseIdentity(from value: String?) -> String? {
+        guard let value = nonBlank(value) else { return nil }
+        if value.hasPrefix("id:") {
+            let rawID = String(value.dropFirst("id:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return UUID(uuidString: rawID).map { GameIdentifier.idKey($0) }
+        }
+        return UUID(uuidString: value).map { GameIdentifier.idKey($0) }
+    }
+
+    nonisolated private static func realStableIdentity(_ value: String?) -> String? {
+        guard let value = nonBlank(value) else { return nil }
+        if value.hasPrefix("public:") || value.hasPrefix("provider:") {
+            return value
+        }
+        if value.hasPrefix("id:") {
+            return databaseIdentity(from: value)
+        }
+        return nil
+    }
+
+    nonisolated private static func nonBlank(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              value.isEmpty == false else { return nil }
+        return value
     }
 }

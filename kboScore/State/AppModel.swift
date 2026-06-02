@@ -134,7 +134,7 @@ final class AppModel {
     private(set) var homeFavoriteTeamGames: [GameDetail] = []
     var notifications: [NotificationItem] = []
     var selectedTab: AppTab = .home
-    var presentedGameID: UUID?
+    var presentedGameIdentity: String?
     var isNotificationsPresented = false
     var notificationAuthorizationStatus: AppNotificationAuthorizationStatus = .notDetermined
     var apnsDeviceToken: String?
@@ -2179,6 +2179,39 @@ final class AppModel {
         persistNotificationHistory()
     }
 
+    func notificationGameDetailNavigationIdentity(for item: NotificationItem) -> String? {
+        let selectedIdentity = item.preferredGameNavigationIdentity
+        #if DEBUG
+        print("[NotificationNavigation] notificationTap notificationID=\(item.id.uuidString) gamePublicID=\(item.gamePublicID ?? item.publicGameID ?? "<nil>") providerGameID=\(item.gameProviderID ?? "<nil>") selectedIdentity=\(selectedIdentity ?? "<nil>")")
+        #endif
+        guard let selectedIdentity else {
+            #if DEBUG
+            print("[NotificationNavigation] notificationTap skipped notificationID=\(item.id.uuidString) reason=missingGameIdentity")
+            #endif
+            return nil
+        }
+        if let match = selectedGameMatch(for: selectedIdentity) {
+            #if DEBUG
+            print("[GameDetailFetch] gameDetailNavigation resolvedBy=local selectedIdentity=\(selectedIdentity) publicGameID=\(match.game.publicGameID ?? "<nil>") providerGameID=\(match.game.providerGameID ?? "<nil>") reason=\(match.reason)")
+            #endif
+        } else {
+            #if DEBUG
+            let resolvedBy: String
+            if selectedIdentity.hasPrefix("public:") || item.gamePublicID != nil || item.publicGameID != nil {
+                resolvedBy = "public"
+            } else if selectedIdentity.hasPrefix("provider:") || item.gameProviderID != nil {
+                resolvedBy = "provider"
+            } else if selectedIdentity.hasPrefix("id:") {
+                resolvedBy = "id"
+            } else {
+                resolvedBy = "fetch"
+            }
+            print("[GameDetailFetch] gameDetailNavigation resolvedBy=\(resolvedBy) selectedIdentity=\(selectedIdentity) localMatch=false")
+            #endif
+        }
+        return selectedIdentity
+    }
+
     func connectNotificationDelegate(_ delegate: AppNotificationDelegate) {
         guard !hasConnectedNotificationDelegate else { return }
         hasConnectedNotificationDelegate = true
@@ -2249,6 +2282,10 @@ final class AppModel {
             eventType: .scoreChange,
             title: "테스트 스코어 알림",
             body: targetGame.map { "\($0.awayTeam.displayName) vs \($0.homeTeam.displayName) 상세로 이동합니다." } ?? "게임 상세 이동 경로를 확인합니다.",
+            publicGameID: targetGame?.publicGameID,
+            providerGameID: targetGame.flatMap { $0.officialGameCenterID ?? $0.providerGameID },
+            gameDatabaseID: targetGame?.id.uuidString,
+            stableGameIdentity: targetGame?.stableDetailIdentity,
             teamIDs: [targetGame?.awayTeam.id, targetGame?.homeTeam.id].compactMap { $0 },
             routeHint: targetGame == nil ? .notifications : .gameDetail
         )
@@ -2279,7 +2316,7 @@ final class AppModel {
     }
 
     func dismissPresentedGameDetail() {
-        presentedGameID = nil
+        presentedGameIdentity = nil
     }
 
     func presentNotifications() {
@@ -3163,10 +3200,10 @@ final class AppModel {
 
     private func routeNotification(_ payload: ScoreNotificationPayload) {
         switch ScoreNotificationPayloadExtractor.route(from: payload) {
-        case .gameDetail(let gameID):
+        case .gameDetail(let gameIdentity):
             isNotificationsPresented = false
             selectedTab = .home
-            presentedGameID = gameID
+            presentedGameIdentity = gameIdentity
         case .notifications:
             presentNotifications()
         case .home:

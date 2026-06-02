@@ -4581,6 +4581,7 @@ struct kboScoreTests {
         #expect(item.body == "LG가 득점했습니다.")
         #expect(item.receivedAt == nil)
         #expect(item.publicGameID == nil)
+        #expect(item.preferredGameNavigationIdentity == nil)
     }
 
     @MainActor
@@ -4615,10 +4616,115 @@ struct kboScoreTests {
         #expect(item.sentAt == receivedAt)
         #expect(item.receivedAt == receivedAt)
         #expect(item.publicGameID == "20260409LTHT0")
+        #expect(item.gamePublicID == "20260409LTHT0")
+        #expect(item.relatedGameID == nil)
+        #expect(item.preferredGameNavigationIdentity == "20260409LTHT0")
         #expect(item.relatedTeamIDs == ["lotte", "hanwha"])
     }
 
-    @Test func scoreNotificationRouteResolvesOfficialGameIdentifierToStableUUID() async throws {
+    @MainActor
+    @Test func notificationTapUsesPublicGameIDInsteadOfNotificationUUID() async throws {
+        let notificationID = UUID(uuidString: "937FEB4E-B0EF-45C2-9913-8C9543B13840")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kia" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa")!,
+            scheduledStart: isoDate("2026-06-02T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            note: "public_game_id=20260602-KIA-LOT",
+            providerGameID: "sched-202606020930-17bc4f38-2589c61c"
+        )
+        let item = NotificationItem(
+            id: notificationID,
+            type: .scoreChange,
+            title: "점수 변경",
+            body: "KIA 득점",
+            sentAt: isoDate("2026-06-02T19:30:00+09:00"),
+            isRead: false,
+            relatedGameID: nil,
+            gamePublicID: "20260602-KIA-LOT",
+            gameProviderID: "sched-202606020930-17bc4f38-2589c61c",
+            relatedTeamIDs: ["kia", "lotte"]
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [game], notifications: [item], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let identity = try #require(model.notificationGameDetailNavigationIdentity(for: item))
+
+        #expect(identity == "20260602-KIA-LOT")
+        #expect(identity != notificationID.uuidString)
+        #expect(model.game(withIdentity: identity)?.publicGameID == "20260602-KIA-LOT")
+    }
+
+    @MainActor
+    @Test func notificationTapUsesProviderIdentityWhenOnlyProviderGameIDExists() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kia" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lotte" }))
+        let providerGameID = "sched-202606020930-17bc4f38-2589c61c"
+        let game = makeGameDetail(
+            id: UUID(uuidString: "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb")!,
+            scheduledStart: isoDate("2026-06-02T18:30:00+09:00"),
+            venue: "사직",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: providerGameID
+        )
+        let item = NotificationItem(
+            id: UUID(),
+            type: .inningChange,
+            title: "이닝 교체",
+            body: "7회말",
+            sentAt: isoDate("2026-06-02T20:00:00+09:00"),
+            isRead: false,
+            relatedGameID: nil,
+            gameProviderID: providerGameID,
+            relatedTeamIDs: ["kia", "lotte"]
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [game], notifications: [item], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let identity = try #require(model.notificationGameDetailNavigationIdentity(for: item))
+
+        #expect(identity == "provider:\(providerGameID)")
+        #expect(model.game(withIdentity: identity)?.providerGameID == providerGameID)
+    }
+
+    @MainActor
+    @Test func notificationTapDoesNotNavigateWhenOnlyLocalNotificationUUIDExists() async throws {
+        let notificationID = UUID(uuidString: "cccccccc-3333-3333-3333-cccccccccccc")!
+        let item = NotificationItem(
+            id: notificationID,
+            type: .scoreChange,
+            title: "점수 변경",
+            body: "로컬 알림",
+            sentAt: isoDate("2026-06-02T20:05:00+09:00"),
+            isRead: false,
+            relatedGameID: notificationID,
+            relatedTeamIDs: ["kia"]
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [], notifications: [item], settings: .default),
+            usePersistedSettings: false
+        )
+
+        #expect(model.notificationGameDetailNavigationIdentity(for: item) == nil)
+    }
+
+    @Test func scoreNotificationRouteKeepsOfficialGameIdentifierAsNavigationIdentity() async throws {
         let payload = ScoreNotificationPayload(
             gameID: "20260323WOLG0",
             eventType: .scoreChange,
@@ -4630,7 +4736,23 @@ struct kboScoreTests {
 
         let route = ScoreNotificationPayloadExtractor.route(from: payload)
 
-        #expect(route == .gameDetail(GameIdentifier.uuid(from: "20260323WOLG0")!))
+        #expect(route == .gameDetail("20260323WOLG0"))
+    }
+
+    @Test func scoreNotificationRoutePrefersPublicGameIdentifier() async throws {
+        let payload = ScoreNotificationPayload(
+            gameID: "937FEB4E-B0EF-45C2-9913-8C9543B13840",
+            eventType: .scoreChange,
+            title: "득점",
+            body: "KIA가 득점했습니다.",
+            publicGameID: "20260602-KIA-LOT",
+            providerGameID: "sched-202606020930-17bc4f38-2589c61c",
+            routeHint: .gameDetail
+        )
+
+        let route = ScoreNotificationPayloadExtractor.route(from: payload)
+
+        #expect(route == .gameDetail("20260602-KIA-LOT"))
     }
 
     @Test func notificationRouteCanTargetNotificationsScreenWithoutTabSelection() async throws {

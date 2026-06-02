@@ -28,6 +28,11 @@ enum GameDetailSection: String, CaseIterable, Identifiable {
     }
 }
 
+nonisolated private enum GameDetailPayloadLoadResult: Sendable {
+    case success(GameCenterDetailPayload?)
+    case failure
+}
+
 @MainActor
 @Observable
 final class GameDetailScreenModel {
@@ -45,9 +50,12 @@ final class GameDetailScreenModel {
     private let fetchOfficialRecordFallback: @Sendable (GameDetail) async throws -> GameCenterReview?
     private let boxscoreClient: any GameBoxscoreFetching
     private var lastLoadedGameKey: String?
+    private var activeDetailLoadKey: String?
+    private var detailLoadTask: Task<GameDetailPayloadLoadResult, Never>?
     private var lastLoadedBoxscoreGameID: String?
     private var lastLoadedOfficialFallbackGameKey: String?
     private var currentGame: GameDetail?
+    private var cachedLineScoreGameKey: String?
     private var activeBoxscoreGameID: String?
     private var activeOfficialFallbackGameKey: String?
     private var boxscoreLoadTask: Task<Void, Never>?
@@ -55,6 +63,7 @@ final class GameDetailScreenModel {
 
     var selectedSection: GameDetailSection = .overview
     var detail: GameCenterDetailPayload?
+    var cachedLineScore: GameCenterLineScore?
     var boxscore: GameBoxscoreResponse?
     var officialFallbackReview: GameCenterReview?
     var isLoading = false
@@ -70,7 +79,7 @@ final class GameDetailScreenModel {
     ) {
         let resolvedClient = client ?? OfficialKBOGameCenterClient()
         self.fetchDetail = fetchDetail ?? { game in
-            try await resolvedClient.fetchDetail(for: game, includeRecordFallback: false)
+            try await resolvedClient.fetchDetail(for: game, includeRecordFallback: game.status.isLiveLike)
         }
         self.fetchOfficialRecordFallback = fetchOfficialRecordFallback ?? { game in
             try await resolvedClient.fetchRecordFallbackReview(for: game)
@@ -94,28 +103,85 @@ final class GameDetailScreenModel {
         guard forceRefresh || lastLoadedGameKey != gameKey else { return }
         currentGame = game
 
+        #if DEBUG
+        print("[GameDetailLive] load start id=\(game.id.uuidString) publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>") officialProviderGameID=\(game.officialProviderGameID ?? "<nil>") status=\(game.status.rawValue) forceRefresh=\(forceRefresh)")
+        #endif
+
         isLoading = true
         errorMessage = nil
         hasAttemptedLoad = true
 
         officialFallbackReview = nil
+        if cachedLineScoreGameKey != gameKey {
+            cachedLineScore = nil
+        }
         scheduleBoxscoreLoadIfNeeded(for: game, forceRefresh: forceRefresh)
 
-        do {
-            detail = try await fetchDetail(game)
-            lastLoadedGameKey = gameKey
-        } catch {
-            detail = nil
-            errorMessage = "경기 상태와 스코어는 현재 데이터로 표시하고 있습니다."
+        let fetchedDetail = await loadDetailPayload(for: game, gameKey: gameKey)
+        detail = fetchedDetail
+        if let lineScore = fetchedDetail?.lineScore {
+            cachedLineScore = lineScore
+            cachedLineScoreGameKey = gameKey
+        }
+        lastLoadedGameKey = gameKey
+        if game.status.isLiveLike {
+            if fetchedDetail?.review?.hasDisplayableRecords != true {
+                scheduleOfficialRecordFallbackIfNeeded(for: game, forceRefresh: forceRefresh)
+            }
+            #if DEBUG
+            print("[GameDetailLive] load result status=\(game.status.rawValue) lineScorePresent=\((fetchedDetail?.lineScore ?? cachedLineScore) != nil) liveRecordPresent=\((fetchedDetail?.review?.hasDisplayableRecords == true) || (officialFallbackReview?.hasDisplayableRecords == true))")
+            #endif
         }
 
         isLoading = false
     }
 
+    private func loadDetailPayload(for game: GameDetail, gameKey: String) async -> GameCenterDetailPayload? {
+        let task: Task<GameDetailPayloadLoadResult, Never>
+        if let inFlight = detailLoadTask, activeDetailLoadKey == gameKey {
+            #if DEBUG
+            print("[GameDetailLive] detail fetch deduped key=\(gameKey)")
+            #endif
+            task = inFlight
+        } else {
+            let fetchDetail = fetchDetail
+            activeDetailLoadKey = gameKey
+            task = Task { () -> GameDetailPayloadLoadResult in
+                do {
+                    return .success(try await fetchDetail(game))
+                } catch {
+                    #if DEBUG
+                    print("[GameDetailLive] detail fetch failed key=\(gameKey) error=\(error)")
+                    #endif
+                    return .failure
+                }
+            }
+            detailLoadTask = task
+        }
+
+        let result = await task.value
+        if activeDetailLoadKey == gameKey {
+            detailLoadTask = nil
+            activeDetailLoadKey = nil
+        }
+        switch result {
+        case .success(let payload):
+            return payload
+        case .failure:
+            errorMessage = "경기 상태와 스코어는 현재 데이터로 표시하고 있습니다."
+            return nil
+        }
+    }
+
     private func scheduleBoxscoreLoadIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final,
               let publicGameID = game.publicGameID?.nilIfBlank else {
+            #if DEBUG
+            print("[GameBoxscore] skipped reason=notFinalOrMissingPublicID status=\(game.status.rawValue) publicGameID=\(game.publicGameID ?? "<nil>")")
+            #endif
             activeBoxscoreGameID = nil
+            boxscore = nil
+            boxscoreErrorMessage = nil
             return
         }
         activeBoxscoreGameID = publicGameID
@@ -190,7 +256,7 @@ final class GameDetailScreenModel {
     }
 
     private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
-        guard game.status == .final else { return }
+        guard game.status == .final || game.status.isLiveLike else { return }
         guard boxscore?.hasRecords != true else {
             cancelOfficialFallbackLoad()
             return
@@ -250,8 +316,14 @@ final class GameDetailScreenModel {
             Self.cachedOfficialFallbackReviews[cacheKey] = (Date(), fetchedReview)
             Self.recentFailedOfficialFallbacks[cacheKey] = nil
             officialFallbackReview = fetchedReview
+            #if DEBUG
+            print("[GameDetailLive] official record fallback success gameKey=\(cacheKey) liveRecordPresent=true")
+            #endif
         } else {
             Self.recentFailedOfficialFallbacks[cacheKey] = Date()
+            #if DEBUG
+            print("[GameDetailLive] official record fallback empty gameKey=\(cacheKey) liveRecordPresent=false")
+            #endif
         }
     }
 
@@ -280,6 +352,10 @@ final class GameDetailScreenModel {
 
     func waitForBoxscoreLoadForTesting() async {
         await boxscoreLoadTask?.value
+    }
+
+    func waitForDetailLoadForTesting() async {
+        _ = await detailLoadTask?.value
     }
 
     func waitForOfficialFallbackLoadForTesting() async {
@@ -317,6 +393,8 @@ final class GameDetailViewModel: ObservableObject {
 
     let stableIdentity: String
     @Published var game: GameDetail?
+    @Published private(set) var isResolvingInitialGame: Bool
+    @Published private(set) var hasAttemptedInitialResolution: Bool
     @Published private(set) var baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
 
     var shouldAutoRefreshLiveGame: Bool {
@@ -334,6 +412,8 @@ final class GameDetailViewModel: ObservableObject {
         self.requestedIdentity = gameIdentity
         self.game = initialGame
         self.stableIdentity = initialGame?.stableDetailIdentity ?? gameIdentity
+        self.isResolvingInitialGame = initialGame == nil
+        self.hasAttemptedInitialResolution = initialGame != nil
         if let initialGame {
             baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
         }
@@ -350,6 +430,8 @@ final class GameDetailViewModel: ObservableObject {
         self.requestedIdentity = requestedIdentity
         self.game = initialGame
         self.stableIdentity = stableIdentity
+        self.isResolvingInitialGame = false
+        self.hasAttemptedInitialResolution = true
         baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
         #if DEBUG
         print("GameDetailViewModel init stableIdentity=\(stableIdentity)")
@@ -359,6 +441,8 @@ final class GameDetailViewModel: ObservableObject {
     func configureInitialGameIfNeeded(_ initialGame: GameDetail?) {
         guard game == nil, let initialGame else { return }
         game = initialGame
+        isResolvingInitialGame = false
+        hasAttemptedInitialResolution = true
         baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
     }
 
@@ -372,6 +456,11 @@ final class GameDetailViewModel: ObservableObject {
             configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: requestedIdentity))
         }
         if game == nil {
+            isResolvingInitialGame = true
+            defer {
+                isResolvingInitialGame = false
+                hasAttemptedInitialResolution = true
+            }
             let fetched = await appModel.refreshGameDetail(for: requestedIdentity, forceRefresh: manual)
             if let fetched {
                 apply(fetched)
@@ -509,7 +598,7 @@ struct BaseRunnerDisplayResolver: Sendable {
         let source = sourceSummary(sources)
 
         #if DEBUG
-        print("[BaseRunners] resolved display first=\(display.first ?? "<hidden>") second=\(display.second ?? "<hidden>") third=\(display.third ?? "<hidden>") source=\(source)")
+        print("[BaseRunners] resolved occupancy first=\(display.first == nil ? "empty" : "occupied(no-name)") second=\(display.second == nil ? "empty" : "occupied(no-name)") third=\(display.third == nil ? "empty" : "occupied(no-name)") source=\(source)")
         #endif
 
         return BaseRunnerDisplayResolution(runners: display, source: source)

@@ -46,9 +46,9 @@ struct NotificationsView: View {
                     } else {
                         LazyVStack(spacing: 8) {
                             ForEach(appModel.filteredNotifications) { item in
-                                if let relatedGameID = item.relatedGameID {
+                                if let gameIdentity = item.preferredGameNavigationIdentity {
                                     NavigationLink {
-                                        GameDetailView(gameID: relatedGameID)
+                                        GameDetailView(gameIdentity: gameIdentity)
                                             .task {
                                                 appModel.markNotificationRead(item.id)
                                             }
@@ -56,8 +56,12 @@ struct NotificationsView: View {
                                         NotificationCardView(item: item)
                                     }
                                     .buttonStyle(.plain)
+                                    .simultaneousGesture(TapGesture().onEnded {
+                                        _ = appModel.notificationGameDetailNavigationIdentity(for: item)
+                                    })
                                 } else {
                                     Button {
+                                        _ = appModel.notificationGameDetailNavigationIdentity(for: item)
                                         appModel.markNotificationRead(item.id)
                                     } label: {
                                         NotificationCardView(item: item)

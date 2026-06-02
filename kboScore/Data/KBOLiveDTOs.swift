@@ -481,6 +481,10 @@ struct KBONotificationDTO: Codable, Sendable {
     let sentAt: Date
     let isRead: Bool
     let relatedGameID: UUID?
+    let gamePublicID: String?
+    let gameProviderID: String?
+    let gameDatabaseID: String?
+    let gameStableIdentity: String?
     let relatedTeamIDs: [String]
 
     nonisolated init(
@@ -491,6 +495,10 @@ struct KBONotificationDTO: Codable, Sendable {
         sentAt: Date,
         isRead: Bool,
         relatedGameID: UUID?,
+        gamePublicID: String? = nil,
+        gameProviderID: String? = nil,
+        gameDatabaseID: String? = nil,
+        gameStableIdentity: String? = nil,
         relatedTeamIDs: [String]
     ) {
         self.id = id
@@ -500,6 +508,10 @@ struct KBONotificationDTO: Codable, Sendable {
         self.sentAt = sentAt
         self.isRead = isRead
         self.relatedGameID = relatedGameID
+        self.gamePublicID = gamePublicID?.nilIfBlank
+        self.gameProviderID = gameProviderID?.nilIfBlank
+        self.gameDatabaseID = gameDatabaseID?.nilIfBlank
+        self.gameStableIdentity = gameStableIdentity?.nilIfBlank
         self.relatedTeamIDs = relatedTeamIDs
     }
 
@@ -512,6 +524,10 @@ struct KBONotificationDTO: Codable, Sendable {
         sentAt = try container.decodeFlexibleDate(forKey: .sentAt) ?? .distantPast
         isRead = try container.decodeIfPresent(Bool.self, forKey: .isRead) ?? false
         relatedGameID = try container.decodeIfPresent(UUID.self, forKey: .relatedGameID)
+        gamePublicID = try container.decodeIfPresent(String.self, forKey: .gamePublicID)?.nilIfBlank
+        gameProviderID = try container.decodeIfPresent(String.self, forKey: .gameProviderID)?.nilIfBlank
+        gameDatabaseID = try container.decodeIfPresent(String.self, forKey: .gameDatabaseID)?.nilIfBlank
+        gameStableIdentity = try container.decodeIfPresent(String.self, forKey: .gameStableIdentity)?.nilIfBlank
         relatedTeamIDs = try container.decodeIfPresent([String].self, forKey: .relatedTeamIDs) ?? []
     }
 }
@@ -736,6 +752,10 @@ enum KBODataMapper {
             sentAt: dto.sentAt,
             isRead: dto.isRead,
             relatedGameID: dto.relatedGameID,
+            gamePublicID: dto.gamePublicID,
+            gameProviderID: dto.gameProviderID,
+            gameDatabaseID: dto.gameDatabaseID,
+            gameStableIdentity: dto.gameStableIdentity,
             relatedTeamIDs: dto.relatedTeamIDs.map(normalizedTeamID)
         )
     }

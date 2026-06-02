@@ -22,6 +22,10 @@ struct GameCancellationNotificationCoordinator {
             eventType: .rainDelay,
             title: title,
             body: body,
+            publicGameID: game.publicGameID,
+            providerGameID: game.officialGameCenterID ?? game.providerGameID,
+            gameDatabaseID: game.id.uuidString,
+            stableGameIdentity: game.stableDetailIdentity,
             teamIDs: [game.awayTeam.id, game.homeTeam.id],
             routeHint: .gameDetail
         )

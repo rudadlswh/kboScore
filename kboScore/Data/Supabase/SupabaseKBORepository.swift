@@ -307,10 +307,9 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
             throw CancellationError()
         } catch {
             #if DEBUG
-            print("[SupabaseKBO] fetchStandingsSource failed season=\(season) fallback=baseGames error=\(error)")
+            print("[SupabaseKBO] fetchStandingsSource failed season=\(season) fallback=none strictSupabaseOnly=true officialRequestsAvoided=true error=\(error)")
             #endif
-            return try await base.fetchGames()
-                .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
+            throw error
         }
     }
 
@@ -516,8 +515,18 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameI
             return lookups
         }
 
-        if UUID(uuidString: trimmed) != nil {
-            return []
+        if trimmed.hasPrefix("id:") {
+            let value = String(trimmed.dropFirst("id:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let id = UUID(uuidString: value) {
+                append(.databaseID(id))
+            }
+            return lookups
+        }
+
+        if let id = UUID(uuidString: trimmed) {
+            append(.databaseID(id))
+            return lookups
         }
 
         if trimmed.hasPrefix("sched-") {

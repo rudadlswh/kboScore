@@ -284,6 +284,11 @@ enum KBOExternalResponseAdapter {
 
     nonisolated private static func parseNotification(_ dictionary: [String: Any]) -> KBONotificationDTO? {
         let relatedTeamIDs = stringArrayValue(for: ["relatedTeamIDs", "teamIds", "teams"], in: dictionary)
+        let rawGameID = stringValue(for: ["gameId", "matchId"], in: dictionary)
+        let parsedPublicGameID = stringValue(for: ["gamePublicID", "gamePublicId", "publicGameID", "publicGameId"], in: dictionary) ??
+            publicGameIDCandidate(from: rawGameID)
+        let parsedProviderGameID = stringValue(for: ["gameProviderID", "gameProviderId", "providerGameID", "providerGameId"], in: dictionary) ??
+            providerGameIDCandidate(from: rawGameID, publicGameID: parsedPublicGameID)
         return KBONotificationDTO(
             id: parseUUID(stringValue(for: ["id", "notificationId", "alertId"], in: dictionary)) ?? UUID(),
             type: stringValue(for: ["type", "category", "eventType"], in: dictionary) ?? "scoreChange",
@@ -291,9 +296,25 @@ enum KBOExternalResponseAdapter {
             body: stringValue(for: ["body", "message", "description", "text"], in: dictionary) ?? "",
             sentAt: parseDate(in: dictionary, defaultDate: .distantPast),
             isRead: boolValue(for: ["isRead", "read"], in: dictionary) ?? false,
-            relatedGameID: GameIdentifier.uuid(from: stringValue(for: ["relatedGameID", "gameId", "matchId"], in: dictionary)),
+            relatedGameID: parseUUID(stringValue(for: ["relatedGameID", "databaseGameId", "databaseGameID"], in: dictionary)),
+            gamePublicID: parsedPublicGameID,
+            gameProviderID: parsedProviderGameID,
+            gameDatabaseID: stringValue(for: ["gameDatabaseID", "gameDatabaseId", "databaseGameID", "databaseGameId", "relatedGameID"], in: dictionary),
+            gameStableIdentity: stringValue(for: ["gameStableIdentity", "stableGameIdentity"], in: dictionary),
             relatedTeamIDs: relatedTeamIDs
         )
+    }
+
+    nonisolated private static func publicGameIDCandidate(from value: String?) -> String? {
+        guard let value, value.contains("-"), parseUUID(value) == nil else { return nil }
+        return value
+    }
+
+    nonisolated private static func providerGameIDCandidate(from value: String?, publicGameID: String?) -> String? {
+        guard publicGameID == nil,
+              let value,
+              parseUUID(value) == nil else { return nil }
+        return value
     }
 
     nonisolated private static func parseTeam(_ dictionary: [String: Any]) -> KBOTeamDTO? {

@@ -54,6 +54,7 @@ struct GameDetailView: View {
                 let presentation = GameDetailPresentation(
                     game: game,
                     payload: screenModel.detail,
+                    cachedLineScore: screenModel.cachedLineScore,
                     boxscore: screenModel.boxscore,
                     officialFallbackReview: screenModel.officialFallbackReview,
                     baseRunnerDisplay: viewModel.baseRunnerDisplay
@@ -74,6 +75,10 @@ struct GameDetailView: View {
                 .task(id: presentation.status) {
                     screenModel.syncSelection(for: presentation.status)
                 }
+            } else if viewModel.isResolvingInitialGame || viewModel.hasAttemptedInitialResolution == false {
+                ProgressView("경기 정보를 불러오는 중")
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .padding(12)
             } else {
                 EmptyStateView(
                     systemImage: "exclamationmark.triangle",
@@ -112,7 +117,20 @@ struct GameDetailView: View {
             }
         }
         .task(id: viewModel.liveRefreshTaskID) {
-            guard viewModel.shouldAutoRefreshLiveGame else { return }
+            guard viewModel.shouldAutoRefreshLiveGame else {
+                #if DEBUG
+                print("[GameDetailLive] refresh stop reason=notLive stableIdentity=\(viewModel.stableIdentity)")
+                #endif
+                return
+            }
+            #if DEBUG
+            print("[GameDetailLive] refresh start stableIdentity=\(viewModel.stableIdentity) intervalSeconds=\(GameDetailViewModel.livePollingIntervalNanoseconds / 1_000_000_000)")
+            #endif
+            defer {
+                #if DEBUG
+                print("[GameDetailLive] refresh stop stableIdentity=\(viewModel.stableIdentity)")
+                #endif
+            }
             while Task.isCancelled == false {
                 do {
                     try await Task.sleep(nanoseconds: GameDetailViewModel.livePollingIntervalNanoseconds)
@@ -363,7 +381,7 @@ private struct DoosanGameDetailSectionPicker: View {
     }
 }
 
-private struct GameDetailPresentation {
+struct GameDetailPresentation {
     let game: GameDetail
     let status: GameStatus
     let stadium: String
@@ -393,6 +411,7 @@ private struct GameDetailPresentation {
     init(
         game: GameDetail,
         payload: GameCenterDetailPayload?,
+        cachedLineScore: GameCenterLineScore? = nil,
         boxscore: GameBoxscoreResponse?,
         officialFallbackReview: GameCenterReview? = nil,
         baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
@@ -426,7 +445,7 @@ private struct GameDetailPresentation {
         durationText = summary?.durationText?.nilIfBlank
         crowdText = summary?.crowdText?.nilIfBlank
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
-        lineScore = payload?.lineScore
+        lineScore = payload?.lineScore ?? cachedLineScore
         review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
             officialFallbackReview ??
             payload?.review
@@ -493,26 +512,18 @@ private struct GameDetailPresentation {
 
     var visibleBaseRunners: [BaseRunnerDisplayItem] {
         [
-            ("1B", bases?.first == true, baseRunners?.first?.nilIfBlank),
-            ("2B", bases?.second == true, baseRunners?.second?.nilIfBlank),
-            ("3B", bases?.third == true, baseRunners?.third?.nilIfBlank)
+            ("1B", bases?.first == true),
+            ("2B", bases?.second == true),
+            ("3B", bases?.third == true)
         ]
         .compactMap { item in
-            guard item.1, let name = item.2 else { return nil }
-            return BaseRunnerDisplayItem(base: item.0, name: name)
+            guard item.1 else { return nil }
+            return BaseRunnerDisplayItem(base: item.0)
         }
     }
 
     var displayBaseRunners: [BaseRunnerDisplayItem] {
-        [
-            ("1B", bases?.first == true, baseRunners?.first?.nilIfBlank ?? baseRunnerDisplay.runners.first?.nilIfBlank),
-            ("2B", bases?.second == true, baseRunners?.second?.nilIfBlank ?? baseRunnerDisplay.runners.second?.nilIfBlank),
-            ("3B", bases?.third == true, baseRunners?.third?.nilIfBlank ?? baseRunnerDisplay.runners.third?.nilIfBlank)
-        ]
-        .compactMap { item in
-            guard item.1, let name = item.2 else { return nil }
-            return BaseRunnerDisplayItem(base: item.0, name: name)
-        }
+        visibleBaseRunners
     }
 
     var displayAwayScore: String {
@@ -530,17 +541,16 @@ private struct GameDetailPresentation {
     func logRenderedBaseRunnersIfNeeded() {
         #if DEBUG
         print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
-        let rendered = displayBaseRunners.reduce(into: ["1B": "<hidden>", "2B": "<hidden>", "3B": "<hidden>"]) { result, item in
-            result[item.base] = item.name
+        let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
+            result[item.base] = "occupied(no-name)"
         }
-        print("[BaseRunners] rendered first=\(rendered["1B"] ?? "unknownRunner") second=\(rendered["2B"] ?? "unknownRunner") third=\(rendered["3B"] ?? "unknownRunner") source=\(baseRunnerDisplay.source)")
+        print("[BaseRunners] rendered first=\(rendered["1B"] ?? "unknown") second=\(rendered["2B"] ?? "unknown") third=\(rendered["3B"] ?? "unknown") source=\(baseRunnerDisplay.source)")
         #endif
     }
 }
 
-private struct BaseRunnerDisplayItem: Identifiable {
+struct BaseRunnerDisplayItem: Identifiable, Equatable {
     let base: String
-    let name: String
 
     var id: String { base }
 }
@@ -704,18 +714,15 @@ private struct BaseRunnerList: View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(runners) { runner in
                 HStack(spacing: 6) {
-                    Text(runner.base)
-                        .font(.caption.weight(.heavy))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
-                        .frame(width: 24, alignment: .leading)
-                    Text(":")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-                    Text(runner.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+//                    Text(runner.base)
+//                        .font(.caption.weight(.heavy))
+//                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
+//                        .frame(width: 24, alignment: .leading)
+//                    Text("점유")
+//                        .font(.subheadline.weight(.semibold))
+//                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+//                        .lineLimit(1)
+//                        .minimumScaleFactor(0.8)
                 }
             }
         }
@@ -975,7 +982,7 @@ private struct LineScoreHeaderRow: View {
                     .frame(width: 30)
             }
 
-            ForEach(["R", "H", "E"], id: \.self) { label in
+            ForEach(["R", "H", "E", "B"], id: \.self) { label in
                 Text(label)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
@@ -1014,6 +1021,8 @@ private struct LineScoreValueRow: View {
             Text(totals.hits?.displayCellText ?? "-")
                 .lineScoreTotalStyle()
             Text(totals.errors?.displayCellText ?? "-")
+                .lineScoreTotalStyle()
+            Text(totals.walks?.displayCellText ?? "-")
                 .lineScoreTotalStyle()
         }
         .padding(.vertical, 6)
@@ -1141,9 +1150,13 @@ private struct GameDetailRecordsPanel: View {
                         awayTeam: presentation.game.awayTeam,
                         homeTeam: presentation.game.homeTeam
                     )
+                    if presentation.status.isLiveLike, review.recordSource.isLimited {
+                        LimitedRecordSourceNote()
+                    }
                     BattingSectionTable(
                         team: selectedTeam == .away ? presentation.game.awayTeam : presentation.game.homeTeam,
-                        section: selectedTeam == .away ? review.awayBatting : review.homeBatting
+                        section: selectedTeam == .away ? review.awayBatting : review.homeBatting,
+                        isLiveLike: presentation.status.isLiveLike
                     )
                 case .pitching:
                     TeamRecordSwitcher(
@@ -1151,6 +1164,9 @@ private struct GameDetailRecordsPanel: View {
                         awayTeam: presentation.game.awayTeam,
                         homeTeam: presentation.game.homeTeam
                     )
+                    if presentation.status.isLiveLike, review.recordSource.isLimited {
+                        LimitedRecordSourceNote()
+                    }
                     PitchingSectionTable(
                         team: selectedTeam == .away ? presentation.game.awayTeam : presentation.game.homeTeam,
                         section: selectedTeam == .away ? review.awayPitching : review.homePitching
@@ -1233,10 +1249,25 @@ private struct TeamRecordButton: View {
     }
 }
 
+private struct LimitedRecordSourceNote: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "info.circle")
+                .font(.caption.weight(.semibold))
+            Text("공식 전체 박스스코어를 불러오지 못해 제공된 일부 기록만 표시합니다.")
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+    }
+}
+
 private struct BattingSectionTable: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
     let section: GameCenterBattingSection
+    let isLiveLike: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1256,14 +1287,14 @@ private struct BattingSectionTable: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     VStack(spacing: 0) {
-                        BattingHeaderRow()
+                        BattingHeaderRow(isLiveLike: isLiveLike)
                         ForEach(section.lines) { line in
-                            BattingValueRow(line: line)
+                            BattingValueRow(line: line, isLiveLike: isLiveLike)
                         }
                         if let totals = section.totals {
-                            BattingTotalsRow(totals: totals)
+                            BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
                         } else if let totals = GameCenterBattingTotals.derived(from: section.lines) {
-                            BattingTotalsRow(totals: totals)
+                            BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
                         }
                     }
                 }
@@ -1272,12 +1303,73 @@ private struct BattingSectionTable: View {
     }
 }
 
+enum GameDetailBattingTableColumns {
+    static func headers(isLiveLike: Bool) -> [String] {
+        if isLiveLike {
+            return ["타수", "득점", "안타", "타점", "홈런", "삼진", "볼넷"]
+        }
+        return ["타수", "득점", "안타", "타점", "홈런", "볼넷", "삼진", "도루", "타율"]
+    }
+
+    static func values(for line: GameCenterBattingLine, isLiveLike: Bool) -> [String] {
+        if isLiveLike {
+            return [
+                line.atBats.displayStat,
+                line.runs.displayStat,
+                line.hits.displayStat,
+                line.runsBattedIn.displayStat,
+                (line.homeRuns ?? line.plateAppearanceHomeRuns).displayStat,
+                (line.strikeouts ?? line.plateAppearanceStrikeouts).displayStat,
+                (line.walks ?? line.plateAppearanceWalks).displayStat
+            ]
+        }
+        return [
+            line.atBats.displayStat,
+            line.runs.displayStat,
+            line.hits.displayStat,
+            line.runsBattedIn.displayStat,
+            (line.homeRuns ?? line.plateAppearanceHomeRuns).displayStat,
+            (line.walks ?? line.plateAppearanceWalks).displayStat,
+            (line.strikeouts ?? line.plateAppearanceStrikeouts).displayStat,
+            line.stolenBases.displayStolenBaseStat,
+            line.average.displayStat
+        ]
+    }
+
+    static func values(for totals: GameCenterBattingTotals, isLiveLike: Bool) -> [String] {
+        if isLiveLike {
+            return [
+                totals.atBats.displayStat,
+                totals.runs.displayStat,
+                totals.hits.displayStat,
+                totals.runsBattedIn.displayStat,
+                (totals.homeRuns ?? totals.plateAppearanceHomeRuns).displayStat,
+                (totals.strikeouts ?? totals.plateAppearanceStrikeouts).displayStat,
+                (totals.walks ?? totals.plateAppearanceWalks).displayStat
+            ]
+        }
+        return [
+            totals.atBats.displayStat,
+            totals.runs.displayStat,
+            totals.hits.displayStat,
+            totals.runsBattedIn.displayStat,
+            (totals.homeRuns ?? totals.plateAppearanceHomeRuns).displayStat,
+            (totals.walks ?? totals.plateAppearanceWalks).displayStat,
+            (totals.strikeouts ?? totals.plateAppearanceStrikeouts).displayStat,
+            totals.stolenBases.displayStolenBaseStat,
+            totals.average.displayStat
+        ]
+    }
+}
+
 private struct BattingHeaderRow: View {
+    let isLiveLike: Bool
+
     var body: some View {
         StatsTableRow(
             name: "타자명",
             position: "포지션",
-            values: ["타수", "득점", "안타", "타점", "홈런", "볼넷", "삼진", "도루", "타율"],
+            values: GameDetailBattingTableColumns.headers(isLiveLike: isLiveLike),
             isHeader: true
         )
     }
@@ -1285,45 +1377,27 @@ private struct BattingHeaderRow: View {
 
 private struct BattingValueRow: View {
     let line: GameCenterBattingLine
+    let isLiveLike: Bool
 
     var body: some View {
         StatsTableRow(
             order: line.battingOrder,
             name: line.name,
             position: GameRecordPositionFormatter.display(line.position),
-            values: [
-                line.atBats.displayStat,
-                line.runs.displayStat,
-                line.hits.displayStat,
-                line.runsBattedIn.displayStat,
-                (line.homeRuns ?? line.plateAppearanceHomeRuns).displayStat,
-                (line.walks ?? line.plateAppearanceWalks).displayStat,
-                (line.strikeouts ?? line.plateAppearanceStrikeouts).displayStat,
-                line.stolenBases.displayStolenBaseStat,
-                line.average.displayStat
-            ]
+            values: GameDetailBattingTableColumns.values(for: line, isLiveLike: isLiveLike)
         )
     }
 }
 
 private struct BattingTotalsRow: View {
     let totals: GameCenterBattingTotals
+    let isLiveLike: Bool
 
     var body: some View {
         StatsTableRow(
             name: "합계",
             position: "",
-            values: [
-                totals.atBats.displayStat,
-                totals.runs.displayStat,
-                totals.hits.displayStat,
-                totals.runsBattedIn.displayStat,
-                (totals.homeRuns ?? totals.plateAppearanceHomeRuns).displayStat,
-                (totals.walks ?? totals.plateAppearanceWalks).displayStat,
-                (totals.strikeouts ?? totals.plateAppearanceStrikeouts).displayStat,
-                totals.stolenBases.displayStolenBaseStat,
-                totals.average.displayStat
-            ],
+            values: GameDetailBattingTableColumns.values(for: totals, isLiveLike: isLiveLike),
             isTotal: true
         )
     }
@@ -1361,6 +1435,14 @@ private struct PitchingSectionTable: View {
                     }
                 }
             }
+        }
+        .onAppear {
+            #if DEBUG
+            print("[GameDetailLive] selectedTeamPitcherRows team=\(team.shortName) count=\(section.lines.count)")
+            for line in section.lines {
+                print("[GameDetailLive] pitcher row side=selected player=\(line.name) source=view stats=IP:\(line.innings ?? "-") K:\(line.strikeouts ?? "-") R:\(line.runsAllowed ?? "-")")
+            }
+            #endif
         }
     }
 }

@@ -96,6 +96,10 @@ private struct BootstrapCachePayload: Codable, Sendable {
             sentAt: item.sentAt,
             isRead: item.isRead,
             relatedGameID: item.relatedGameID,
+            gamePublicID: item.gamePublicID ?? item.publicGameID,
+            gameProviderID: item.gameProviderID,
+            gameDatabaseID: item.gameDatabaseID,
+            gameStableIdentity: item.gameStableIdentity,
             relatedTeamIDs: item.relatedTeamIDs
         )
     }
