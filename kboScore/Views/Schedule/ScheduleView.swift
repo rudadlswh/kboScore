@@ -29,6 +29,12 @@ enum ScheduleDayResultAppearance: Equatable, Sendable {
     }
 }
 
+enum ScheduleSelectedGamesContentState: Equatable, Sendable {
+    case initialLoading
+    case loadedEmpty
+    case loaded
+}
+
 @MainActor
 final class ScheduleViewModel: ObservableObject {
     @Published var displayedMonth = Date()
@@ -40,7 +46,7 @@ final class ScheduleViewModel: ObservableObject {
     private(set) var hasAvailableMonths = false
     private(set) var previousAvailableMonth: Date?
     private(set) var nextAvailableMonth: Date?
-    private(set) var isLoadingDisplayedMonth = false
+    private(set) var isLoadingDisplayedMonth = true
     private(set) var statusMessage: String?
     private(set) var monthGameCount = 0
 #if DEBUG
@@ -59,6 +65,16 @@ final class ScheduleViewModel: ObservableObject {
 
     var displayedMonthKey: KBOMonthScheduleKey {
         monthKey(for: displayedMonth)
+    }
+
+    var selectedGamesContentState: ScheduleSelectedGamesContentState {
+        if selectedDateGames.isEmpty == false {
+            return .loaded
+        }
+        if isLoadingDisplayedMonth, monthGameCount == 0 {
+            return .initialLoading
+        }
+        return .loadedEmpty
     }
 
     func loadDisplayedMonth(appModel: AppModel) async {
@@ -111,6 +127,8 @@ final class ScheduleViewModel: ObservableObject {
 #if DEBUG
         print("ScheduleMonthChanged from=\(previousKey.yearMonthText) to=\(requestedKey.yearMonthText)")
 #endif
+        let hasCachedRequestedMonth = cachedMonths[requestedKey] != nil
+        setLoadingDisplayedMonth(hasCachedRequestedMonth == false)
         displayedMonth = requestedMonth
         selectedDate = preferredSelectedDate(for: requestedKey)
         pendingAutomaticSelectionMonthKey = requestedKey
@@ -176,6 +194,7 @@ final class ScheduleViewModel: ObservableObject {
         if forceRefresh == false, cachedMonths[key] != nil {
             logLocalMonthIfNeeded(key)
             await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
+            setLoadingDisplayedMonth(false)
             applyPendingAutomaticSelectionIfNeeded(for: key)
             await rebuildPresentation(
                 favoriteTeamID: appModel.settings.favoriteTeamID,
@@ -188,6 +207,10 @@ final class ScheduleViewModel: ObservableObject {
 #if DEBUG
             print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight")
 #endif
+            setLoadingDisplayedMonth(cachedMonths[key] == nil)
+            defer {
+                setLoadingDisplayedMonth(false)
+            }
             do {
                 cachedMonths[key] = try await task.value
                 failedMonths.remove(key)
@@ -202,8 +225,7 @@ final class ScheduleViewModel: ObservableObject {
             return
         }
 
-        objectWillChange.send()
-        isLoadingDisplayedMonth = true
+        setLoadingDisplayedMonth(cachedMonths[key] == nil)
         let task = Task<ScheduleMonthCacheEntry, Error> { @MainActor in
             let fetched = try await appModel.fetchIsolatedScheduleMonth(
                 for: key,
@@ -212,6 +234,10 @@ final class ScheduleViewModel: ObservableObject {
             return await ScheduleMonthCacheEntry.build(key: key, games: fetched)
         }
         inFlightMonthTasks[key] = task
+        defer {
+            inFlightMonthTasks[key] = nil
+            setLoadingDisplayedMonth(false)
+        }
 
         do {
             let entry = try await task.value
@@ -227,8 +253,6 @@ final class ScheduleViewModel: ObservableObject {
 #endif
         }
 
-        inFlightMonthTasks[key] = nil
-        isLoadingDisplayedMonth = false
         applyPendingAutomaticSelectionIfNeeded(for: key)
         await rebuildPresentation(
             favoriteTeamID: appModel.settings.favoriteTeamID,
@@ -249,6 +273,12 @@ final class ScheduleViewModel: ObservableObject {
 #if DEBUG
         debugSummary = presentation.debugSummary
 #endif
+    }
+
+    private func setLoadingDisplayedMonth(_ isLoading: Bool) {
+        guard isLoadingDisplayedMonth != isLoading else { return }
+        objectWillChange.send()
+        isLoadingDisplayedMonth = isLoading
     }
 
     private func logLocalMonthIfNeeded(_ key: KBOMonthScheduleKey) {
@@ -316,6 +346,19 @@ final class ScheduleViewModel: ObservableObject {
         }
 
         return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    private func mergeAppModelMonthSnapshot(
+        _ snapshot: [GameDetail],
+        into existingMonthGames: [GameDetail],
+        for key: KBOMonthScheduleKey
+    ) -> [GameDetail] {
+        ScheduleMonthOverlayResolver.merge(
+            existingMonthGames: existingMonthGames,
+            incomingGames: snapshot,
+            monthKey: key,
+            calendar: calendar
+        )
     }
 
     private func mergePostReconciliationDateRefresh(
@@ -408,10 +451,11 @@ final class ScheduleViewModel: ObservableObject {
         let snapshot = appModel.currentScheduleMonthSnapshot(for: key)
         guard snapshot.isEmpty == false else { return }
         let currentGames = cachedMonths[key]?.games ?? []
-        guard currentGames != snapshot else { return }
-        cachedMonths[key] = await ScheduleMonthCacheEntry.build(key: key, games: snapshot)
+        let mergedGames = mergeAppModelMonthSnapshot(snapshot, into: currentGames, for: key)
+        guard currentGames != mergedGames else { return }
+        cachedMonths[key] = await ScheduleMonthCacheEntry.build(key: key, games: mergedGames)
 #if DEBUG
-        print("[ScheduleCache] month=\(key.yearMonthText) source=appModelSync gameCount=\(snapshot.count)")
+        print("[ScheduleCache] month=\(key.yearMonthText) source=appModelSync incoming=\(snapshot.count) before=\(currentGames.count) after=\(mergedGames.count)")
 #endif
     }
 
@@ -433,6 +477,48 @@ private struct ScheduleMonthCacheEntry: Sendable {
             }
             return ScheduleMonthCacheEntry(key: key, games: sortedGames, gamesByDate: gamesByDate)
         }.value
+    }
+}
+
+enum ScheduleMonthOverlayResolver {
+    static func merge(
+        existingMonthGames: [GameDetail],
+        incomingGames: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        calendar: Calendar
+    ) -> [GameDetail] {
+        let monthIncomingGames = incomingGames.filter {
+            isGame($0, in: monthKey, calendar: calendar)
+        }
+        guard existingMonthGames.isEmpty == false else {
+            return monthIncomingGames.sorted { $0.scheduledStart < $1.scheduledStart }
+        }
+
+        var mergedGames = existingMonthGames.filter {
+            isGame($0, in: monthKey, calendar: calendar)
+        }
+
+        for incomingGame in monthIncomingGames {
+            let incomingAliases = incomingGame.gameIdentityAliases
+            if let index = mergedGames.firstIndex(where: { existingGame in
+                existingGame.gameIdentityAliases.isDisjoint(with: incomingAliases) == false
+            }) {
+                mergedGames[index] = incomingGame
+            } else {
+                mergedGames.append(incomingGame)
+            }
+        }
+
+        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    private static func isGame(
+        _ game: GameDetail,
+        in monthKey: KBOMonthScheduleKey,
+        calendar: Calendar
+    ) -> Bool {
+        let components = calendar.dateComponents([.year, .month], from: game.scheduledStart)
+        return components.year == monthKey.year && components.month == monthKey.month
     }
 }
 
@@ -919,13 +1005,19 @@ private struct ScheduleCalendarCardView: View {
                 }
                 #endif
 
-                if selectedGames.isEmpty {
+                switch viewModel.selectedGamesContentState {
+                case .initialLoading:
+                    ScheduleLoadingPlaceholderView(
+                        title: selectedDayTitle,
+                        message: "일정을 불러오는 중입니다"
+                    )
+                case .loadedEmpty:
                     EmptyStateView(
                         systemImage: "calendar",
                         title: selectedDayTitle,
                         message: emptyMessage
                     )
-                } else {
+                case .loaded:
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text(selectedDayTitle)
@@ -955,6 +1047,11 @@ private struct ScheduleCalendarCardView: View {
                         }
                     }
                 }
+            } else if viewModel.isLoadingDisplayedMonth {
+                ScheduleLoadingPlaceholderView(
+                    title: emptyMonthTitle,
+                    message: "일정을 불러오는 중입니다"
+                )
             } else if viewModel.hasAvailableMonths {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -1135,6 +1232,27 @@ private struct ScheduleCalendarCardView: View {
             return isSelected(day) ? palette.primary : .clear
         }
         return isSelected(day) ? appModel.currentTheme.accent : .clear
+    }
+}
+
+private struct ScheduleLoadingPlaceholderView: View {
+    @Environment(AppModel.self) private var appModel
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.regular)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 104)
+        .padding(.vertical, 8)
     }
 }
 

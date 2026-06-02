@@ -154,7 +154,8 @@ extension GameCenterReview {
             awayBatting: awayBatting.enrichingPositions(from: source.awayBatting, sideLabel: "away"),
             homeBatting: homeBatting.enrichingPositions(from: source.homeBatting, sideLabel: "home"),
             awayPitching: awayPitching,
-            homePitching: homePitching
+            homePitching: homePitching,
+            recordSource: recordSource
         )
     }
 
@@ -165,7 +166,8 @@ extension GameCenterReview {
             awayBatting: awayBatting.enrichingPositions(from: sourceSections[0], sideLabel: "away"),
             homeBatting: homeBatting.enrichingPositions(from: sourceSections[1], sideLabel: "home"),
             awayPitching: awayPitching,
-            homePitching: homePitching
+            homePitching: homePitching,
+            recordSource: recordSource
         )
     }
 }

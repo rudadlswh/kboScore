@@ -63,12 +63,41 @@ struct GameCenterTeamLineTotals: Sendable {
     let walks: String?
 }
 
+enum GameCenterRecordSource: String, Sendable {
+    case unknown
+    case fullBoxscore
+    case scoreboardHTMLBoxscore
+    case keyplayerPartialLimited
+    case lineupLimited
+
+    var isLimited: Bool {
+        self == .keyplayerPartialLimited || self == .lineupLimited
+    }
+}
+
 struct GameCenterReview: Sendable {
     let summaryItems: [GameCenterSummaryItem]
     let awayBatting: GameCenterBattingSection
     let homeBatting: GameCenterBattingSection
     let awayPitching: GameCenterPitchingSection
     let homePitching: GameCenterPitchingSection
+    let recordSource: GameCenterRecordSource
+
+    init(
+        summaryItems: [GameCenterSummaryItem],
+        awayBatting: GameCenterBattingSection,
+        homeBatting: GameCenterBattingSection,
+        awayPitching: GameCenterPitchingSection,
+        homePitching: GameCenterPitchingSection,
+        recordSource: GameCenterRecordSource = .unknown
+    ) {
+        self.summaryItems = summaryItems
+        self.awayBatting = awayBatting
+        self.homeBatting = homeBatting
+        self.awayPitching = awayPitching
+        self.homePitching = homePitching
+        self.recordSource = recordSource
+    }
 
     var hasDisplayableRecords: Bool {
         awayBatting.lines.isEmpty == false ||

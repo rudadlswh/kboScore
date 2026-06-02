@@ -238,7 +238,8 @@ extension GameBoxscoreResponse {
             awayBatting: GameCenterBattingSection(lines: awayBatters.map(\.gameCenterLine), totals: nil),
             homeBatting: GameCenterBattingSection(lines: homeBatters.map(\.gameCenterLine), totals: nil),
             awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(\.gameCenterLine)),
-            homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine))
+            homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine)),
+            recordSource: .fullBoxscore
         )
     }
 }
