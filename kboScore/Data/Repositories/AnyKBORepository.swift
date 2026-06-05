@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
@@ -20,7 +20,12 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
     private let replaceLocalTeamRanksBlock: (@Sendable ([TeamRankRow], Int) async -> Int)?
     private let fetchFavoriteTeamScheduleBlock: (@Sendable (Date, Team.ID, Bool) async throws -> [GameDetail])?
     private let fetchGameDetailSnapshotBlock: (@Sendable (GameDetail, String, [Team]) async throws -> GameDetail?)?
+    private let fetchGameDetailSnapshotResultBlock: (@Sendable (GameDetail, String, [Team]) async throws -> GameDetailSnapshotFetchResult?)?
     private let fetchGameDetailIdentitySnapshotBlock: (@Sendable (String, [Team]) async throws -> GameDetail?)?
+    private let fetchGameDetailDatabaseReviewBlock: (@Sendable (GameDetail) async throws -> GameCenterReview?)?
+    private let fetchGameDetailDatabaseReviewResultBlock: (@Sendable (GameDetail) async throws -> GameDetailDatabaseReviewFetchResult?)?
+    private let fetchGameDetailDatabaseReviewForProviderBlock: (@Sendable (String?, String?, String) async throws -> GameDetailDatabaseReviewFetchResult?)?
+    private let fetchGameDetailDatabaseReviewForSupabaseGameIDBlock: (@Sendable (UUID, String?, String?, String) async throws -> GameDetailDatabaseReviewFetchResult?)?
     private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
     private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
     private let upsertLocalGamesBlock: (@Sendable ([GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int))?
@@ -76,12 +81,50 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
         } else {
             fetchGameDetailSnapshotBlock = nil
         }
+        if let detailSource = base as? any KBOGameDetailSnapshotResultDataSource {
+            fetchGameDetailSnapshotResultBlock = { game, identity, cachedTeams in
+                try await detailSource.fetchGameDetailSnapshotResult(for: game, identity: identity, cachedTeams: cachedTeams)
+            }
+        } else {
+            fetchGameDetailSnapshotResultBlock = nil
+        }
         if let identitySource = base as? any KBOGameIdentityResolutionDataSource {
             fetchGameDetailIdentitySnapshotBlock = { identity, cachedTeams in
                 try await identitySource.fetchGameDetailIdentitySnapshot(identity: identity, cachedTeams: cachedTeams)
             }
         } else {
             fetchGameDetailIdentitySnapshotBlock = nil
+        }
+        if let databaseRecordSource = base as? any KBOGameDetailDatabaseRecordDataSource {
+            fetchGameDetailDatabaseReviewBlock = { game in
+                try await databaseRecordSource.fetchGameDetailDatabaseReview(for: game)
+            }
+        } else {
+            fetchGameDetailDatabaseReviewBlock = nil
+        }
+        if let databaseRecordSource = base as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
+            fetchGameDetailDatabaseReviewResultBlock = { game in
+                try await databaseRecordSource.fetchGameDetailDatabaseReviewResult(for: game)
+            }
+            fetchGameDetailDatabaseReviewForProviderBlock = { providerGameID, publicGameID, invokedFrom in
+                try await databaseRecordSource.fetchGameDetailDatabaseReview(
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID,
+                    invokedFrom: invokedFrom
+                )
+            }
+            fetchGameDetailDatabaseReviewForSupabaseGameIDBlock = { supabaseGameId, providerGameID, publicGameID, invokedFrom in
+                try await databaseRecordSource.fetchGameDetailDatabaseReview(
+                    supabaseGameId: supabaseGameId,
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID,
+                    invokedFrom: invokedFrom
+                )
+            }
+        } else {
+            fetchGameDetailDatabaseReviewResultBlock = nil
+            fetchGameDetailDatabaseReviewForProviderBlock = nil
+            fetchGameDetailDatabaseReviewForSupabaseGameIDBlock = nil
         }
         if let scheduleSyncSource = base as? any KBOScheduleRemoteSyncDataSource {
             fetchRemoteGameCountBlock = { try await scheduleSyncSource.fetchRemoteGameCount() }
@@ -173,12 +216,80 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
         return try await fetchGameDetailSnapshotBlock(game, identity, cachedTeams)
     }
 
+    nonisolated func fetchGameDetailSnapshotResult(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetailSnapshotFetchResult? {
+        if let fetchGameDetailSnapshotResultBlock {
+            return try await fetchGameDetailSnapshotResultBlock(game, identity, cachedTeams)
+        }
+        guard let game = try await fetchGameDetailSnapshotBlock?(game, identity, cachedTeams) else { return nil }
+        return GameDetailSnapshotFetchResult(
+            game: game,
+            rawSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID
+        )
+    }
+
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
     ) async throws -> GameDetail? {
         guard let fetchGameDetailIdentitySnapshotBlock else { return nil }
         return try await fetchGameDetailIdentitySnapshotBlock(identity, cachedTeams)
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
+        guard let fetchGameDetailDatabaseReviewBlock else { return nil }
+        return try await fetchGameDetailDatabaseReviewBlock(game)
+    }
+
+    nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
+        if let fetchGameDetailDatabaseReviewResultBlock {
+            return try await fetchGameDetailDatabaseReviewResultBlock(game)
+        }
+        guard let review = try await fetchGameDetailDatabaseReviewBlock?(game) else { return nil }
+        return GameDetailDatabaseReviewFetchResult(
+            review: review,
+            inputLocalGameID: game.id,
+            rawSupabaseGameID: nil,
+            resolvedSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID,
+            publicBatterRawRowCount: review.awayBatting.lines.count + review.homeBatting.lines.count,
+            publicPitcherRawRowCount: review.awayPitching.lines.count + review.homePitching.lines.count,
+            eventRawRowCount: 0
+        )
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        guard let fetchGameDetailDatabaseReviewForProviderBlock else { return nil }
+        return try await fetchGameDetailDatabaseReviewForProviderBlock(
+            providerGameID,
+            publicGameID,
+            invokedFrom
+        )
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        supabaseGameId: UUID,
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        guard let fetchGameDetailDatabaseReviewForSupabaseGameIDBlock else { return nil }
+        return try await fetchGameDetailDatabaseReviewForSupabaseGameIDBlock(
+            supabaseGameId,
+            providerGameID,
+            publicGameID,
+            invokedFrom
+        )
     }
 
     nonisolated func fetchRemoteGameCount() async throws -> Int {

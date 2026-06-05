@@ -65,6 +65,7 @@ struct GameCenterTeamLineTotals: Sendable {
 
 enum GameCenterRecordSource: String, Sendable {
     case unknown
+    case dbLiveTextRecords
     case fullBoxscore
     case scoreboardHTMLBoxscore
     case keyplayerPartialLimited

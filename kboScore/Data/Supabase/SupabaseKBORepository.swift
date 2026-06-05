@@ -60,10 +60,25 @@ protocol SupabaseKBOReading: Sendable {
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow]
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow]
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow?
+    nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow]
+    nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow]
+    nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow]
 }
 
 extension SupabaseKBOReading {
     nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow] {
+        []
+    }
+
+    nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
+        []
+    }
+
+    nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
+        []
+    }
+
+    nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
         []
     }
 }
@@ -387,7 +402,229 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
 
 }
 
-extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource {
+extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource {
+    nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
+        try await fetchGameDetailDatabaseReviewResult(for: game)?.review
+    }
+
+    nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
+        #if DEBUG
+        print("[GameDetailDBRecords] dbRecordFetch inputLocalGameId=\(game.id.uuidString) publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
+        #endif
+        guard let gameRow = try await resolveSupabaseGameRowForDatabaseRecords(for: game) else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=missingGameRow inputLocalGameId=\(game.id.uuidString) providerGameID=\(game.providerGameID ?? "<nil>")")
+            #endif
+            return nil
+        }
+        let recordGameID = gameRow.id
+        #if DEBUG
+        print("[GameDetailDBRecords] dbRecordFetch resolvedSupabaseGameId=\(recordGameID.uuidString) inputLocalGameId=\(game.id.uuidString) providerGameID=\(gameRow.providerGameID ?? game.providerGameID ?? "<nil>")")
+        #endif
+
+        async let batterRowsTask = source.fetchGameBatterRecords(gameID: recordGameID)
+        async let pitcherRowsTask = source.fetchGamePitcherRecords(gameID: recordGameID)
+        async let eventRowsTask = fetchGameEventsIfAllowed(gameID: recordGameID)
+        let batterRows = try await batterRowsTask
+        let pitcherRows = try await pitcherRowsTask
+        let eventRows = await eventRowsTask
+
+        #if DEBUG
+        print("[GameDetailDBRecords] DB batter count=\(batterRows.count) gameID=\(recordGameID.uuidString)")
+        print("[GameDetailDBRecords] DB pitcher count=\(pitcherRows.count) gameID=\(recordGameID.uuidString)")
+        print("[GameDetailDBRecords] DB event count=\(eventRows.count) gameID=\(recordGameID.uuidString)")
+        #endif
+
+        let review = await SupabaseKBOMapper.mapDetailedRecordReview(
+            game: game,
+            recordGameID: recordGameID,
+            awayTeamDatabaseID: gameRow.awayTeamID,
+            homeTeamDatabaseID: gameRow.homeTeamID,
+            batterRows: batterRows,
+            pitcherRows: pitcherRows,
+            eventRows: eventRows
+        )
+        #if DEBUG
+        print("[GameDetailDBRecords] dbRecordFetch resolvedSupabaseGameId=\(recordGameID.uuidString) providerGameID=\(gameRow.providerGameID ?? game.providerGameID ?? "<nil>") batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
+        #endif
+        return GameDetailDatabaseReviewFetchResult(
+            review: review,
+            inputLocalGameID: game.id,
+            rawSupabaseGameID: recordGameID,
+            resolvedSupabaseGameID: recordGameID,
+            providerGameID: gameRow.providerGameID ?? game.providerGameID,
+            publicGameID: gameRow.publicGameID ?? game.publicGameID,
+            publicBatterRawRowCount: batterRows.count,
+            publicPitcherRawRowCount: pitcherRows.count,
+            eventRawRowCount: eventRows.count
+        )
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        #if DEBUG
+        print("[GameDetailDBRecords] providerDbRecordFetch invokedFrom=\(invokedFrom) providerGameID=\(providerGameID ?? "<nil>") publicGameID=\(publicGameID ?? "<nil>")")
+        #endif
+        let lookups = databaseRecordProviderLookups(
+            providerGameID: providerGameID,
+            publicGameID: publicGameID
+        )
+        for lookup in lookups {
+            let rows = try await source.fetchGame(lookup: lookup)
+            #if DEBUG
+            print("[GameDetailDBRecords] providerDbRecordFetch lookup key=\(lookup.debugKey) value=\(lookup.debugValue) count=\(rows.count)")
+            #endif
+            guard let row = rows.first else { continue }
+            return try await fetchGameDetailDatabaseReview(
+                supabaseGameId: row.id,
+                providerGameID: row.providerGameID ?? providerGameID,
+                publicGameID: row.publicGameID ?? publicGameID,
+                invokedFrom: invokedFrom
+            )
+        }
+        #if DEBUG
+        print("[GameDetailDBRecords] selectedRecordSource=none reason=missingProviderResolvedGameRow providerGameID=\(providerGameID ?? "<nil>") publicGameID=\(publicGameID ?? "<nil>")")
+        #endif
+        return nil
+    }
+
+    nonisolated private func databaseRecordProviderLookups(
+        providerGameID: String?,
+        publicGameID: String?
+    ) -> [SupabaseGameLookup] {
+        var lookups: [SupabaseGameLookup] = []
+        var seen = Set<String>()
+
+        func append(_ lookup: SupabaseGameLookup) {
+            let key = "\(lookup.debugKey)=\(lookup.debugValue)"
+            guard seen.insert(key).inserted else { return }
+            lookups.append(lookup)
+        }
+
+        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           providerGameID.isEmpty == false {
+            append(.providerGameID(providerGameID))
+            append(.officialProviderGameID(providerGameID))
+        }
+        if let publicGameID = publicGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           publicGameID.isEmpty == false {
+            append(.publicGameID(publicGameID))
+        }
+        return lookups
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        supabaseGameId: UUID,
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        #if DEBUG
+        print("[GameDetailDBRecords] explicitDbRecordFetch invokedFrom=\(invokedFrom) rawSupabaseGameId=\(supabaseGameId.uuidString) providerGameID=\(providerGameID ?? "<nil>") publicGameID=\(publicGameID ?? "<nil>")")
+        #endif
+        let gameRows = try await source.fetchGame(lookup: .databaseID(supabaseGameId))
+        guard let gameRow = gameRows.first else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=missingRawSupabaseGameRow rawSupabaseGameId=\(supabaseGameId.uuidString) providerGameID=\(providerGameID ?? "<nil>")")
+            #endif
+            return nil
+        }
+        let teamRows = try await cachedTeamRows()
+        let mappedGames = SupabaseKBOMapper.mapGames(gameRows: [gameRow], teamRows: teamRows)
+        guard let mappedGame = mappedGames.first else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=rawSupabaseGameRowMappingFailed rawSupabaseGameId=\(supabaseGameId.uuidString)")
+            #endif
+            return nil
+        }
+
+        async let batterRowsTask = source.fetchGameBatterRecords(gameID: supabaseGameId)
+        async let pitcherRowsTask = source.fetchGamePitcherRecords(gameID: supabaseGameId)
+        async let eventRowsTask = fetchGameEventsIfAllowed(gameID: supabaseGameId)
+        let batterRows = try await batterRowsTask
+        let pitcherRows = try await pitcherRowsTask
+        let eventRows = await eventRowsTask
+
+        let review = await SupabaseKBOMapper.mapDetailedRecordReview(
+            game: mappedGame,
+            recordGameID: supabaseGameId,
+            awayTeamDatabaseID: gameRow.awayTeamID,
+            homeTeamDatabaseID: gameRow.homeTeamID,
+            batterRows: batterRows,
+            pitcherRows: pitcherRows,
+            eventRows: eventRows
+        )
+
+        #if DEBUG
+        print("[GameDetailDBRecords] explicitDbRecordFetch invokedFrom=\(invokedFrom) rawSupabaseGameId=\(supabaseGameId.uuidString) batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
+        #endif
+        return GameDetailDatabaseReviewFetchResult(
+            review: review,
+            inputLocalGameID: mappedGame.id,
+            rawSupabaseGameID: supabaseGameId,
+            resolvedSupabaseGameID: supabaseGameId,
+            providerGameID: gameRow.providerGameID ?? providerGameID,
+            publicGameID: gameRow.publicGameID ?? publicGameID,
+            publicBatterRawRowCount: batterRows.count,
+            publicPitcherRawRowCount: pitcherRows.count,
+            eventRawRowCount: eventRows.count
+        )
+    }
+
+    nonisolated private func resolveSupabaseGameRowForDatabaseRecords(for game: GameDetail) async throws -> SupabaseGameRow? {
+        let directLookups = databaseRecordDetailLookups(for: game)
+        for lookup in directLookups {
+            let rows = try await source.fetchGame(lookup: lookup)
+            guard let row = rows.first else { continue }
+            return row
+        }
+
+        let teamRows = try await cachedTeamRows()
+        for lookup in teamFallbackDetailLookups(for: game, teamRows: teamRows) {
+            let rows = try await source.fetchGame(lookup: lookup)
+            guard let row = rows.first else { continue }
+            return row
+        }
+
+        return nil
+    }
+
+    nonisolated private func databaseRecordDetailLookups(for game: GameDetail) -> [SupabaseGameLookup] {
+        var lookups = directDetailLookups(for: game, identity: game.stableDetailIdentity)
+        var seen = Set(lookups.map { "\($0.debugKey)=\($0.debugValue)" })
+
+        func append(_ lookup: SupabaseGameLookup) {
+            let key = "\(lookup.debugKey)=\(lookup.debugValue)"
+            guard seen.insert(key).inserted else { return }
+            lookups.append(lookup)
+        }
+
+        if let publicGameID = game.publicGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           publicGameID.isEmpty == false {
+            append(.publicGameID(publicGameID))
+        }
+        if let officialProviderGameID = game.officialProviderGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           officialProviderGameID.isEmpty == false {
+            append(.officialProviderGameID(officialProviderGameID))
+        }
+        append(.databaseID(game.id))
+        return lookups
+    }
+
+    nonisolated private func fetchGameEventsIfAllowed(gameID: UUID) async -> [SupabaseGameEventRow] {
+        do {
+            return try await source.fetchGameEvents(gameID: gameID)
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] DB event fetch skipped gameID=\(gameID.uuidString) reason=unavailableOrPolicy error=\(error)")
+            #endif
+            return []
+        }
+    }
+
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
@@ -432,6 +669,18 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameI
         identity: String,
         cachedTeams: [Team]
     ) async throws -> GameDetail? {
+        try await fetchGameDetailSnapshotResult(
+            for: game,
+            identity: identity,
+            cachedTeams: cachedTeams
+        )?.game
+    }
+
+    nonisolated func fetchGameDetailSnapshotResult(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetailSnapshotFetchResult? {
         let directLookups = directDetailLookups(for: game, identity: identity)
         var fetchedTeamRows: [SupabaseTeamRow] = []
 
@@ -457,7 +706,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameI
             print("[GameDetailSnapshot] game_id=\(row.id.uuidString) inning=\(snapshot?.inningLabel ?? "<nil>") balls=\(snapshot?.balls.map(String.init) ?? "-") strikes=\(snapshot?.strikes.map(String.init) ?? "-") outs=\(snapshot?.outs.map(String.init) ?? "-") bases=\((snapshot?.runnerOnFirst ?? false) ? "1" : "-")\((snapshot?.runnerOnSecond ?? false) ? "2" : "-")\((snapshot?.runnerOnThird ?? false) ? "3" : "-") currentPitcher=\(supabaseDebugText(snapshot?.currentPitcherName)) batter=\(supabaseDebugText(snapshot?.currentBatterName))")
             print("fetchGameDetail(single:) success identity=\(identity) id=\(mapped.supabaseDebugIdentifier)")
             #endif
-            return mapped
+            return GameDetailSnapshotFetchResult(
+                game: mapped,
+                rawSupabaseGameID: row.id,
+                providerGameID: row.providerGameID ?? mapped.providerGameID,
+                publicGameID: row.publicGameID ?? mapped.publicGameID
+            )
         }
 
         fetchedTeamRows = try await cachedTeamRows()
@@ -478,7 +732,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameI
             print("[GameDetailSnapshot] game_id=\(row.id.uuidString) inning=\(snapshot?.inningLabel ?? "<nil>") balls=\(snapshot?.balls.map(String.init) ?? "-") strikes=\(snapshot?.strikes.map(String.init) ?? "-") outs=\(snapshot?.outs.map(String.init) ?? "-") bases=\((snapshot?.runnerOnFirst ?? false) ? "1" : "-")\((snapshot?.runnerOnSecond ?? false) ? "2" : "-")\((snapshot?.runnerOnThird ?? false) ? "3" : "-") currentPitcher=\(supabaseDebugText(snapshot?.currentPitcherName)) batter=\(supabaseDebugText(snapshot?.currentBatterName))")
             print("fetchGameDetail(single:) success identity=\(identity) id=\(mapped.supabaseDebugIdentifier)")
             #endif
-            return mapped
+            return GameDetailSnapshotFetchResult(
+                game: mapped,
+                rawSupabaseGameID: row.id,
+                providerGameID: row.providerGameID ?? mapped.providerGameID,
+                publicGameID: row.publicGameID ?? mapped.publicGameID
+            )
         }
 
         return nil
@@ -728,6 +987,60 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         "live_last_checked_at",
         "away_starting_pitcher_name",
         "home_starting_pitcher_name"
+    ].joined(separator: ",")
+    nonisolated static let batterRecordSelectColumns = [
+        "id",
+        "game_id",
+        "team_id",
+        "source_order",
+        "batting_order",
+        "position",
+        "player_name",
+        "at_bats",
+        "runs",
+        "hits",
+        "rbi",
+        "home_runs",
+        "walks",
+        "strikeouts",
+        "stolen_bases",
+        "grounded_into_double_play",
+        "errors",
+        "batting_average"
+    ].joined(separator: ",")
+    nonisolated static let pitcherRecordSelectColumns = [
+        "id",
+        "game_id",
+        "team_id",
+        "source_order",
+        "pitching_order",
+        "player_name",
+        "appearance",
+        "decision_result",
+        "wins",
+        "losses",
+        "saves",
+        "innings_pitched",
+        "batters_faced",
+        "pitch_count",
+        "at_bats",
+        "hits",
+        "home_runs",
+        "walks_or_hit_by_pitch",
+        "strikeouts",
+        "runs",
+        "earned_runs",
+        "era"
+    ].joined(separator: ",")
+    nonisolated static let gameEventSelectColumns = [
+        "id",
+        "game_id",
+        "provider_event_id",
+        "sequence_number",
+        "inning",
+        "inning_half",
+        "event_type",
+        "event_text"
     ].joined(separator: ",")
 
     init(configuration: SupabaseConfiguration) {
@@ -1047,6 +1360,93 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         logLatestSnapshotFieldDiagnostics(rows, context: "single")
         #endif
         return rows.first
+    }
+
+    nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
+        #if DEBUG
+        print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_batter_records game_id=\(gameID.uuidString)")
+        #endif
+        do {
+            let rows: [SupabaseGameBatterRecordRow] = try await database
+                .from("public_game_batter_records")
+                .select(Self.batterRecordSelectColumns)
+                .eq("game_id", value: gameID.uuidString)
+                .order("source_order", ascending: true)
+                .execute()
+                .value
+            #if DEBUG
+            print("[GameDetailDBRecords] DB batter count=\(rows.count) source=public_game_batter_records game_id=\(gameID.uuidString)")
+            #endif
+            return rows
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] DB batter public view failed game_id=\(gameID.uuidString) fallback=game_batter_records error=\(error)")
+            #endif
+            let rows: [SupabaseGameBatterRecordRow] = try await database
+                .from("game_batter_records")
+                .select(Self.batterRecordSelectColumns)
+                .eq("game_id", value: gameID.uuidString)
+                .order("source_order", ascending: true)
+                .execute()
+                .value
+            #if DEBUG
+            print("[GameDetailDBRecords] DB batter count=\(rows.count) source=game_batter_records game_id=\(gameID.uuidString)")
+            #endif
+            return rows
+        }
+    }
+
+    nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
+        #if DEBUG
+        print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_pitcher_records game_id=\(gameID.uuidString)")
+        #endif
+        do {
+            let rows: [SupabaseGamePitcherRecordRow] = try await database
+                .from("public_game_pitcher_records")
+                .select(Self.pitcherRecordSelectColumns)
+                .eq("game_id", value: gameID.uuidString)
+                .order("pitching_order", ascending: true)
+                .order("source_order", ascending: true)
+                .execute()
+                .value
+            #if DEBUG
+            print("[GameDetailDBRecords] DB pitcher count=\(rows.count) source=public_game_pitcher_records game_id=\(gameID.uuidString)")
+            #endif
+            return rows
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] DB pitcher public view failed game_id=\(gameID.uuidString) fallback=game_pitcher_records error=\(error)")
+            #endif
+            let rows: [SupabaseGamePitcherRecordRow] = try await database
+                .from("game_pitcher_records")
+                .select(Self.pitcherRecordSelectColumns)
+                .eq("game_id", value: gameID.uuidString)
+                .order("pitching_order", ascending: true)
+                .order("source_order", ascending: true)
+                .execute()
+                .value
+            #if DEBUG
+            print("[GameDetailDBRecords] DB pitcher count=\(rows.count) source=game_pitcher_records game_id=\(gameID.uuidString)")
+            #endif
+            return rows
+        }
+    }
+
+    nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
+        #if DEBUG
+        print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) table=game_events game_id=\(gameID.uuidString)")
+        #endif
+        let rows: [SupabaseGameEventRow] = try await database
+            .from("game_events")
+            .select(Self.gameEventSelectColumns)
+            .eq("game_id", value: gameID.uuidString)
+            .order("sequence_number", ascending: true)
+            .execute()
+            .value
+        #if DEBUG
+        print("[GameDetailDBRecords] DB event count=\(rows.count) source=game_events game_id=\(gameID.uuidString)")
+        #endif
+        return rows
     }
 
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {

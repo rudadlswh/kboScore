@@ -66,6 +66,8 @@ nonisolated struct GameBatterRecord: Codable, Equatable, Sendable {
     let walks: Int?
     let strikeouts: Int?
     let stolenBases: Int?
+    let groundedIntoDoublePlay: Int?
+    let errors: Int?
     let battingAverage: String?
 }
 
@@ -234,13 +236,35 @@ extension GameBoxscoreResponse {
     var gameCenterReview: GameCenterReview? {
         guard hasRecords else { return nil }
         return GameCenterReview(
-            summaryItems: [],
+            summaryItems: gameCenterSummaryItems,
             awayBatting: GameCenterBattingSection(lines: awayBatters.map(\.gameCenterLine), totals: nil),
             homeBatting: GameCenterBattingSection(lines: homeBatters.map(\.gameCenterLine), totals: nil),
             awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(\.gameCenterLine)),
             homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine)),
             recordSource: .fullBoxscore
         )
+    }
+
+    private var gameCenterSummaryItems: [GameCenterSummaryItem] {
+        [
+            teamTotalSummaryItem(title: "도루", away: awayBatters.total(\.stolenBases), home: homeBatters.total(\.stolenBases)),
+            teamTotalSummaryItem(title: "병살타", away: awayBatters.total(\.groundedIntoDoublePlay), home: homeBatters.total(\.groundedIntoDoublePlay)),
+            teamTotalSummaryItem(title: "실책", away: awayBatters.total(\.errors), home: homeBatters.total(\.errors))
+        ].compactMap { $0 }
+    }
+
+    private func teamTotalSummaryItem(title: String, away: Int?, home: Int?) -> GameCenterSummaryItem? {
+        guard away != nil || home != nil else { return nil }
+        let awayValue = String(away ?? 0)
+        let homeValue = String(home ?? 0)
+        return GameCenterSummaryItem(title: title, value: "\(awayValue) - \(homeValue)", values: [awayValue, homeValue])
+    }
+}
+
+private extension Array where Element == GameBatterRecord {
+    func total(_ keyPath: KeyPath<GameBatterRecord, Int?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath] }
+        return values.isEmpty ? nil : values.reduce(0, +)
     }
 }
 

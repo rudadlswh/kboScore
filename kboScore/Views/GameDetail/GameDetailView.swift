@@ -56,25 +56,17 @@ struct GameDetailView: View {
                     payload: screenModel.detail,
                     cachedLineScore: screenModel.cachedLineScore,
                     boxscore: screenModel.boxscore,
+                    databaseRecordReview: screenModel.databaseRecordReview,
                     officialFallbackReview: screenModel.officialFallbackReview,
                     baseRunnerDisplay: viewModel.baseRunnerDisplay
                 )
-                let availableSections = GameDetailSection.availableSections(for: presentation.status)
-
                 VStack(alignment: .leading, spacing: 12) {
                     GameStatusSummaryCard(presentation: presentation)
                     actionButtons(for: game)
-                    sectionPicker(availableSections: availableSections)
-                    selectedSection(presentation: presentation)
+                    overviewSection(presentation: presentation)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .task(id: viewModel.stableIdentity) {
-                    await screenModel.load(for: game)
-                }
-                .task(id: presentation.status) {
-                    screenModel.syncSelection(for: presentation.status)
-                }
             } else if viewModel.isResolvingInitialGame || viewModel.hasAttemptedInitialResolution == false {
                 ProgressView("경기 정보를 불러오는 중")
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -107,12 +99,20 @@ struct GameDetailView: View {
         .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
         .task(id: viewModel.stableIdentity) {
             viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
+            let inputLocalGameID = viewModel.game?.id
             let refreshedGame = await viewModel.refreshIfNeeded(
                 appModel: appModel,
                 bypassAutomaticThrottle: true
             ) ?? viewModel.game
             if let refreshedGame {
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await loadDetailPresentation(
+                    for: refreshedGame,
+                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                    forceRefresh: refreshedGame.status.isLiveLike
+                )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
@@ -138,64 +138,102 @@ struct GameDetailView: View {
                     break
                 }
                 guard Task.isCancelled == false, viewModel.shouldAutoRefreshLiveGame else { break }
+                let inputLocalGameID = viewModel.game?.id
                 guard let refreshedGame = await viewModel.refreshIfNeeded(
                     appModel: appModel,
                     bypassAutomaticThrottle: true
                 ) else { continue }
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await loadDetailPresentation(
+                    for: refreshedGame,
+                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                    forceRefresh: refreshedGame.status.isLiveLike
+                )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, viewModel.shouldAutoRefreshLiveGame else { return }
             Task {
+                let inputLocalGameID = viewModel.game?.id
                 guard let refreshedGame = await viewModel.refreshIfNeeded(
                     appModel: appModel,
                     bypassAutomaticThrottle: true
                 ) else { return }
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await loadDetailPresentation(
+                    for: refreshedGame,
+                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                    forceRefresh: refreshedGame.status.isLiveLike
+                )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
             }
         }
         .refreshable {
+            let inputLocalGameID = viewModel.game?.id
             await viewModel.refreshIfNeeded(appModel: appModel, manual: true)
             guard let refreshedGame = viewModel.game else { return }
-            await screenModel.load(for: refreshedGame, forceRefresh: true)
-        }
-    }
-
-    @ViewBuilder
-    private func sectionPicker(availableSections: [GameDetailSection]) -> some View {
-        if let palette = appModel.favoriteStadiumPalette {
-            DoosanGameDetailSectionPicker(
-                selection: $screenModel.selectedSection,
-                sections: availableSections,
-                palette: palette
+            await loadDetailPresentation(
+                for: refreshedGame,
+                inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                forceRefresh: true
             )
-        } else {
-            Picker("상세 섹션", selection: $screenModel.selectedSection) {
-                ForEach(availableSections) { section in
-                    Text(section.rawValue)
-                        .tag(section)
-                }
-            }
-            .pickerStyle(.segmented)
         }
+    }
+
+    private func loadDetailPresentation(
+        for game: GameDetail,
+        inputLocalGameId: UUID,
+        rawSupabaseGameID: UUID?,
+        rawSupabaseProviderGameID: String?,
+        rawSupabasePublicGameID: String?,
+        forceRefresh: Bool
+    ) async {
+        await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: inputLocalGameId,
+            resolvedGame: game,
+            rawSupabaseGameID: rawSupabaseGameID,
+            rawSupabaseProviderGameID: rawSupabaseProviderGameID,
+            rawSupabasePublicGameID: rawSupabasePublicGameID,
+            fetchDatabaseRecordReviewResult: appModel.fetchGameDetailDatabaseReviewResult,
+            fetchDatabaseRecordReviewResultByRawSupabaseID: appModel.fetchGameDetailDatabaseReviewResult
+        )
+        await screenModel.load(
+            for: game,
+            forceRefresh: forceRefresh,
+            fetchDatabaseRecordReview: appModel.fetchGameDetailDatabaseReview
+        )
+        await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: inputLocalGameId,
+            resolvedGame: game,
+            rawSupabaseGameID: rawSupabaseGameID,
+            rawSupabaseProviderGameID: rawSupabaseProviderGameID,
+            rawSupabasePublicGameID: rawSupabasePublicGameID,
+            fetchDatabaseRecordReviewResult: appModel.fetchGameDetailDatabaseReviewResult,
+            fetchDatabaseRecordReviewResultByRawSupabaseID: appModel.fetchGameDetailDatabaseReviewResult
+        )
     }
 
     @ViewBuilder
-    private func selectedSection(presentation: GameDetailPresentation) -> some View {
-        switch screenModel.selectedSection {
-        case .overview:
-            overviewSection(presentation: presentation)
-        case .review:
-            reviewSection(for: presentation)
+    private func overviewSection(
+        presentation: GameDetailPresentation
+    ) -> some View {
+        switch GameDetailOverviewContentKind.contentKind(for: presentation.status) {
         case .preview:
-            previewSection(for: presentation)
+            previewOverviewContent(for: presentation)
+        case .overview:
+            gameStatusOverviewContent(presentation: presentation)
         }
     }
 
-    private func overviewSection(
+    private func gameStatusOverviewContent(
         presentation: GameDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -236,74 +274,44 @@ struct GameDetailView: View {
         }
     }
 
-    private func reviewSection(
+    private func previewOverviewContent(
         for presentation: GameDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if presentation.status != .final {
-                EmptyStateView(
-                    systemImage: "doc.text.magnifyingglass",
-                    title: "리뷰는 경기 종료 후 제공됩니다",
-                    message: "경기 종료 후 박스스코어와 기록 요약이 준비되면 이 섹션에 표시됩니다."
-                )
-            } else {
-                if screenModel.isLoading && screenModel.detail == nil {
-                    DetailLoadingCard(message: "리뷰 데이터를 준비하는 중")
-                }
-
-                GameLineScoreCard(presentation: presentation)
-
-                GameDetailRecordsPanel(presentation: presentation, isLoading: screenModel.isLoading)
+            if screenModel.isLoading && screenModel.detail == nil {
+                DetailLoadingCard(message: "프리뷰 데이터를 준비하는 중")
             }
-        }
-    }
 
-    private func previewSection(
-        for presentation: GameDetailPresentation
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if presentation.status == .final || presentation.status == .cancelled {
-                EmptyStateView(
-                    systemImage: "sportscourt",
-                    title: "프리뷰는 경기 전에 제공됩니다",
-                    message: "예정 경기일 때 선발 예상과 매치업 요약을 확인할 수 있습니다."
-                )
-            } else {
-                if screenModel.isLoading && screenModel.detail == nil {
-                    DetailLoadingCard(message: "프리뷰 데이터를 준비하는 중")
-                }
-
-                if let preview = presentation.preview {
-                    if preview.probableStarters?.away != nil || preview.probableStarters?.home != nil {
-                        ProbableStartersCard(
-                            awayTeam: presentation.game.awayTeam,
-                            homeTeam: presentation.game.homeTeam,
-                            starters: preview.probableStarters
-                        )
-                    }
-
-                    if let awayMatchup = preview.awayMatchup,
-                       let homeMatchup = preview.homeMatchup {
-                        MatchupComparisonCard(awayMatchup: awayMatchup, homeMatchup: homeMatchup)
-                    }
-
-                    if preview.probableStarters?.away == nil,
-                       preview.probableStarters?.home == nil,
-                       preview.awayMatchup == nil,
-                       preview.homeMatchup == nil {
-                        EmptyStateView(
-                            systemImage: "person.crop.circle.badge.questionmark",
-                            title: "프리뷰 정보가 아직 없습니다",
-                            message: "선발 예고와 팀 비교 데이터가 준비되면 이 섹션에 표시됩니다."
-                        )
-                    }
-                } else {
-                    EmptyStateView(
-                        systemImage: "person.crop.circle.badge.questionmark",
-                        title: "공식 프리뷰 정보 준비 중",
-                        message: "현재 데이터 소스에서 프리뷰 정보를 아직 제공하지 않습니다."
+            if let preview = presentation.preview {
+                if preview.probableStarters?.away != nil || preview.probableStarters?.home != nil {
+                    ProbableStartersCard(
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam,
+                        starters: preview.probableStarters
                     )
                 }
+
+                if let awayMatchup = preview.awayMatchup,
+                   let homeMatchup = preview.homeMatchup {
+                    MatchupComparisonCard(awayMatchup: awayMatchup, homeMatchup: homeMatchup)
+                }
+
+                if preview.probableStarters?.away == nil,
+                   preview.probableStarters?.home == nil,
+                   preview.awayMatchup == nil,
+                   preview.homeMatchup == nil {
+                    EmptyStateView(
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        title: "프리뷰 정보가 아직 없습니다",
+                        message: "선발 예고와 팀 비교 데이터가 준비되면 이 섹션에 표시됩니다."
+                    )
+                }
+            } else {
+                EmptyStateView(
+                    systemImage: "person.crop.circle.badge.questionmark",
+                    title: "공식 프리뷰 정보 준비 중",
+                    message: "현재 데이터 소스에서 프리뷰 정보를 아직 제공하지 않습니다."
+                )
             }
         }
     }
@@ -345,42 +353,6 @@ struct GameDetailView: View {
     }
 }
 
-private struct DoosanGameDetailSectionPicker: View {
-    @Binding var selection: GameDetailSection
-    let sections: [GameDetailSection]
-    let palette: StadiumPalette
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(sections) { section in
-                Button {
-                    selection = section
-                } label: {
-                    Text(section.rawValue)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(selection == section ? Color.white : palette.textSecondary)
-                        .frame(maxWidth: .infinity, minHeight: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(selection == section ? palette.primary : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == section ? .isSelected : [])
-            }
-        }
-        .padding(4)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(palette.recessedSurface)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(palette.ghostBorder, lineWidth: 0.75)
-        }
-    }
-}
-
 struct GameDetailPresentation {
     let game: GameDetail
     let status: GameStatus
@@ -413,6 +385,7 @@ struct GameDetailPresentation {
         payload: GameCenterDetailPayload?,
         cachedLineScore: GameCenterLineScore? = nil,
         boxscore: GameBoxscoreResponse?,
+        databaseRecordReview: GameCenterReview? = nil,
         officialFallbackReview: GameCenterReview? = nil,
         baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
     ) {
@@ -446,7 +419,8 @@ struct GameDetailPresentation {
         crowdText = summary?.crowdText?.nilIfBlank
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
         lineScore = payload?.lineScore ?? cachedLineScore
-        review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
+        review = databaseRecordReview?.enrichingBatterPositions(from: payload?.review) ??
+            boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
             officialFallbackReview ??
             payload?.review
         preview = payload?.preview
@@ -835,7 +809,6 @@ private struct StatusTile<Content: View>: View {
 
 private struct OverviewMetadataCard: View {
     let presentation: GameDetailPresentation
-    @Binding var selectedSection: GameDetailSection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -849,21 +822,6 @@ private struct OverviewMetadataCard: View {
                 MetaValueTile(title: "관중", value: presentation.crowdText ?? "미집계")
                 MetaValueTile(title: "종료", value: presentation.endTimeText ?? "진행 중")
                 MetaValueTile(title: "경기시간", value: presentation.durationText ?? "집계 중")
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if presentation.status == .upcoming {
-                        OverviewJumpButton(title: "프리뷰", isSelected: selectedSection == .preview) {
-                            selectedSection = .preview
-                        }
-                    } else {
-                        OverviewJumpButton(title: "리뷰", isSelected: selectedSection == .review) {
-                            selectedSection = .review
-                        }
-                    }
-                }
-                .padding(.horizontal, 1)
             }
         }
         .cardSurface()
@@ -891,29 +849,6 @@ private struct MetaValueTile: View {
             appModel.favoriteStadiumPalette?.recessedSurface ?? Color(.tertiarySystemBackground),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
-    }
-}
-
-private struct OverviewJumpButton: View {
-    @Environment(AppModel.self) private var appModel
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        let palette = appModel.favoriteStadiumPalette
-        Button(action: action) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : (palette?.textPrimary ?? Color.primary))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? (palette?.primary ?? KBOLivePalette.primary) : (palette?.recessedSurface ?? Color(.secondarySystemBackground)))
-                )
-        }
-        .buttonStyle(.plain)
     }
 }
 

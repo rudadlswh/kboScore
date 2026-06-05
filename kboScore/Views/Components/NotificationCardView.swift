@@ -12,13 +12,13 @@ struct NotificationCardView: View {
     let item: NotificationItem
 
     var body: some View {
-        let palette = appModel.favoriteStadiumPalette
-        let typeTint = palette.map { item.type.stadiumTintColor($0) } ?? item.type.tintColor
+        let palette = appModel.favoriteStadiumPalette ?? StadiumPalette.doosan
+        let typeTint = item.type.stadiumTintColor(palette)
 
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(typeTint.opacity(item.isRead ? (palette == nil ? 0.12 : 0.20) : (palette == nil ? 0.2 : 0.28)))
+                    .fill(typeTint.opacity(item.isRead ? 0.20 : 0.28))
                 Image(systemName: item.type.systemImage)
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(typeTint)
@@ -38,18 +38,18 @@ struct NotificationCardView: View {
 
                     if !item.isRead {
                         Circle()
-                            .fill(palette?.primary ?? appModel.currentTheme.accent)
+                            .fill(DoosanPalette.primary)
                             .frame(width: 7, height: 7)
                     }
 
                     Text(item.sentAt.relativeKoreanText)
                         .font(.caption2)
-                        .foregroundStyle(palette?.textSecondary ?? .secondary)
+                        .foregroundStyle(palette.textSecondary)
                 }
 
                 Text(item.body)
                     .font(.subheadline.weight(item.isRead ? .semibold : .bold))
-                    .foregroundStyle(palette?.textPrimary ?? .primary)
+                    .foregroundStyle(palette.textPrimary)
                     .multilineTextAlignment(.leading)
 
                 if !relatedTeams.isEmpty {
@@ -58,24 +58,21 @@ struct NotificationCardView: View {
                             TeamMarkView(team: team, size: 22)
                             Text(team.displayName)
                                 .font(.caption2.weight(.semibold))
-                                .foregroundStyle(palette?.textSecondary ?? .secondary)
+                                .foregroundStyle(palette.textSecondary)
                         }
                     }
                 }
 
                 Text(item.title)
                     .font(.caption)
-                    .foregroundStyle(
-                        palette.map { item.isRead ? $0.textSecondary : $0.textPrimary.opacity(0.84) }
-                            ?? (item.isRead ? Color.secondary : Color.primary.opacity(0.7))
-                    )
+                    .foregroundStyle(item.isRead ? palette.textSecondary : palette.textPrimary.opacity(0.84))
             }
         }
         .cardSurface(
             padding: 12,
             cornerRadius: 18,
-            fillColor: palette.map { item.isRead ? $0.sectionBackground : $0.elevatedCardStrong }
-                ?? (item.isRead ? Color(.secondarySystemBackground) : typeTint.opacity(0.06))
+            fillColor: item.isRead ? palette.sectionBackground : palette.elevatedCardStrong,
+            showsGhostBorder: true
         )
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 18, style: .continuous)

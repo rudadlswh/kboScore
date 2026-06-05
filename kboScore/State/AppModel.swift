@@ -67,6 +67,19 @@ private struct HomeFavoriteGameRefreshKey: Hashable {
     let favoriteTeamID: String
 }
 
+private struct RawSupabaseGameDetailIdentity: Sendable {
+    let supabaseGameID: UUID
+    let providerGameID: String?
+    let publicGameID: String?
+}
+
+struct GameDetailRefreshResult: Sendable {
+    let game: GameDetail
+    let rawSupabaseGameID: UUID?
+    let providerGameID: String?
+    let publicGameID: String?
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -109,6 +122,7 @@ final class AppModel {
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
     private var notifiedGameContentKeys: Set<String> = []
     private var lastFavoriteTeamWidgetSemanticKey: String?
+    private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
 
     var isLoading = false
     var loadErrorMessage: String?
@@ -175,7 +189,7 @@ final class AppModel {
     private var monthlyScheduleRefreshDayKeys: [KBOMonthScheduleKey: String] = [:]
     private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
     private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
-    private var inFlightGameDetailRefreshTasks: [String: Task<GameDetail?, Never>] = [:]
+    private var inFlightGameDetailRefreshTasks: [String: Task<GameDetailRefreshResult?, Never>] = [:]
     private var lastGameDetailRefreshAt: [String: Date] = [:]
     private var inFlightHomeFavoriteGameTasks: [HomeFavoriteGameRefreshKey: Task<Void, Never>] = [:]
     private var lastHomeFavoriteGameRefreshAt: [HomeFavoriteGameRefreshKey: Date] = [:]
@@ -402,7 +416,13 @@ final class AppModel {
             await existingTask.value
             return
         }
-        let shouldThrottleRecentRefresh = reason != "homeRefresh" && reason != "favoriteTeamSelected"
+        let unthrottledReasons: Set<String> = [
+            "homeRefresh",
+            "favoriteTeamSelected",
+            "sceneBackground",
+            "backgroundTask"
+        ]
+        let shouldThrottleRecentRefresh = !unthrottledReasons.contains(reason)
         if shouldThrottleRecentRefresh,
            let refreshedAt = lastHomeFavoriteGameRefreshAt[refreshKey],
            Date().timeIntervalSince(refreshedAt) < 15 {
@@ -477,11 +497,58 @@ final class AppModel {
     }
 
     func refreshTodayOnForeground() async {
-        guard hasLoaded else { return }
-        await refreshFavoriteTeamGameForHome(reason: "foreground", bypassingCache: true)
-        await loadHomeFallbackStandingsSourceIfNeeded(reason: "foreground")
+        await refreshTodayForLiveActivity(reason: "foreground", includeHomeFallback: true)
+    }
+
+    @discardableResult
+    func refreshTodayForBackgroundLiveActivity(reason: String) async -> Bool {
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] start reason=\(reason) localUpdateOnly=true limitation=iOSMaySuspendBeforeLocalUpdateCompletes")
+        #endif
+        let backgroundTaskID = UIApplication.shared.beginBackgroundTask(
+            withName: "LiveActivityBackgroundRefresh"
+        ) {
+            #if DEBUG
+            print("[LiveActivityBackgroundRefresh] expiration reason=\(reason) limitation=iOSRequestedSuspend")
+            #endif
+        }
+        defer {
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            }
+        }
+
+        let didAttemptRefresh = await refreshTodayForLiveActivity(
+            reason: reason,
+            includeHomeFallback: false
+        )
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] completed reason=\(reason) attempted=\(didAttemptRefresh) limitation=localUpdatesNotGuaranteedAfterSuspend")
+        #endif
+        return didAttemptRefresh
+    }
+
+    @discardableResult
+    private func refreshTodayForLiveActivity(reason: String, includeHomeFallback: Bool) async -> Bool {
+        guard hasLoaded else {
+            #if DEBUG
+            print("[LiveActivityBackgroundRefresh] skipped reason=\(reason) appLoaded=false")
+            #endif
+            return false
+        }
+        await refreshFavoriteTeamGameForHome(reason: reason, bypassingCache: true)
+        await refreshTodayGamesFromSupabase(
+            for: currentDateProvider(),
+            monthKey: scheduleMonthKey(for: currentDateProvider()),
+            reason: "liveActivity"
+        )
+        await refreshActiveLiveActivityGameDetailIfNeeded(reason: reason)
+        if includeHomeFallback {
+            await loadHomeFallbackStandingsSourceIfNeeded(reason: reason)
+        }
         await syncFavoriteTeamLiveActivity()
         await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        return true
     }
 
     func refreshMyTeam() async {
@@ -1870,8 +1937,104 @@ final class AppModel {
         }
     }
 
+    func fetchGameDetailDatabaseReview(for game: GameDetail) async -> GameCenterReview? {
+        guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDataSource else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedRepository gameID=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
+        do {
+            return try await recordSource.fetchGameDetailDatabaseReview(for: game)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=fetchFailed gameID=\(game.id.uuidString) error=\(error)")
+            #endif
+            return nil
+        }
+    }
+
+    func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async -> GameDetailDatabaseReviewFetchResult? {
+        if let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
+            do {
+                let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
+                let providerGameID = game.providerGameID ?? rawIdentity?.providerGameID
+                let publicGameID = game.publicGameID ?? rawIdentity?.publicGameID
+                if providerGameID?.nilIfBlank != nil || publicGameID?.nilIfBlank != nil {
+                    #if DEBUG
+                    print("[GameDetailDBRecords] providerResolvedRequest invokedFrom=afterFetchGameSingleProviderResolved localGameId=\(game.id.uuidString) providerGameID=\(providerGameID ?? "<nil>") publicGameID=\(publicGameID ?? "<nil>")")
+                    #endif
+                    return try await recordSource.fetchGameDetailDatabaseReview(
+                        providerGameID: providerGameID,
+                        publicGameID: publicGameID,
+                        invokedFrom: "afterFetchGameSingleProviderResolved"
+                    )
+                }
+                #if DEBUG
+                print("[GameDetailDBRecords] providerResolvedRequest skipped reason=missingProviderAndPublicID localGameId=\(game.id.uuidString)")
+                #endif
+                return try await recordSource.fetchGameDetailDatabaseReviewResult(for: game)
+            } catch is CancellationError {
+                return nil
+            } catch {
+                #if DEBUG
+                print("[GameDetailDBRecords] selectedRecordSource=none reason=fetchFailed gameID=\(game.id.uuidString) error=\(error)")
+                #endif
+                return nil
+            }
+        }
+
+        guard let review = await fetchGameDetailDatabaseReview(for: game) else { return nil }
+        return GameDetailDatabaseReviewFetchResult(
+            review: review,
+            inputLocalGameID: game.id,
+            rawSupabaseGameID: nil,
+            resolvedSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID,
+            publicBatterRawRowCount: review.awayBatting.lines.count + review.homeBatting.lines.count,
+            publicPitcherRawRowCount: review.awayPitching.lines.count + review.homePitching.lines.count,
+            eventRawRowCount: 0
+        )
+    }
+
+    func fetchGameDetailDatabaseReviewResult(
+        rawSupabaseGameID: UUID,
+        providerGameID: String?,
+        publicGameID: String?
+    ) async -> GameDetailDatabaseReviewFetchResult? {
+        guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedRepository rawSupabaseGameId=\(rawSupabaseGameID.uuidString)")
+            #endif
+            return nil
+        }
+        do {
+            return try await recordSource.fetchGameDetailDatabaseReview(
+                supabaseGameId: rawSupabaseGameID,
+                providerGameID: providerGameID,
+                publicGameID: publicGameID,
+                invokedFrom: "afterFetchGameSingleRawSupabaseId"
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=fetchFailed rawSupabaseGameId=\(rawSupabaseGameID.uuidString) error=\(error)")
+            #endif
+            return nil
+        }
+    }
+
     @discardableResult
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
+        await refreshGameDetailResult(for: gameIdentity, forceRefresh: forceRefresh)?.game
+    }
+
+    @discardableResult
+    func refreshGameDetailResult(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetailRefreshResult? {
         guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else {
             #if DEBUG
             debugLogMissingSelectedGame(gameIdentity)
@@ -1891,11 +2054,23 @@ final class AppModel {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(stableRefreshKey) skipped=freshEnough")
             #endif
-            return selectedGame
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.providerGameID ?? selectedGame.providerGameID,
+                publicGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.publicGameID ?? selectedGame.publicGameID
+            )
         }
 
         let task = Task { @MainActor [weak self] in
-            guard let self else { return Optional(selectedGame) }
+            guard let self else {
+                return Optional(GameDetailRefreshResult(
+                    game: selectedGame,
+                    rawSupabaseGameID: nil,
+                    providerGameID: selectedGame.providerGameID,
+                    publicGameID: selectedGame.publicGameID
+                ))
+            }
             return await self.performRefreshGameDetail(
                 selectedGame: selectedGame,
                 gameIdentity: gameIdentity,
@@ -1956,12 +2131,17 @@ final class AppModel {
         selectedGame: GameDetail,
         gameIdentity: String,
         forceRefresh: Bool
-    ) async -> GameDetail? {
+    ) async -> GameDetailRefreshResult? {
         guard let detailSource = repository as? any KBOGameDetailSnapshotDataSource else {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) skipped=unsupportedRepository")
             #endif
-            return selectedGame
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         }
 
         #if DEBUG
@@ -1970,16 +2150,40 @@ final class AppModel {
 
         do {
             let previousKnownGames = allKnownGames()
-            guard let incomingGame = try await detailSource.fetchGameDetailSnapshot(
+            let snapshotResult: GameDetailSnapshotFetchResult?
+            if let resultSource = repository as? any KBOGameDetailSnapshotResultDataSource {
+                snapshotResult = try await resultSource.fetchGameDetailSnapshotResult(
+                    for: selectedGame,
+                    identity: gameIdentity,
+                    cachedTeams: teams
+                )
+            } else if let incomingGame = try await detailSource.fetchGameDetailSnapshot(
                 for: selectedGame,
                 identity: gameIdentity,
                 cachedTeams: teams
-            ) else {
+            ) {
+                snapshotResult = GameDetailSnapshotFetchResult(
+                    game: incomingGame,
+                    rawSupabaseGameID: nil,
+                    providerGameID: incomingGame.providerGameID,
+                    publicGameID: incomingGame.publicGameID
+                )
+            } else {
+                snapshotResult = nil
+            }
+
+            guard let snapshotResult else {
                 #if DEBUG
                 print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) fetched count=0 sharedUpdated=false")
                 #endif
-                return selectedGame
+                return GameDetailRefreshResult(
+                    game: selectedGame,
+                    rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                    providerGameID: selectedGame.providerGameID,
+                    publicGameID: selectedGame.publicGameID
+                )
             }
+            let incomingGame = snapshotResult.game
 
             let upsertResult = upsertScheduleGamesIntoLocalStore([incomingGame])
             let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([incomingGame])
@@ -1987,6 +2191,7 @@ final class AppModel {
             let resolved = game(withIdentity: incomingGame.canonicalGameIdentityValue) ??
                 game(withIdentity: gameIdentity) ??
                 incomingGame
+            recordRawSupabaseGameDetailIdentity(snapshotResult, selectedGame: selectedGame, incomingGame: incomingGame, resolvedGame: resolved, requestedIdentity: gameIdentity)
             let sharedUpdated = upsertResult.inserted > 0 ||
                 upsertResult.updated > 0 ||
                 cacheUpsertResult.inserted > 0 ||
@@ -1998,18 +2203,86 @@ final class AppModel {
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await syncFavoriteTeamLiveActivity()
             await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
-            return resolved
+            return GameDetailRefreshResult(
+                game: resolved,
+                rawSupabaseGameID: snapshotResult.rawSupabaseGameID,
+                providerGameID: snapshotResult.providerGameID ?? resolved.providerGameID,
+                publicGameID: snapshotResult.publicGameID ?? resolved.publicGameID
+            )
         } catch is CancellationError {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) cancelled=true")
             #endif
-            return selectedGame
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         } catch {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) failed error=\(error)")
             #endif
-            return selectedGame
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         }
+    }
+
+    private func recordRawSupabaseGameDetailIdentity(
+        _ result: GameDetailSnapshotFetchResult,
+        selectedGame: GameDetail,
+        incomingGame: GameDetail,
+        resolvedGame: GameDetail,
+        requestedIdentity: String
+    ) {
+        guard let rawSupabaseGameID = result.rawSupabaseGameID else { return }
+        let identity = RawSupabaseGameDetailIdentity(
+            supabaseGameID: rawSupabaseGameID,
+            providerGameID: result.providerGameID ?? incomingGame.providerGameID ?? resolvedGame.providerGameID,
+            publicGameID: result.publicGameID ?? incomingGame.publicGameID ?? resolvedGame.publicGameID
+        )
+        let keys = [
+            requestedIdentity,
+            selectedGame.id.uuidString,
+            selectedGame.stableDetailIdentity,
+            selectedGame.canonicalGameIdentityValue,
+            incomingGame.id.uuidString,
+            incomingGame.stableDetailIdentity,
+            incomingGame.canonicalGameIdentityValue,
+            resolvedGame.id.uuidString,
+            resolvedGame.stableDetailIdentity,
+            resolvedGame.canonicalGameIdentityValue,
+            incomingGame.providerGameID.map { "provider:\($0)" },
+            resolvedGame.providerGameID.map { "provider:\($0)" },
+            incomingGame.publicGameID.map { "public:\($0)" },
+            resolvedGame.publicGameID.map { "public:\($0)" }
+        ].compactMap { $0?.nilIfBlank }
+        for key in Set(keys) {
+            rawSupabaseGameDetailIdentities[key] = identity
+        }
+        #if DEBUG
+        print("[GameDetailDBRecords] rawSupabaseGameId cached localGameId=\(selectedGame.id.uuidString) rawSupabaseGameId=\(rawSupabaseGameID.uuidString) providerGameID=\(identity.providerGameID ?? "<nil>") publicGameID=\(identity.publicGameID ?? "<nil>")")
+        #endif
+    }
+
+    private func rawSupabaseGameDetailIdentity(for game: GameDetail) -> RawSupabaseGameDetailIdentity? {
+        let keys = [
+            game.id.uuidString,
+            game.stableDetailIdentity,
+            game.canonicalGameIdentityValue,
+            game.providerGameID.map { "provider:\($0)" },
+            game.publicGameID.map { "public:\($0)" }
+        ].compactMap { $0?.nilIfBlank }
+        for key in keys {
+            if let identity = rawSupabaseGameDetailIdentities[key] {
+                return identity
+            }
+        }
+        return nil
     }
 
     func gameNavigationIdentity(for game: GameDetail) -> String {
@@ -3351,6 +3624,21 @@ final class AppModel {
         }
     }
 
+    private func refreshActiveLiveActivityGameDetailIfNeeded(reason: String) async {
+        guard let activeLiveActivityGameID,
+              let activeGame = game(withID: activeLiveActivityGameID) else {
+            return
+        }
+
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] activeGameDetailRefresh start reason=\(reason) gameID=\(activeLiveActivityGameID.uuidString)")
+        #endif
+        _ = await refreshGameDetailResult(
+            for: activeGame.canonicalGameIdentityValue,
+            forceRefresh: true
+        )
+    }
+
     private func syncFavoriteTeamLiveActivity() async {
         liveActivitySupported = liveActivityController.isSupported
 
@@ -4290,4 +4578,11 @@ private enum ScheduleStartupSyncState {
     case inFlight(Task<Void, Never>)
     case completed
     case failedButDoNotRetryAutomatically
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

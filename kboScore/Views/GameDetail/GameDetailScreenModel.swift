@@ -11,19 +11,24 @@ import Observation
 
 enum GameDetailSection: String, CaseIterable, Identifiable {
     case overview = "개요"
-    case review = "리뷰"
-    case preview = "프리뷰"
 
     var id: String { rawValue }
 
-    static func availableSections(for status: GameStatus) -> [GameDetailSection] {
+    static func availableSections(for _: GameStatus) -> [GameDetailSection] {
+        [.overview]
+    }
+}
+
+nonisolated enum GameDetailOverviewContentKind: Equatable, Sendable {
+    case preview
+    case overview
+
+    static func contentKind(for status: GameStatus) -> GameDetailOverviewContentKind {
         switch status {
         case .upcoming:
-            [.overview, .preview]
-        case .live, .rainDelay:
-            [.overview, .preview]
-        case .final, .cancelled:
-            [.overview, .review]
+            .preview
+        case .live, .rainDelay, .final, .cancelled:
+            .overview
         }
     }
 }
@@ -47,6 +52,7 @@ final class GameDetailScreenModel {
     private static var recentFailedOfficialFallbacks: [String: Date] = [:]
 
     private let fetchDetail: @Sendable (GameDetail) async throws -> GameCenterDetailPayload?
+    private let fetchDatabaseRecordReview: (@Sendable (GameDetail) async -> GameCenterReview?)?
     private let fetchOfficialRecordFallback: @Sendable (GameDetail) async throws -> GameCenterReview?
     private let boxscoreClient: any GameBoxscoreFetching
     private var lastLoadedGameKey: String?
@@ -61,10 +67,10 @@ final class GameDetailScreenModel {
     private var boxscoreLoadTask: Task<Void, Never>?
     private var officialFallbackLoadTask: Task<Void, Never>?
 
-    var selectedSection: GameDetailSection = .overview
     var detail: GameCenterDetailPayload?
     var cachedLineScore: GameCenterLineScore?
     var boxscore: GameBoxscoreResponse?
+    var databaseRecordReview: GameCenterReview?
     var officialFallbackReview: GameCenterReview?
     var isLoading = false
     var errorMessage: String?
@@ -75,25 +81,25 @@ final class GameDetailScreenModel {
         client: OfficialKBOGameCenterClient? = nil,
         boxscoreClient: (any GameBoxscoreFetching)? = nil,
         fetchDetail: (@Sendable (GameDetail) async throws -> GameCenterDetailPayload?)? = nil,
+        fetchDatabaseRecordReview: (@Sendable (GameDetail) async -> GameCenterReview?)? = nil,
         fetchOfficialRecordFallback: (@Sendable (GameDetail) async throws -> GameCenterReview?)? = nil
     ) {
         let resolvedClient = client ?? OfficialKBOGameCenterClient()
         self.fetchDetail = fetchDetail ?? { game in
-            try await resolvedClient.fetchDetail(for: game, includeRecordFallback: game.status.isLiveLike)
+            try await resolvedClient.fetchDetail(for: game, includeRecordFallback: false)
         }
+        self.fetchDatabaseRecordReview = fetchDatabaseRecordReview
         self.fetchOfficialRecordFallback = fetchOfficialRecordFallback ?? { game in
             try await resolvedClient.fetchRecordFallbackReview(for: game)
         }
         self.boxscoreClient = boxscoreClient ?? GameBoxscoreClientFactory.makeAppClient()
     }
 
-    func syncSelection(for status: GameStatus) {
-        let availableSections = GameDetailSection.availableSections(for: status)
-        guard availableSections.contains(selectedSection) == false else { return }
-        selectedSection = availableSections.contains(.preview) ? .preview : .review
-    }
-
-    func load(for game: GameDetail, forceRefresh: Bool = false) async {
+    func load(
+        for game: GameDetail,
+        forceRefresh: Bool = false,
+        fetchDatabaseRecordReview: (@Sendable (GameDetail) async -> GameCenterReview?)? = nil
+    ) async {
         let gameKey = [
             game.id.uuidString,
             game.officialGameCenterID ?? "",
@@ -101,6 +107,11 @@ final class GameDetailScreenModel {
             game.status.rawValue
         ].joined(separator: "::")
         guard forceRefresh || lastLoadedGameKey != gameKey else { return }
+        let previousGame = currentGame
+        let previousDatabaseRecordReview = databaseRecordReview
+        let shouldPreserveExistingDatabaseReview =
+            previousDatabaseRecordReview?.hasDisplayableRecords == true &&
+            previousGame?.stableDetailIdentity == game.stableDetailIdentity
         currentGame = game
 
         #if DEBUG
@@ -112,28 +123,102 @@ final class GameDetailScreenModel {
         hasAttemptedLoad = true
 
         officialFallbackReview = nil
+        if shouldPreserveExistingDatabaseReview == false {
+            databaseRecordReview = nil
+        }
         if cachedLineScoreGameKey != gameKey {
             cachedLineScore = nil
         }
         scheduleBoxscoreLoadIfNeeded(for: game, forceRefresh: forceRefresh)
 
+        let databaseReviewFetcher = fetchDatabaseRecordReview ?? self.fetchDatabaseRecordReview
+        async let fetchedDatabaseReview = loadDatabaseRecordReviewIfNeeded(
+            for: game,
+            fetcher: databaseReviewFetcher
+        )
         let fetchedDetail = await loadDetailPayload(for: game, gameKey: gameKey)
+        let loadedDatabaseRecordReview = await fetchedDatabaseReview
+        if loadedDatabaseRecordReview?.hasDisplayableRecords == true {
+            databaseRecordReview = loadedDatabaseRecordReview
+        } else if shouldPreserveExistingDatabaseReview {
+            databaseRecordReview = previousDatabaseRecordReview
+        } else {
+            databaseRecordReview = nil
+        }
         detail = fetchedDetail
+        if databaseRecordReview?.hasDisplayableRecords == true {
+            cancelOfficialFallbackLoad()
+        }
         if let lineScore = fetchedDetail?.lineScore {
             cachedLineScore = lineScore
             cachedLineScoreGameKey = gameKey
         }
         lastLoadedGameKey = gameKey
         if game.status.isLiveLike {
-            if fetchedDetail?.review?.hasDisplayableRecords != true {
+            if databaseRecordReview?.hasDisplayableRecords != true &&
+                fetchedDetail?.review?.hasDisplayableRecords != true {
                 scheduleOfficialRecordFallbackIfNeeded(for: game, forceRefresh: forceRefresh)
             }
             #if DEBUG
-            print("[GameDetailLive] load result status=\(game.status.rawValue) lineScorePresent=\((fetchedDetail?.lineScore ?? cachedLineScore) != nil) liveRecordPresent=\((fetchedDetail?.review?.hasDisplayableRecords == true) || (officialFallbackReview?.hasDisplayableRecords == true))")
+            print("[GameDetailLive] load result status=\(game.status.rawValue) lineScorePresent=\((fetchedDetail?.lineScore ?? cachedLineScore) != nil) liveRecordPresent=\((databaseRecordReview?.hasDisplayableRecords == true) || (fetchedDetail?.review?.hasDisplayableRecords == true) || (officialFallbackReview?.hasDisplayableRecords == true)) selectedRecordSource=\(databaseRecordReview?.recordSource.rawValue ?? fetchedDetail?.review?.recordSource.rawValue ?? officialFallbackReview?.recordSource.rawValue ?? "none")")
             #endif
         }
 
         isLoading = false
+    }
+
+    private func loadDatabaseRecordReviewIfNeeded(
+        for game: GameDetail,
+        fetcher: (@Sendable (GameDetail) async -> GameCenterReview?)?
+    ) async -> GameCenterReview? {
+        guard game.status == .final || game.status.isLiveLike,
+              let fetcher else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedOrNotRecordStatus status=\(game.status.rawValue) gameID=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
+        let review = await fetcher(game)
+        #if DEBUG
+        let batterCount = (review?.awayBatting.lines.count ?? 0) + (review?.homeBatting.lines.count ?? 0)
+        let pitcherCount = (review?.awayPitching.lines.count ?? 0) + (review?.homePitching.lines.count ?? 0)
+        print("[GameDetailDBRecords] selectedRecordSource=\(review?.recordSource.rawValue ?? "none") mappedBatterCount=\(batterCount) mappedPitcherCount=\(pitcherCount)")
+        #endif
+        return review?.hasDisplayableRecords == true ? review : nil
+    }
+
+    func mergeDatabaseRecordReviewAfterFetchGameSingle(
+        inputLocalGameId: UUID,
+        resolvedGame: GameDetail,
+        rawSupabaseGameID: UUID? = nil,
+        rawSupabaseProviderGameID: String? = nil,
+        rawSupabasePublicGameID: String? = nil,
+        fetchDatabaseRecordReviewResult: @Sendable (GameDetail) async -> GameDetailDatabaseReviewFetchResult?,
+        fetchDatabaseRecordReviewResultByRawSupabaseID: @Sendable (UUID, String?, String?) async -> GameDetailDatabaseReviewFetchResult?
+    ) async {
+        guard resolvedGame.status == .final || resolvedGame.status.isLiveLike else { return }
+        currentGame = resolvedGame
+        let previousRecordSource = selectedRecordSourceDebugValue
+        let result = await fetchDatabaseRecordReviewResult(resolvedGame)
+        let review = result?.review
+        let hasMappedRows = (result?.mappedBatterCount ?? 0) > 0 || (result?.mappedPitcherCount ?? 0) > 0
+        if let review, review.hasDisplayableRecords, hasMappedRows {
+            databaseRecordReview = review
+            cancelOfficialFallbackLoad()
+        }
+        #if DEBUG
+        print("[GameDetailDBRecords] invokedFrom=afterFetchGameSingleProviderResolved localGameId=\(inputLocalGameId.uuidString)")
+        print("[GameDetailDBRecords] rawSupabaseGameId=\(result?.rawSupabaseGameID?.uuidString ?? result?.resolvedSupabaseGameID?.uuidString ?? "<nil>") providerGameID=\(result?.providerGameID ?? resolvedGame.providerGameID ?? "<nil>") publicGameID=\(result?.publicGameID ?? resolvedGame.publicGameID ?? "<nil>")")
+        print("[GameDetailDBRecords] publicBatterRawRowCount=\(result?.publicBatterRawRowCount ?? 0) publicPitcherRawRowCount=\(result?.publicPitcherRawRowCount ?? 0) eventRawRowCount=\(result?.eventRawRowCount ?? 0)")
+        print("[GameDetailDBRecords] mappedBatterCount=\(result?.mappedBatterCount ?? 0) mappedPitcherCount=\(result?.mappedPitcherCount ?? 0) previousRecordSource=\(previousRecordSource) finalRecordSource=\(selectedRecordSourceDebugValue)")
+        #endif
+    }
+
+    private var selectedRecordSourceDebugValue: String {
+        databaseRecordReview?.recordSource.rawValue ??
+            detail?.review?.recordSource.rawValue ??
+            officialFallbackReview?.recordSource.rawValue ??
+            "none"
     }
 
     private func loadDetailPayload(for game: GameDetail, gameKey: String) async -> GameCenterDetailPayload? {
@@ -257,6 +342,10 @@ final class GameDetailScreenModel {
 
     private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final || game.status.isLiveLike else { return }
+        guard databaseRecordReview?.hasDisplayableRecords != true else {
+            cancelOfficialFallbackLoad()
+            return
+        }
         guard boxscore?.hasRecords != true else {
             cancelOfficialFallbackLoad()
             return
@@ -311,6 +400,10 @@ final class GameDetailScreenModel {
         lastLoadedOfficialFallbackGameKey = cacheKey
         guard activeOfficialFallbackGameKey == cacheKey,
               boxscore?.hasRecords != true else { return }
+        guard databaseRecordReview?.hasDisplayableRecords != true else {
+            cancelOfficialFallbackLoad()
+            return
+        }
 
         if let fetchedReview, fetchedReview.hasDisplayableRecords {
             Self.cachedOfficialFallbackReviews[cacheKey] = (Date(), fetchedReview)
@@ -383,8 +476,8 @@ private extension String {
 final class GameDetailViewModel: ObservableObject {
     private static let automaticRefreshInterval: TimeInterval = 12
     private static let automaticRefreshStableIdentityThrottle: TimeInterval = 8
-    private static var inFlightRefreshesByStableIdentity: [String: Task<GameDetail?, Never>] = [:]
-    private static var recentAutomaticRefreshesByStableIdentity: [String: (date: Date, game: GameDetail)] = [:]
+    private static var inFlightRefreshesByStableIdentity: [String: Task<GameDetailRefreshResult?, Never>] = [:]
+    private static var recentAutomaticRefreshesByStableIdentity: [String: (date: Date, result: GameDetailRefreshResult)] = [:]
     static let livePollingIntervalNanoseconds: UInt64 = 12_000_000_000
 
     private let requestedIdentity: String
@@ -396,6 +489,9 @@ final class GameDetailViewModel: ObservableObject {
     @Published private(set) var isResolvingInitialGame: Bool
     @Published private(set) var hasAttemptedInitialResolution: Bool
     @Published private(set) var baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
+    @Published private(set) var rawSupabaseGameID: UUID?
+    @Published private(set) var rawSupabaseProviderGameID: String?
+    @Published private(set) var rawSupabasePublicGameID: String?
 
     var shouldAutoRefreshLiveGame: Bool {
         game?.status.isLiveLike == true
@@ -461,10 +557,10 @@ final class GameDetailViewModel: ObservableObject {
                 isResolvingInitialGame = false
                 hasAttemptedInitialResolution = true
             }
-            let fetched = await appModel.refreshGameDetail(for: requestedIdentity, forceRefresh: manual)
+            let fetched = await appModel.refreshGameDetailResult(for: requestedIdentity, forceRefresh: manual)
             if let fetched {
                 apply(fetched)
-                return fetched
+                return fetched.game
             }
             return nil
         }
@@ -479,8 +575,8 @@ final class GameDetailViewModel: ObservableObject {
 
             if let recentRefresh = Self.recentAutomaticRefreshesByStableIdentity[refreshIdentity],
                Date().timeIntervalSince(recentRefresh.date) < Self.automaticRefreshStableIdentityThrottle {
-                if recentRefresh.game != game {
-                    apply(recentRefresh.game)
+                if recentRefresh.result.game != game {
+                    apply(recentRefresh.result)
                 }
                 #if DEBUG
                 print("GameDetailFetch skipped recent stableIdentity=\(refreshIdentity)")
@@ -495,7 +591,7 @@ final class GameDetailViewModel: ObservableObject {
             #endif
             if let fetched = await inFlightRefresh.value {
                 apply(fetched)
-                return fetched
+                return fetched.game
             }
             return game
         }
@@ -508,18 +604,31 @@ final class GameDetailViewModel: ObservableObject {
         print("GameDetailFetch start stableIdentity=\(refreshIdentity)")
         #endif
         let task = Task { @MainActor in
-            await appModel.refreshGameDetail(for: refreshIdentity, forceRefresh: manual)
+            await appModel.refreshGameDetailResult(for: refreshIdentity, forceRefresh: manual)
         }
         Self.inFlightRefreshesByStableIdentity[refreshIdentity] = task
         let fetched = await task.value
         Self.inFlightRefreshesByStableIdentity[refreshIdentity] = nil
         if manual == false {
-            Self.recentAutomaticRefreshesByStableIdentity[refreshIdentity] = (Date(), fetched ?? currentGame)
+            let cachedResult = fetched ?? GameDetailRefreshResult(
+                game: currentGame,
+                rawSupabaseGameID: rawSupabaseGameID,
+                providerGameID: rawSupabaseProviderGameID ?? currentGame.providerGameID,
+                publicGameID: rawSupabasePublicGameID ?? currentGame.publicGameID
+            )
+            Self.recentAutomaticRefreshesByStableIdentity[refreshIdentity] = (Date(), cachedResult)
         }
         if let fetched {
             apply(fetched)
         }
-        return fetched ?? game
+        return fetched?.game ?? game
+    }
+
+    private func apply(_ fetched: GameDetailRefreshResult) {
+        rawSupabaseGameID = fetched.rawSupabaseGameID
+        rawSupabaseProviderGameID = fetched.providerGameID
+        rawSupabasePublicGameID = fetched.publicGameID
+        apply(fetched.game)
     }
 
     private func apply(_ fetched: GameDetail) {

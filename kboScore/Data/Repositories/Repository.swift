@@ -117,11 +117,65 @@ protocol KBOGameDetailSnapshotDataSource: Sendable {
     ) async throws -> GameDetail?
 }
 
+struct GameDetailSnapshotFetchResult: Sendable {
+    let game: GameDetail
+    let rawSupabaseGameID: UUID?
+    let providerGameID: String?
+    let publicGameID: String?
+}
+
+protocol KBOGameDetailSnapshotResultDataSource: KBOGameDetailSnapshotDataSource {
+    nonisolated func fetchGameDetailSnapshotResult(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetailSnapshotFetchResult?
+}
+
 protocol KBOGameIdentityResolutionDataSource: Sendable {
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
     ) async throws -> GameDetail?
+}
+
+protocol KBOGameDetailDatabaseRecordDataSource: Sendable {
+    nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview?
+}
+
+struct GameDetailDatabaseReviewFetchResult: Sendable {
+    let review: GameCenterReview?
+    let inputLocalGameID: UUID
+    let rawSupabaseGameID: UUID?
+    let resolvedSupabaseGameID: UUID?
+    let providerGameID: String?
+    let publicGameID: String?
+    let publicBatterRawRowCount: Int
+    let publicPitcherRawRowCount: Int
+    let eventRawRowCount: Int
+
+    var mappedBatterCount: Int {
+        (review?.awayBatting.lines.count ?? 0) + (review?.homeBatting.lines.count ?? 0)
+    }
+
+    var mappedPitcherCount: Int {
+        (review?.awayPitching.lines.count ?? 0) + (review?.homePitching.lines.count ?? 0)
+    }
+}
+
+protocol KBOGameDetailDatabaseRecordDiagnosticDataSource: KBOGameDetailDatabaseRecordDataSource {
+    nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult?
+    nonisolated func fetchGameDetailDatabaseReview(
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult?
+    nonisolated func fetchGameDetailDatabaseReview(
+        supabaseGameId: UUID,
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult?
 }
 
 struct KBOScheduleMissingGamesResult: Sendable {

@@ -14,6 +14,13 @@ nonisolated struct SupabaseConfiguration: Sendable {
     let publishableKey: String
 }
 
+private extension Array where Element == SupabaseGameBatterRecordRow {
+    func total(_ keyPath: KeyPath<SupabaseGameBatterRecordRow, Int?>) -> Int? {
+        let values = compactMap { $0[keyPath: keyPath] }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+}
+
 nonisolated struct SupabaseTeamRow: Decodable, Sendable {
     let id: UUID
     let code: String
@@ -206,6 +213,120 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     }
 }
 
+struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
+    let id: UUID?
+    let gameID: UUID
+    let teamID: UUID
+    let sourceOrder: Int?
+    let battingOrder: Int?
+    let position: String?
+    let playerName: String
+    let atBats: Int?
+    let runs: Int?
+    let hits: Int?
+    let rbi: Int?
+    let homeRuns: Int?
+    let walks: Int?
+    let strikeouts: Int?
+    let stolenBases: Int?
+    let groundedIntoDoublePlay: Int?
+    let errors: Int?
+    let battingAverage: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case gameID = "game_id"
+        case teamID = "team_id"
+        case sourceOrder = "source_order"
+        case battingOrder = "batting_order"
+        case position
+        case playerName = "player_name"
+        case atBats = "at_bats"
+        case runs
+        case hits
+        case rbi
+        case homeRuns = "home_runs"
+        case walks
+        case strikeouts
+        case stolenBases = "stolen_bases"
+        case groundedIntoDoublePlay = "grounded_into_double_play"
+        case errors
+        case battingAverage = "batting_average"
+    }
+}
+
+struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
+    let id: UUID?
+    let gameID: UUID
+    let teamID: UUID
+    let sourceOrder: Int?
+    let pitchingOrder: Int?
+    let playerName: String
+    let appearance: String?
+    let decisionResult: String?
+    let wins: Int?
+    let losses: Int?
+    let saves: Int?
+    let inningsPitched: String?
+    let battersFaced: Int?
+    let pitchCount: Int?
+    let atBats: Int?
+    let hits: Int?
+    let homeRuns: Int?
+    let walksOrHitByPitch: Int?
+    let strikeouts: Int?
+    let runs: Int?
+    let earnedRuns: Int?
+    let era: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case gameID = "game_id"
+        case teamID = "team_id"
+        case sourceOrder = "source_order"
+        case pitchingOrder = "pitching_order"
+        case playerName = "player_name"
+        case appearance
+        case decisionResult = "decision_result"
+        case wins
+        case losses
+        case saves
+        case inningsPitched = "innings_pitched"
+        case battersFaced = "batters_faced"
+        case pitchCount = "pitch_count"
+        case atBats = "at_bats"
+        case hits
+        case homeRuns = "home_runs"
+        case walksOrHitByPitch = "walks_or_hit_by_pitch"
+        case strikeouts
+        case runs
+        case earnedRuns = "earned_runs"
+        case era
+    }
+}
+
+struct SupabaseGameEventRow: Decodable, Sendable, Equatable {
+    let id: UUID?
+    let gameID: UUID
+    let providerEventID: String?
+    let sequenceNumber: Int
+    let inning: Int?
+    let inningHalf: String?
+    let eventType: String?
+    let eventText: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case gameID = "game_id"
+        case providerEventID = "provider_event_id"
+        case sequenceNumber = "sequence_number"
+        case inning
+        case inningHalf = "inning_half"
+        case eventType = "event_type"
+        case eventText = "event_text"
+    }
+}
+
 nonisolated private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
     let stringValue: String
     let intValue: Int?
@@ -303,6 +424,153 @@ nonisolated enum SupabaseKBOMapper {
             games: mapGames(gameRows: gameRows, teamRows: teamRows),
             notifications: notifications,
             settings: settings
+        )
+    }
+
+    @MainActor
+    static func mapDetailedRecordReview(
+        game: GameDetail,
+        recordGameID: UUID? = nil,
+        awayTeamDatabaseID: UUID,
+        homeTeamDatabaseID: UUID,
+        batterRows: [SupabaseGameBatterRecordRow],
+        pitcherRows: [SupabaseGamePitcherRecordRow],
+        eventRows: [SupabaseGameEventRow] = []
+    ) -> GameCenterReview? {
+        let resolvedRecordGameID = recordGameID ?? game.id
+        let awayBatters = sortedBatterRows(
+            batterRows.filter { $0.gameID == resolvedRecordGameID && $0.teamID == awayTeamDatabaseID }
+        )
+        let homeBatters = sortedBatterRows(
+            batterRows.filter { $0.gameID == resolvedRecordGameID && $0.teamID == homeTeamDatabaseID }
+        )
+        let awayPitchers = sortedPitcherRows(
+            pitcherRows.filter { $0.gameID == resolvedRecordGameID && $0.teamID == awayTeamDatabaseID }
+        )
+        let homePitchers = sortedPitcherRows(
+            pitcherRows.filter { $0.gameID == resolvedRecordGameID && $0.teamID == homeTeamDatabaseID }
+        )
+
+        guard awayBatters.isEmpty == false ||
+            homeBatters.isEmpty == false ||
+            awayPitchers.isEmpty == false ||
+            homePitchers.isEmpty == false ||
+            eventRows.isEmpty == false else {
+            return nil
+        }
+
+        return GameCenterReview(
+            summaryItems: gameCenterSummaryItems(awayBatters: awayBatters, homeBatters: homeBatters),
+            awayBatting: GameCenterBattingSection(lines: awayBatters.map(mapBatterRecord), totals: nil),
+            homeBatting: GameCenterBattingSection(lines: homeBatters.map(mapBatterRecord), totals: nil),
+            awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(mapPitcherRecord)),
+            homePitching: GameCenterPitchingSection(lines: homePitchers.map(mapPitcherRecord)),
+            recordSource: .dbLiveTextRecords
+        )
+    }
+
+    @MainActor
+    private static func gameCenterSummaryItems(
+        awayBatters: [SupabaseGameBatterRecordRow],
+        homeBatters: [SupabaseGameBatterRecordRow]
+    ) -> [GameCenterSummaryItem] {
+        [
+            teamTotalSummaryItem(title: "도루", away: awayBatters.total(\.stolenBases), home: homeBatters.total(\.stolenBases)),
+            teamTotalSummaryItem(title: "병살타", away: awayBatters.total(\.groundedIntoDoublePlay), home: homeBatters.total(\.groundedIntoDoublePlay)),
+            teamTotalSummaryItem(title: "실책", away: awayBatters.total(\.errors), home: homeBatters.total(\.errors))
+        ].compactMap { $0 }
+    }
+
+    @MainActor
+    private static func teamTotalSummaryItem(title: String, away: Int?, home: Int?) -> GameCenterSummaryItem? {
+        guard away != nil || home != nil else { return nil }
+        let awayValue = String(away ?? 0)
+        let homeValue = String(home ?? 0)
+        return GameCenterSummaryItem(title: title, value: "\(awayValue) - \(homeValue)", values: [awayValue, homeValue])
+    }
+
+    @MainActor
+    private static func sortedBatterRows(
+        _ rows: [SupabaseGameBatterRecordRow]
+    ) -> [SupabaseGameBatterRecordRow] {
+        return rows.sorted { lhs, rhs in
+            let lhsSourceOrder = lhs.sourceOrder ?? Int.max
+            let rhsSourceOrder = rhs.sourceOrder ?? Int.max
+            if lhsSourceOrder != rhsSourceOrder {
+                return lhsSourceOrder < rhsSourceOrder
+            }
+            let lhsBattingOrder = lhs.battingOrder ?? Int.max
+            let rhsBattingOrder = rhs.battingOrder ?? Int.max
+            if lhsBattingOrder != rhsBattingOrder {
+                return lhsBattingOrder < rhsBattingOrder
+            }
+            if lhs.playerName != rhs.playerName {
+                return lhs.playerName < rhs.playerName
+            }
+            return false
+        }
+    }
+
+    @MainActor
+    private static func sortedPitcherRows(
+        _ rows: [SupabaseGamePitcherRecordRow]
+    ) -> [SupabaseGamePitcherRecordRow] {
+        return rows.sorted { lhs, rhs in
+            let lhsPitchingOrder = lhs.pitchingOrder ?? Int.max
+            let rhsPitchingOrder = rhs.pitchingOrder ?? Int.max
+            if lhsPitchingOrder != rhsPitchingOrder {
+                return lhsPitchingOrder < rhsPitchingOrder
+            }
+            let lhsSourceOrder = lhs.sourceOrder ?? Int.max
+            let rhsSourceOrder = rhs.sourceOrder ?? Int.max
+            if lhsSourceOrder != rhsSourceOrder {
+                return lhsSourceOrder < rhsSourceOrder
+            }
+            if lhs.playerName != rhs.playerName {
+                return lhs.playerName < rhs.playerName
+            }
+            return false
+        }
+    }
+
+    @MainActor
+    private static func mapBatterRecord(_ row: SupabaseGameBatterRecordRow) -> GameCenterBattingLine {
+        GameCenterBattingLine(
+            battingOrder: row.battingOrder.map(String.init) ?? "",
+            position: row.position?.nilIfBlank ?? "",
+            name: row.playerName,
+            atBats: row.atBats.map(String.init),
+            runs: row.runs.map(String.init),
+            hits: row.hits.map(String.init),
+            runsBattedIn: row.rbi.map(String.init),
+            homeRuns: row.homeRuns.map(String.init),
+            walks: row.walks.map(String.init),
+            strikeouts: row.strikeouts.map(String.init),
+            stolenBases: row.stolenBases.map(String.init),
+            average: nil
+        )
+    }
+
+    @MainActor
+    private static func mapPitcherRecord(_ row: SupabaseGamePitcherRecordRow) -> GameCenterPitchingLine {
+        GameCenterPitchingLine(
+            pitchingOrder: row.pitchingOrder.map(String.init),
+            name: row.playerName,
+            role: row.appearance?.nilIfBlank,
+            result: row.decisionResult?.nilIfBlank,
+            innings: row.inningsPitched?.nilIfBlank,
+            battersFaced: row.battersFaced.map(String.init),
+            pitches: row.pitchCount.map(String.init),
+            atBats: row.atBats.map(String.init),
+            hitsAllowed: row.hits.map(String.init),
+            walksAllowed: nil,
+            hitBatters: nil,
+            walksOrHitByPitch: row.walksOrHitByPitch.map(String.init),
+            strikeouts: row.strikeouts.map(String.init),
+            homeRunsAllowed: row.homeRuns.map(String.init),
+            runsAllowed: row.runs.map(String.init),
+            earnedRuns: row.earnedRuns.map(String.init),
+            earnedRunAverage: nil
         )
     }
 

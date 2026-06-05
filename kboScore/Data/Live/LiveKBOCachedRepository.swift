@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameIdentityResolutionDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -151,6 +151,33 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamS
         return try await detailSource.fetchGameDetailSnapshot(for: game, identity: identity, cachedTeams: cachedTeams)
     }
 
+    nonisolated func fetchGameDetailSnapshotResult(
+        for game: GameDetail,
+        identity: String,
+        cachedTeams: [Team]
+    ) async throws -> GameDetailSnapshotFetchResult? {
+        if let detailSource = base as? any KBOGameDetailSnapshotResultDataSource {
+            return try await detailSource.fetchGameDetailSnapshotResult(
+                for: game,
+                identity: identity,
+                cachedTeams: cachedTeams
+            )
+        }
+        guard let game = try await fetchGameDetailSnapshot(
+            for: game,
+            identity: identity,
+            cachedTeams: cachedTeams
+        ) else {
+            return nil
+        }
+        return GameDetailSnapshotFetchResult(
+            game: game,
+            rawSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID
+        )
+    }
+
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
@@ -159,6 +186,65 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamS
             return nil
         }
         return try await identitySource.fetchGameDetailIdentitySnapshot(identity: identity, cachedTeams: cachedTeams)
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
+        guard let recordSource = base as? any KBOGameDetailDatabaseRecordDataSource else {
+            return nil
+        }
+        return try await recordSource.fetchGameDetailDatabaseReview(for: game)
+    }
+
+    nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
+        if let recordSource = base as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
+            return try await recordSource.fetchGameDetailDatabaseReviewResult(for: game)
+        }
+        guard let review = try await fetchGameDetailDatabaseReview(for: game) else {
+            return nil
+        }
+        return GameDetailDatabaseReviewFetchResult(
+            review: review,
+            inputLocalGameID: game.id,
+            rawSupabaseGameID: nil,
+            resolvedSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID,
+            publicBatterRawRowCount: review.awayBatting.lines.count + review.homeBatting.lines.count,
+            publicPitcherRawRowCount: review.awayPitching.lines.count + review.homePitching.lines.count,
+            eventRawRowCount: 0
+        )
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        guard let recordSource = base as? any KBOGameDetailDatabaseRecordDiagnosticDataSource else {
+            return nil
+        }
+        return try await recordSource.fetchGameDetailDatabaseReview(
+            providerGameID: providerGameID,
+            publicGameID: publicGameID,
+            invokedFrom: invokedFrom
+        )
+    }
+
+    nonisolated func fetchGameDetailDatabaseReview(
+        supabaseGameId: UUID,
+        providerGameID: String?,
+        publicGameID: String?,
+        invokedFrom: String
+    ) async throws -> GameDetailDatabaseReviewFetchResult? {
+        guard let recordSource = base as? any KBOGameDetailDatabaseRecordDiagnosticDataSource else {
+            return nil
+        }
+        return try await recordSource.fetchGameDetailDatabaseReview(
+            supabaseGameId: supabaseGameId,
+            providerGameID: providerGameID,
+            publicGameID: publicGameID,
+            invokedFrom: invokedFrom
+        )
     }
 
     nonisolated func fetchRemoteGameCount() async throws -> Int {

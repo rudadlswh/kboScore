@@ -39,6 +39,20 @@ struct kboScoreTests {
         #expect(KBOInningFormatter.korean(nil) == nil)
     }
 
+    @Test func gameDetailOnlyExposesOverviewSection() throws {
+        for status in GameStatus.allCases {
+            #expect(GameDetailSection.availableSections(for: status) == [.overview])
+        }
+    }
+
+    @Test func gameDetailOverviewUsesPreviewOnlyBeforeGame() throws {
+        #expect(GameDetailOverviewContentKind.contentKind(for: .upcoming) == .preview)
+        #expect(GameDetailOverviewContentKind.contentKind(for: .live) == .overview)
+        #expect(GameDetailOverviewContentKind.contentKind(for: .rainDelay) == .overview)
+        #expect(GameDetailOverviewContentKind.contentKind(for: .final) == .overview)
+        #expect(GameDetailOverviewContentKind.contentKind(for: .cancelled) == .overview)
+    }
+
     @Test func homeSummaryUsesStartingPitchersFromSupabaseRows() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -5842,6 +5856,81 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == "최신타자")
     }
 
+    @Test func backgroundLiveActivityRefreshReusesLocalUpdateController() async throws {
+        let controller = TestLiveActivityController(isSupported: true)
+        let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let gameID = UUID(uuidString: "cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd")!
+        let selected = makeGameDetail(
+            id: gameID,
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 0,
+            homeScore: 1,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Top 1",
+            note: "provider_game_id=20260428WOLG0"
+        )
+        let latest = makeGameDetail(
+            id: gameID,
+            scheduledStart: referenceDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 2,
+            homeScore: 3,
+            status: .live,
+            seasonClassification: .regularSeason,
+            inningText: "Bottom 4",
+            note: "provider_game_id=20260428WOLG0 updated_at=2026-04-28T19:42:00+09:00",
+            bases: RunnerState(first: false, second: true, third: false),
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: "백그라운드투수",
+            currentBatterName: "백그라운드타자"
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(
+                fetchBootstrapData: {
+                    KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default)
+                },
+                fetchScheduleBypassingCache: { _, _ in
+                    [latest]
+                }
+            ),
+            fetchGameDetailSnapshot: { _, _, _ in latest }
+        )
+        let model = AppModel(
+            repository: repository,
+            liveActivityController: controller,
+            bootstrap: KBOBootstrapData(teams: teams, games: [selected], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        model.settings.favoriteTeamID = "lg"
+
+        await model.startOrUpdateLiveActivityIfNeeded(for: selected)
+        let didAttempt = await model.refreshTodayForBackgroundLiveActivity(reason: "backgroundTask")
+
+        let snapshot = try #require(controller.snapshots.last)
+        #expect(didAttempt)
+        #expect(controller.snapshots.count >= 2)
+        #expect(snapshot.favoriteScoreText == "3")
+        #expect(snapshot.opponentScoreText == "2")
+        #expect(snapshot.inningText == "4회 말")
+        #expect(snapshot.balls == 1)
+        #expect(snapshot.strikes == 2)
+        #expect(snapshot.outs == 1)
+        #expect(snapshot.currentPitcherName == "백그라운드투수")
+        #expect(snapshot.currentBatterName == "백그라운드타자")
+    }
+
     @Test func preseasonBootstrapFixtureDecodes() async throws {
         let data = try fixtureData(named: "2026-preseason-bootstrap")
         let decoder = JSONDecoder()
@@ -8863,6 +8952,9 @@ struct kboScoreTests {
         #expect(response.awayBatters[0].hits == 2)
         #expect(response.awayBatters[0].rbi == 1)
         #expect(response.awayBatters[0].battingAverage == "0.300")
+        #expect(response.awayBatters[1].stolenBases == 1)
+        #expect(response.awayBatters[1].groundedIntoDoublePlay == 1)
+        #expect(response.homeBatters[0].errors == 1)
         #expect(response.awayPitchers[0].playerName == "잭로그")
         #expect(response.awayPitchers[0].appearance == "선발")
         #expect(response.awayPitchers[0].decisionResult == "승")
@@ -8871,6 +8963,19 @@ struct kboScoreTests {
         #expect(response.awayPitchers[0].pitchCount == 88)
         #expect(response.awayPitchers[0].walksOrHitByPitch == 1)
         #expect(response.awayPitchers[0].era == "3.19")
+    }
+
+    @Test func gameBoxscoreResponseBuildsMajorRecordSummaryItemsFromLiveTextStats() throws {
+        let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
+        let review = try #require(response.gameCenterReview)
+        let stats = review.keyStats(awayTeam: Team(id: "doosan", name: "두산", shortName: "두산", englishName: "Doosan Bears", markText: "두산"), homeTeam: Team(id: "ssg", name: "SSG", shortName: "SSG", englishName: "SSG Landers", markText: "SSG"), lineScore: nil)
+
+        #expect(review.summaryItems.contains { $0.title == "도루" && $0.values == ["1", "0"] })
+        #expect(review.summaryItems.contains { $0.title == "병살타" && $0.values == ["1", "0"] })
+        #expect(review.summaryItems.contains { $0.title == "실책" && $0.values == ["0", "1"] })
+        #expect(stats.away.stolenBases == 1)
+        #expect(stats.away.doublePlays == 1)
+        #expect(stats.home.errors == 1)
     }
 
     @Test func gameBoxscoreResponseKeepsNullableBatterFieldsNil() throws {
@@ -8963,6 +9068,734 @@ struct kboScoreTests {
 
         #expect(GameRecordPositionFormatter.debugLoggedPositionCountForTesting == 1)
         #endif
+    }
+
+    @Test func supabaseBatterRecordDTODecodesSnakeCaseColumns() throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let teamID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+        let row = try JSONDecoder().decode(
+            SupabaseGameBatterRecordRow.self,
+            from: Data(
+                """
+                {
+                  "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                  "game_id": "\(gameID.uuidString)",
+                  "team_id": "\(teamID.uuidString)",
+                  "source_order": 3,
+                  "batting_order": 7,
+                  "position": "一",
+                  "player_name": "나승엽",
+                  "at_bats": 2,
+                  "runs": 1,
+                  "hits": 1,
+                  "rbi": 2,
+                  "home_runs": 1,
+                  "walks": 1,
+                  "strikeouts": 0,
+                  "stolen_bases": 0,
+                  "batting_average": "0.500"
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.gameID == gameID)
+        #expect(row.teamID == teamID)
+        #expect(row.sourceOrder == 3)
+        #expect(row.battingOrder == 7)
+        #expect(row.playerName == "나승엽")
+        #expect(row.homeRuns == 1)
+        #expect(row.walks == 1)
+    }
+
+    @Test func supabasePitcherRecordDTODecodesSnakeCaseColumns() throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+        let teamID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+        let row = try JSONDecoder().decode(
+            SupabaseGamePitcherRecordRow.self,
+            from: Data(
+                """
+                {
+                  "id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                  "game_id": "\(gameID.uuidString)",
+                  "team_id": "\(teamID.uuidString)",
+                  "source_order": 0,
+                  "pitching_order": 1,
+                  "player_name": "나균안",
+                  "appearance": "선발",
+                  "decision_result": null,
+                  "wins": null,
+                  "losses": null,
+                  "saves": null,
+                  "innings_pitched": "2 1/3",
+                  "batters_faced": 11,
+                  "pitch_count": 45,
+                  "at_bats": 10,
+                  "hits": 3,
+                  "home_runs": 1,
+                  "walks_or_hit_by_pitch": 1,
+                  "strikeouts": 2,
+                  "runs": 1,
+                  "earned_runs": 1,
+                  "era": null
+                }
+                """.utf8
+            )
+        )
+
+        #expect(row.gameID == gameID)
+        #expect(row.teamID == teamID)
+        #expect(row.pitchingOrder == 1)
+        #expect(row.playerName == "나균안")
+        #expect(row.inningsPitched == "2 1/3")
+        #expect(row.pitchCount == 45)
+        #expect(row.walksOrHitByPitch == 1)
+    }
+
+    @Test func supabaseDetailedRecordsMapIntoGameCenterRowsAndSortBySourceOrder() throws {
+        let fixture = try makeSupabaseDetailedRecordFixture()
+
+        let review = try #require(SupabaseKBOMapper.mapDetailedRecordReview(
+            game: fixture.game,
+            awayTeamDatabaseID: fixture.awayTeamID,
+            homeTeamDatabaseID: fixture.homeTeamID,
+            batterRows: [
+                fixture.batter(name: "나승엽", teamID: fixture.awayTeamID, sourceOrder: 1, battingOrder: nil, walks: 1),
+                fixture.batter(name: "황성빈", teamID: fixture.awayTeamID, sourceOrder: 0, battingOrder: nil, atBats: 2, strikeouts: 1),
+                fixture.batter(name: "아데를린", teamID: fixture.homeTeamID, sourceOrder: 0, battingOrder: 4, rbi: 1, homeRuns: 1)
+            ],
+            pitcherRows: [
+                fixture.pitcher(name: "네일", teamID: fixture.homeTeamID, sourceOrder: 0, pitchingOrder: 1, innings: "3", pitchCount: 42, hits: 2, strikeouts: 4),
+                fixture.pitcher(name: "나균안", teamID: fixture.awayTeamID, sourceOrder: 0, pitchingOrder: 1, innings: "2 1/3", pitchCount: 45, hits: 3, homeRuns: 1, strikeouts: 2, runs: 1, earnedRuns: 1)
+            ]
+        ))
+
+        #expect(review.recordSource == .dbLiveTextRecords)
+        #expect(review.awayBatting.lines.map(\.name) == ["황성빈", "나승엽"])
+        #expect(review.awayBatting.lines[0].atBats == "2")
+        #expect(review.awayBatting.lines[0].strikeouts == "1")
+        #expect(review.awayBatting.lines[1].walks == "1")
+        #expect(review.homeBatting.lines[0].homeRuns == "1")
+        #expect(review.homeBatting.lines[0].runsBattedIn == "1")
+        #expect(review.awayBatting.lines[0].average == nil)
+        #expect(review.awayPitching.lines.map(\.name) == ["나균안"])
+        #expect(review.homePitching.lines.map(\.name) == ["네일"])
+        #expect(review.awayPitching.lines[0].pitches == "45")
+        #expect(review.awayPitching.lines[0].homeRunsAllowed == "1")
+        #expect(review.awayPitching.lines[0].earnedRuns == "1")
+    }
+
+    @Test func supabasePitcherRecordsSortByPitchingOrderBeforeSourceOrder() throws {
+        let fixture = try makeSupabaseDetailedRecordFixture()
+
+        let review = try #require(SupabaseKBOMapper.mapDetailedRecordReview(
+            game: fixture.game,
+            awayTeamDatabaseID: fixture.awayTeamID,
+            homeTeamDatabaseID: fixture.homeTeamID,
+            batterRows: [],
+            pitcherRows: [
+                fixture.pitcher(name: "두번째", teamID: fixture.awayTeamID, sourceOrder: 0, pitchingOrder: 2),
+                fixture.pitcher(name: "첫번째", teamID: fixture.awayTeamID, sourceOrder: 9, pitchingOrder: 1)
+            ]
+        ))
+
+        #expect(review.awayPitching.lines.map(\.name) == ["첫번째", "두번째"])
+    }
+
+    @Test func gameDetailDatabaseRecordsUseResolvedSupabaseGameIDWhenLocalIDDiffers() async throws {
+        let inputLocalGameID = UUID(uuidString: "76E4CD75-1111-2222-3333-444444444444")!
+        let resolvedSupabaseGameID = UUID(uuidString: "A9E90D0E-8BA7-404C-960A-DB7D01CA8AF3")!
+        let awayTeamID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let homeTeamID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데"),
+            SupabaseTeamRow(id: homeTeamID, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+        ]
+        let game = makeGameDetail(
+            id: inputLocalGameID,
+            scheduledStart: isoDate("2026-06-02T18:30:00+09:00"),
+            venue: "광주",
+            awayTeam: SupabaseKBOMapper.mapTeam(teamRows[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teamRows[1]),
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260602-KIA-LOT provider_game_id=20260602LTHT0",
+            providerGameID: "20260602LTHT0"
+        )
+        let gameRow = try makeSupabaseGameRow(
+            id: resolvedSupabaseGameID,
+            publicGameID: "20260602-KIA-LOT",
+            providerGameID: "20260602LTHT0",
+            gameDate: "2026-06-02",
+            scheduledAt: "2026-06-02T18:30:00+09:00",
+            stadium: "광주",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Top 1"
+        )
+        let fixture = SupabaseDetailedRecordFixture(
+            game: game,
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID
+        )
+        let batterRows = (0..<18).map { index in
+            fixture.batter(
+                name: "타자\(index + 1)",
+                teamID: index < 9 ? awayTeamID : homeTeamID,
+                sourceOrder: index < 9 ? index : index - 9,
+                battingOrder: (index % 9) + 1,
+                gameID: resolvedSupabaseGameID,
+                atBats: 1
+            )
+        }
+        let pitcherRows = [
+            fixture.pitcher(
+                name: "나균안",
+                teamID: awayTeamID,
+                sourceOrder: 0,
+                pitchingOrder: 1,
+                gameID: resolvedSupabaseGameID,
+                innings: "1",
+                pitchCount: 12
+            ),
+            fixture.pitcher(
+                name: "네일",
+                teamID: homeTeamID,
+                sourceOrder: 0,
+                pitchingOrder: 1,
+                gameID: resolvedSupabaseGameID,
+                innings: "1",
+                pitchCount: 11
+            )
+        ]
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(
+                teamRows: teamRows,
+                gameRows: [gameRow],
+                tracker: tracker,
+                batterRows: batterRows,
+                pitcherRows: pitcherRows
+            ),
+            runtimeState: nil
+        )
+
+        let fetchedReview = try await repository.fetchGameDetailDatabaseReview(for: game)
+        let review = try #require(fetchedReview)
+
+        #expect(review.recordSource == .dbLiveTextRecords)
+        #expect(review.awayBatting.lines.count + review.homeBatting.lines.count == 18)
+        #expect(review.awayPitching.lines.count + review.homePitching.lines.count == 2)
+        #expect(await tracker.batterRecordGameIDs == [resolvedSupabaseGameID])
+        #expect(await tracker.pitcherRecordGameIDs == [resolvedSupabaseGameID])
+        #expect(await tracker.eventRecordGameIDs == [resolvedSupabaseGameID])
+        #expect(await tracker.batterRecordGameIDs.contains(inputLocalGameID) == false)
+        #expect(await tracker.pitcherRecordGameIDs.contains(inputLocalGameID) == false)
+    }
+
+    @Test func gameDetailSnapshotResultPreservesRawSupabaseGameIDSeparatelyFromMappedLocalID() async throws {
+        let inputLocalGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let awayTeamID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let homeTeamID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데"),
+            SupabaseTeamRow(id: homeTeamID, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+        ]
+        let game = makeGameDetail(
+            id: inputLocalGameID,
+            scheduledStart: isoDate("2026-06-03T18:30:00+09:00"),
+            venue: "광주",
+            awayTeam: SupabaseKBOMapper.mapTeam(teamRows[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teamRows[1]),
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260603-KIA-LOT provider_game_id=20260603LTHT0",
+            providerGameID: "20260603LTHT0"
+        )
+        let gameRow = try makeSupabaseGameRow(
+            id: rawSupabaseGameID,
+            publicGameID: "20260603-KIA-LOT",
+            providerGameID: "20260603LTHT0",
+            gameDate: "2026-06-03",
+            scheduledAt: "2026-06-03T18:30:00+09:00",
+            stadium: "광주",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Top 1"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(teamRows: teamRows, gameRows: [gameRow], tracker: tracker),
+            runtimeState: nil
+        )
+
+        let result = try #require(await repository.fetchGameDetailSnapshotResult(
+            for: game,
+            identity: "provider:20260603LTHT0",
+            cachedTeams: []
+        ))
+
+        #expect(result.rawSupabaseGameID == rawSupabaseGameID)
+        #expect(result.providerGameID == "20260603LTHT0")
+        #expect(result.publicGameID == "20260603-KIA-LOT")
+        #expect(result.game.id != rawSupabaseGameID)
+    }
+
+    @Test func explicitSupabaseGameIDDatabaseReviewQueriesDetailedRecordsWithRawID() async throws {
+        let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let awayTeamID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let homeTeamID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데"),
+            SupabaseTeamRow(id: homeTeamID, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+        ]
+        let mappedGame = makeGameDetail(
+            id: localGameID,
+            scheduledStart: isoDate("2026-06-03T18:30:00+09:00"),
+            venue: "광주",
+            awayTeam: SupabaseKBOMapper.mapTeam(teamRows[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teamRows[1]),
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260603-KIA-LOT provider_game_id=20260603LTHT0",
+            providerGameID: "20260603LTHT0"
+        )
+        let gameRow = try makeSupabaseGameRow(
+            id: rawSupabaseGameID,
+            publicGameID: "20260603-KIA-LOT",
+            providerGameID: "20260603LTHT0",
+            gameDate: "2026-06-03",
+            scheduledAt: "2026-06-03T18:30:00+09:00",
+            stadium: "광주",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Top 1"
+        )
+        let fixture = SupabaseDetailedRecordFixture(
+            game: mappedGame,
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID
+        )
+        let batterRows = (0..<18).map { index in
+            fixture.batter(
+                name: "타자\(index + 1)",
+                teamID: index < 9 ? awayTeamID : homeTeamID,
+                sourceOrder: index < 9 ? index : index - 9,
+                battingOrder: (index % 9) + 1,
+                gameID: rawSupabaseGameID,
+                atBats: 1
+            )
+        }
+        let pitcherRows = [
+            fixture.pitcher(name: "원정투수", teamID: awayTeamID, sourceOrder: 0, pitchingOrder: 1, gameID: rawSupabaseGameID, innings: "1", pitchCount: 12),
+            fixture.pitcher(name: "홈투수", teamID: homeTeamID, sourceOrder: 0, pitchingOrder: 1, gameID: rawSupabaseGameID, innings: "1", pitchCount: 11)
+        ]
+        let eventRows = (0..<40).map { index in
+            SupabaseGameEventRow(
+                id: UUID(),
+                gameID: rawSupabaseGameID,
+                providerEventID: "event-\(index)",
+                sequenceNumber: index,
+                inning: 1,
+                inningHalf: "top",
+                eventType: "play",
+                eventText: "event \(index)"
+            )
+        }
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(
+                teamRows: teamRows,
+                gameRows: [gameRow],
+                tracker: tracker,
+                batterRows: batterRows,
+                pitcherRows: pitcherRows,
+                eventRows: eventRows
+            ),
+            runtimeState: nil
+        )
+
+        let result = try #require(await repository.fetchGameDetailDatabaseReview(
+            supabaseGameId: rawSupabaseGameID,
+            providerGameID: "20260603LTHT0",
+            publicGameID: "20260603-KIA-LOT",
+            invokedFrom: "afterFetchGameSingleRawSupabaseId"
+        ))
+
+        #expect(result.rawSupabaseGameID == rawSupabaseGameID)
+        #expect(result.publicBatterRawRowCount == 18)
+        #expect(result.publicPitcherRawRowCount == 2)
+        #expect(result.eventRawRowCount == 40)
+        #expect(result.mappedBatterCount == 18)
+        #expect(result.mappedPitcherCount == 2)
+        #expect(result.review?.recordSource == .dbLiveTextRecords)
+        #expect(await tracker.batterRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.pitcherRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.eventRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.batterRecordGameIDs.contains(localGameID) == false)
+    }
+
+    @Test func providerResolvedDatabaseReviewQueriesDetailedRecordsWithRawSupabaseID() async throws {
+        let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let awayTeamID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let homeTeamID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데"),
+            SupabaseTeamRow(id: homeTeamID, code: "kia", name: "KIA 타이거즈", shortName: "KIA")
+        ]
+        let mappedGame = makeGameDetail(
+            id: localGameID,
+            scheduledStart: isoDate("2026-06-03T18:30:00+09:00"),
+            venue: "광주",
+            awayTeam: SupabaseKBOMapper.mapTeam(teamRows[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teamRows[1]),
+            awayScore: 0,
+            homeScore: 0,
+            status: .live,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260603-KIA-LOT provider_game_id=20260603LTHT0",
+            providerGameID: "20260603LTHT0"
+        )
+        let gameRow = try makeSupabaseGameRow(
+            id: rawSupabaseGameID,
+            publicGameID: "20260603-KIA-LOT",
+            providerGameID: "20260603LTHT0",
+            gameDate: "2026-06-03",
+            scheduledAt: "2026-06-03T18:30:00+09:00",
+            stadium: "광주",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Top 1"
+        )
+        let fixture = SupabaseDetailedRecordFixture(
+            game: mappedGame,
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID
+        )
+        let batterRows = (0..<18).map { index in
+            fixture.batter(
+                name: "타자\(index + 1)",
+                teamID: index < 9 ? awayTeamID : homeTeamID,
+                sourceOrder: index < 9 ? index : index - 9,
+                battingOrder: (index % 9) + 1,
+                gameID: rawSupabaseGameID,
+                atBats: 1
+            )
+        }
+        let pitcherRows = [
+            fixture.pitcher(name: "원정투수", teamID: awayTeamID, sourceOrder: 0, pitchingOrder: 1, gameID: rawSupabaseGameID, innings: "1", pitchCount: 12),
+            fixture.pitcher(name: "홈투수", teamID: homeTeamID, sourceOrder: 0, pitchingOrder: 1, gameID: rawSupabaseGameID, innings: "1", pitchCount: 11)
+        ]
+        let eventRows = (0..<40).map { index in
+            SupabaseGameEventRow(
+                id: UUID(),
+                gameID: rawSupabaseGameID,
+                providerEventID: "event-\(index)",
+                sequenceNumber: index,
+                inning: 1,
+                inningHalf: "top",
+                eventType: "play",
+                eventText: "event \(index)"
+            )
+        }
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(
+                teamRows: teamRows,
+                gameRows: [gameRow],
+                tracker: tracker,
+                batterRows: batterRows,
+                pitcherRows: pitcherRows,
+                eventRows: eventRows
+            ),
+            runtimeState: nil
+        )
+
+        let result = try #require(await repository.fetchGameDetailDatabaseReview(
+            providerGameID: "20260603LTHT0",
+            publicGameID: "20260603-KIA-LOT",
+            invokedFrom: "afterFetchGameSingleProviderResolved"
+        ))
+
+        #expect(result.inputLocalGameID != rawSupabaseGameID)
+        #expect(result.rawSupabaseGameID == rawSupabaseGameID)
+        #expect(result.resolvedSupabaseGameID == rawSupabaseGameID)
+        #expect(result.providerGameID == "20260603LTHT0")
+        #expect(result.publicGameID == "20260603-KIA-LOT")
+        #expect(result.publicBatterRawRowCount == 18)
+        #expect(result.publicPitcherRawRowCount == 2)
+        #expect(result.eventRawRowCount == 40)
+        #expect(result.mappedBatterCount == 18)
+        #expect(result.mappedPitcherCount == 2)
+        #expect(result.review?.recordSource == .dbLiveTextRecords)
+        #expect(await tracker.singleLookups == [
+            .providerGameID("20260603LTHT0"),
+            .databaseID(rawSupabaseGameID)
+        ])
+        #expect(await tracker.batterRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.pitcherRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.eventRecordGameIDs == [rawSupabaseGameID])
+        #expect(await tracker.batterRecordGameIDs.contains(localGameID) == false)
+
+        let appRepository = AnyKBORepository(
+            CachedKBORepository(
+                base: AnyKBORepository(repository),
+                configuration: .supabaseStartup,
+                runtimeState: nil
+            )
+        )
+        let cachedResult = try #require(await appRepository.fetchGameDetailDatabaseReview(
+            providerGameID: "20260603LTHT0",
+            publicGameID: "20260603-KIA-LOT",
+            invokedFrom: "afterFetchGameSingleProviderResolved"
+        ))
+        #expect(cachedResult.rawSupabaseGameID == rawSupabaseGameID)
+        #expect(cachedResult.publicBatterRawRowCount == 18)
+        #expect(cachedResult.publicPitcherRawRowCount == 2)
+        #expect(cachedResult.eventRawRowCount == 40)
+        #expect(cachedResult.review?.recordSource == .dbLiveTextRecords)
+        #expect(await tracker.singleLookups == [
+            .providerGameID("20260603LTHT0"),
+            .databaseID(rawSupabaseGameID),
+            .providerGameID("20260603LTHT0"),
+            .databaseID(rawSupabaseGameID)
+        ])
+    }
+
+    @Test func gameDetailScreenModelPrefersDatabaseRecordsOverKeyplayerFallback() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeLiveBoxscoreDetailGame()
+        let databaseReview = try makeSampleDatabaseRecordReview(game: game)
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchDatabaseRecordReview: { _ in databaseReview },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: game)
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(model.databaseRecordReview?.recordSource == .dbLiveTextRecords)
+        #expect(model.databaseRecordReview?.awayBatting.lines.first?.name == "황성빈")
+        #expect(model.officialFallbackReview == nil)
+        #expect(await officialFallback.fetchCount == 0)
+    }
+
+    @Test func gameDetailScreenModelKeepsKeyplayerFallbackWhenDatabaseRecordsAreEmpty() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: try makeLiveBoxscoreDetailGame())
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(model.databaseRecordReview == nil)
+        #expect(model.officialFallbackReview?.recordSource == .keyplayerPartialLimited)
+        #expect(await officialFallback.fetchCount == 1)
+    }
+
+    @Test func gameDetailScreenModelPostFetchGameSingleDatabaseReviewOverridesEarlyEmptyLimitedRecords() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let resolvedSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let game = try makeLiveBoxscoreDetailGame(id: localGameID, providerGameID: "20260603LTHT0")
+        let resolvedGame = try makeLiveBoxscoreDetailGame(id: resolvedSupabaseGameID, providerGameID: "20260603LTHT0")
+        let lineupReview = sampleLineupLimitedReview()
+        let databaseReview = sampleDatabaseRecordReview(game: resolvedGame, batterCount: 18, pitcherCount: 2)
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game, review: lineupReview) },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+
+        await model.load(for: game)
+        #expect(model.databaseRecordReview == nil)
+
+        await model.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: localGameID,
+            resolvedGame: resolvedGame,
+            rawSupabaseGameID: resolvedSupabaseGameID,
+            rawSupabaseProviderGameID: "20260603LTHT0",
+            rawSupabasePublicGameID: "20260603-LT-HT",
+            fetchDatabaseRecordReviewResult: { game in
+                GameDetailDatabaseReviewFetchResult(
+                    review: databaseReview,
+                    inputLocalGameID: game.id,
+                    rawSupabaseGameID: resolvedSupabaseGameID,
+                    resolvedSupabaseGameID: resolvedSupabaseGameID,
+                    providerGameID: "20260603LTHT0",
+                    publicGameID: "20260603-LT-HT",
+                    publicBatterRawRowCount: 18,
+                    publicPitcherRawRowCount: 2,
+                    eventRawRowCount: 40
+                )
+            },
+            fetchDatabaseRecordReviewResultByRawSupabaseID: { rawSupabaseGameID, providerGameID, publicGameID in
+                GameDetailDatabaseReviewFetchResult(
+                    review: databaseReview,
+                    inputLocalGameID: localGameID,
+                    rawSupabaseGameID: rawSupabaseGameID,
+                    resolvedSupabaseGameID: rawSupabaseGameID,
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID,
+                    publicBatterRawRowCount: 18,
+                    publicPitcherRawRowCount: 2,
+                    eventRawRowCount: 40
+                )
+            }
+        )
+
+        let presentation = GameDetailPresentation(
+            game: resolvedGame,
+            payload: model.detail,
+            boxscore: nil,
+            databaseRecordReview: model.databaseRecordReview,
+            officialFallbackReview: model.officialFallbackReview
+        )
+        #expect(presentation.review?.recordSource == .dbLiveTextRecords)
+        #expect((presentation.review?.awayBatting.lines.count ?? 0) + (presentation.review?.homeBatting.lines.count ?? 0) == 18)
+        #expect((presentation.review?.awayPitching.lines.count ?? 0) + (presentation.review?.homePitching.lines.count ?? 0) == 2)
+
+        await model.load(for: resolvedGame, forceRefresh: true)
+        let refreshedPresentation = GameDetailPresentation(
+            game: resolvedGame,
+            payload: model.detail,
+            boxscore: nil,
+            databaseRecordReview: model.databaseRecordReview,
+            officialFallbackReview: model.officialFallbackReview
+        )
+        #expect(refreshedPresentation.review?.recordSource == .dbLiveTextRecords)
+    }
+
+    @Test func gameDetailScreenModelPreservesPreloadedDatabaseReviewThroughLiveLoad() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let game = try makeLiveBoxscoreDetailGame(id: localGameID, providerGameID: "20260603LTHT0")
+        let databaseReview = sampleDatabaseRecordReview(game: game, batterCount: 18, pitcherCount: 2)
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: localGameID,
+            resolvedGame: game,
+            fetchDatabaseRecordReviewResult: { game in
+                GameDetailDatabaseReviewFetchResult(
+                    review: databaseReview,
+                    inputLocalGameID: game.id,
+                    rawSupabaseGameID: rawSupabaseGameID,
+                    resolvedSupabaseGameID: rawSupabaseGameID,
+                    providerGameID: "20260603LTHT0",
+                    publicGameID: "20260603-KIA-LOT",
+                    publicBatterRawRowCount: 18,
+                    publicPitcherRawRowCount: 2,
+                    eventRawRowCount: 40
+                )
+            },
+            fetchDatabaseRecordReviewResultByRawSupabaseID: { _, _, _ in nil }
+        )
+        await model.load(for: game, forceRefresh: true)
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: model.detail,
+            boxscore: nil,
+            databaseRecordReview: model.databaseRecordReview,
+            officialFallbackReview: model.officialFallbackReview
+        )
+        #expect(presentation.review?.recordSource == .dbLiveTextRecords)
+        #expect(model.officialFallbackReview == nil)
+        #expect(await officialFallback.fetchCount == 0)
+    }
+
+    @Test func gameDetailScreenModelPostFetchGameSingleKeepsFallbackWhenDatabaseRowsAreEmpty() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeLiveBoxscoreDetailGame()
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: game)
+        await model.waitForOfficialFallbackLoadForTesting()
+        await model.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: game.id,
+            resolvedGame: game,
+            fetchDatabaseRecordReviewResult: { game in
+                GameDetailDatabaseReviewFetchResult(
+                    review: nil,
+                    inputLocalGameID: game.id,
+                    rawSupabaseGameID: game.id,
+                    resolvedSupabaseGameID: game.id,
+                    providerGameID: game.providerGameID,
+                    publicGameID: game.publicGameID,
+                    publicBatterRawRowCount: 0,
+                    publicPitcherRawRowCount: 0,
+                    eventRawRowCount: 0
+                )
+            },
+            fetchDatabaseRecordReviewResultByRawSupabaseID: { rawSupabaseGameID, providerGameID, publicGameID in
+                GameDetailDatabaseReviewFetchResult(
+                    review: nil,
+                    inputLocalGameID: game.id,
+                    rawSupabaseGameID: rawSupabaseGameID,
+                    resolvedSupabaseGameID: rawSupabaseGameID,
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID,
+                    publicBatterRawRowCount: 0,
+                    publicPitcherRawRowCount: 0,
+                    eventRawRowCount: 0
+                )
+            }
+        )
+
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: model.detail,
+            boxscore: nil,
+            databaseRecordReview: model.databaseRecordReview,
+            officialFallbackReview: model.officialFallbackReview
+        )
+        #expect(presentation.review?.recordSource == .keyplayerPartialLimited)
+        #expect(model.databaseRecordReview == nil)
     }
 
     @Test func gameBoxscoreResponseSortsRecordsBySourceOrder() throws {
@@ -12933,6 +13766,9 @@ private actor DetailFetchTracker {
     private(set) var singleLookups: [SupabaseGameLookup] = []
     private(set) var dateFetches = 0
     private(set) var teamFetches = 0
+    private(set) var batterRecordGameIDs: [UUID] = []
+    private(set) var pitcherRecordGameIDs: [UUID] = []
+    private(set) var eventRecordGameIDs: [UUID] = []
 
     func recordSingleLookup(_ lookup: SupabaseGameLookup) {
         singleLookups.append(lookup)
@@ -12945,12 +13781,43 @@ private actor DetailFetchTracker {
     func recordTeamFetch() {
         teamFetches += 1
     }
+
+    func recordBatterRecordFetch(gameID: UUID) {
+        batterRecordGameIDs.append(gameID)
+    }
+
+    func recordPitcherRecordFetch(gameID: UUID) {
+        pitcherRecordGameIDs.append(gameID)
+    }
+
+    func recordEventRecordFetch(gameID: UUID) {
+        eventRecordGameIDs.append(gameID)
+    }
 }
 
 private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
     let teamRows: [SupabaseTeamRow]
     let gameRows: [SupabaseGameRow]
     let tracker: DetailFetchTracker
+    let batterRows: [SupabaseGameBatterRecordRow]
+    let pitcherRows: [SupabaseGamePitcherRecordRow]
+    let eventRows: [SupabaseGameEventRow]
+
+    init(
+        teamRows: [SupabaseTeamRow],
+        gameRows: [SupabaseGameRow],
+        tracker: DetailFetchTracker,
+        batterRows: [SupabaseGameBatterRecordRow] = [],
+        pitcherRows: [SupabaseGamePitcherRecordRow] = [],
+        eventRows: [SupabaseGameEventRow] = []
+    ) {
+        self.teamRows = teamRows
+        self.gameRows = gameRows
+        self.tracker = tracker
+        self.batterRows = batterRows
+        self.pitcherRows = pitcherRows
+        self.eventRows = eventRows
+    }
 
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         await tracker.recordTeamFetch()
@@ -13025,6 +13892,27 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
 
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         nil
+    }
+
+    nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
+        await tracker.recordBatterRecordFetch(gameID: gameID)
+        return await MainActor.run {
+            batterRows.filter { $0.gameID == gameID }
+        }
+    }
+
+    nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
+        await tracker.recordPitcherRecordFetch(gameID: gameID)
+        return await MainActor.run {
+            pitcherRows.filter { $0.gameID == gameID }
+        }
+    }
+
+    nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
+        await tracker.recordEventRecordFetch(gameID: gameID)
+        return await MainActor.run {
+            eventRows.filter { $0.gameID == gameID }
+        }
     }
 }
 
@@ -13290,6 +14178,8 @@ private func sampleGameBoxscoreJSON() -> Data {
               "walks": 1,
               "strikeouts": 0,
               "stolenBases": 1,
+              "groundedIntoDoublePlay": 1,
+              "errors": 0,
               "battingAverage": "0.280"
             },
             {
@@ -13305,6 +14195,8 @@ private func sampleGameBoxscoreJSON() -> Data {
               "walks": null,
               "strikeouts": null,
               "stolenBases": null,
+              "groundedIntoDoublePlay": null,
+              "errors": null,
               "battingAverage": "0.300"
             }
           ],
@@ -13322,6 +14214,8 @@ private func sampleGameBoxscoreJSON() -> Data {
               "walks": null,
               "strikeouts": null,
               "stolenBases": null,
+              "groundedIntoDoublePlay": 0,
+              "errors": 1,
               "battingAverage": "0.300"
             }
           ],
@@ -13396,12 +14290,16 @@ private func makeBoxscoreDetailGame() throws -> GameDetail {
     )
 }
 
-private func makeLiveBoxscoreDetailGame(status: GameStatus = .live) throws -> GameDetail {
+private func makeLiveBoxscoreDetailGame(
+    status: GameStatus = .live,
+    id: UUID = UUID(uuidString: "11111111-2222-3333-4444-555555555556")!,
+    providerGameID: String = "20260510SKOB0"
+) throws -> GameDetail {
     let teams = MockKBOData.makeBootstrap().teams
     let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
     let ssg = try #require(teams.first(where: { $0.id == "ssg" }))
     return makeGameDetail(
-        id: UUID(uuidString: "11111111-2222-3333-4444-555555555556")!,
+        id: id,
         scheduledStart: isoDate("2026-05-10T14:00:00+09:00"),
         venue: "잠실",
         awayTeam: doosan,
@@ -13409,13 +14307,127 @@ private func makeLiveBoxscoreDetailGame(status: GameStatus = .live) throws -> Ga
         awayScore: status == .upcoming || status == .cancelled ? nil : 3,
         homeScore: status == .upcoming || status == .cancelled ? nil : 1,
         status: status,
-        note: "public_game_id=20260510-DOO-SSG provider_game_id=20260510SKOB0",
-        providerGameID: "20260510SKOB0",
+        note: "public_game_id=20260510-DOO-SSG provider_game_id=\(providerGameID)",
+        providerGameID: providerGameID,
         bases: RunnerState(first: true, second: false, third: false),
         balls: 1,
         strikes: 2,
         outs: 1
     )
+}
+
+private struct SupabaseDetailedRecordFixture {
+    let game: GameDetail
+    let awayTeamID: UUID
+    let homeTeamID: UUID
+
+    func batter(
+        name: String,
+        teamID: UUID,
+        sourceOrder: Int?,
+        battingOrder: Int?,
+        gameID: UUID? = nil,
+        atBats: Int? = nil,
+        runs: Int? = nil,
+        hits: Int? = nil,
+        rbi: Int? = nil,
+        homeRuns: Int? = nil,
+        walks: Int? = nil,
+        strikeouts: Int? = nil,
+        stolenBases: Int? = nil,
+        groundedIntoDoublePlay: Int? = nil,
+        errors: Int? = nil
+    ) -> SupabaseGameBatterRecordRow {
+        SupabaseGameBatterRecordRow(
+            id: UUID(),
+            gameID: gameID ?? game.id,
+            teamID: teamID,
+            sourceOrder: sourceOrder,
+            battingOrder: battingOrder,
+            position: nil,
+            playerName: name,
+            atBats: atBats,
+            runs: runs,
+            hits: hits,
+            rbi: rbi,
+            homeRuns: homeRuns,
+            walks: walks,
+            strikeouts: strikeouts,
+            stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
+            battingAverage: "0.999"
+        )
+    }
+
+    func pitcher(
+        name: String,
+        teamID: UUID,
+        sourceOrder: Int?,
+        pitchingOrder: Int?,
+        gameID: UUID? = nil,
+        innings: String? = nil,
+        pitchCount: Int? = nil,
+        hits: Int? = nil,
+        homeRuns: Int? = nil,
+        strikeouts: Int? = nil,
+        runs: Int? = nil,
+        earnedRuns: Int? = nil
+    ) -> SupabaseGamePitcherRecordRow {
+        SupabaseGamePitcherRecordRow(
+            id: UUID(),
+            gameID: gameID ?? game.id,
+            teamID: teamID,
+            sourceOrder: sourceOrder,
+            pitchingOrder: pitchingOrder,
+            playerName: name,
+            appearance: "선발",
+            decisionResult: nil,
+            wins: nil,
+            losses: nil,
+            saves: nil,
+            inningsPitched: innings,
+            battersFaced: nil,
+            pitchCount: pitchCount,
+            atBats: nil,
+            hits: hits,
+            homeRuns: homeRuns,
+            walksOrHitByPitch: nil,
+            strikeouts: strikeouts,
+            runs: runs,
+            earnedRuns: earnedRuns,
+            era: "0.00"
+        )
+    }
+}
+
+private func makeSupabaseDetailedRecordFixture() throws -> SupabaseDetailedRecordFixture {
+    SupabaseDetailedRecordFixture(
+        game: try makeLiveBoxscoreDetailGame(),
+        awayTeamID: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+        homeTeamID: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+    )
+}
+
+@MainActor
+private func makeSampleDatabaseRecordReview(game: GameDetail) throws -> GameCenterReview {
+    let fixture = SupabaseDetailedRecordFixture(
+        game: game,
+        awayTeamID: UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!,
+        homeTeamID: UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
+    )
+    return try #require(SupabaseKBOMapper.mapDetailedRecordReview(
+        game: game,
+        awayTeamDatabaseID: fixture.awayTeamID,
+        homeTeamDatabaseID: fixture.homeTeamID,
+        batterRows: [
+            fixture.batter(name: "황성빈", teamID: fixture.awayTeamID, sourceOrder: 0, battingOrder: 1, atBats: 2, strikeouts: 1),
+            fixture.batter(name: "나승엽", teamID: fixture.awayTeamID, sourceOrder: 1, battingOrder: 2, walks: 1)
+        ],
+        pitcherRows: [
+            fixture.pitcher(name: "나균안", teamID: fixture.awayTeamID, sourceOrder: 0, pitchingOrder: 1, innings: "2 1/3", pitchCount: 45, hits: 3, strikeouts: 2)
+        ]
+    ))
 }
 
 private func makeIdentityLookupGame(
@@ -13605,6 +14617,141 @@ private func sampleOfficialFallbackReview() -> GameCenterReview {
         homeBatting: GameCenterBattingSection(lines: [], totals: nil),
         awayPitching: GameCenterPitchingSection(lines: []),
         homePitching: GameCenterPitchingSection(lines: [])
+    )
+}
+
+private func sampleKeyplayerLimitedReview() -> GameCenterReview {
+    GameCenterReview(
+        summaryItems: [],
+        awayBatting: GameCenterBattingSection(
+            lines: [
+                GameCenterBattingLine(
+                    battingOrder: "",
+                    position: "",
+                    name: "키플레이어",
+                    atBats: nil,
+                    runs: nil,
+                    hits: "1",
+                    runsBattedIn: nil,
+                    homeRuns: nil,
+                    walks: nil,
+                    strikeouts: nil,
+                    average: nil
+                )
+            ],
+            totals: nil
+        ),
+        homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+        awayPitching: GameCenterPitchingSection(lines: []),
+        homePitching: GameCenterPitchingSection(lines: []),
+        recordSource: .keyplayerPartialLimited
+    )
+}
+
+private func sampleLineupLimitedReview() -> GameCenterReview {
+    GameCenterReview(
+        summaryItems: [],
+        awayBatting: GameCenterBattingSection(
+            lines: [
+                GameCenterBattingLine(
+                    battingOrder: "1",
+                    position: "중",
+                    name: "라인업타자",
+                    atBats: nil,
+                    runs: nil,
+                    hits: nil,
+                    runsBattedIn: nil,
+                    homeRuns: nil,
+                    walks: nil,
+                    strikeouts: nil,
+                    average: nil
+                )
+            ],
+            totals: nil
+        ),
+        homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+        awayPitching: GameCenterPitchingSection(lines: []),
+        homePitching: GameCenterPitchingSection(lines: []),
+        recordSource: .lineupLimited
+    )
+}
+
+private func sampleDatabaseRecordReview(
+    game: GameDetail,
+    batterCount: Int,
+    pitcherCount: Int
+) -> GameCenterReview {
+    let awayBatters = (0..<(batterCount / 2)).map { index in
+        GameCenterBattingLine(
+            battingOrder: "\(index + 1)",
+            position: "타",
+            name: "원정타자\(index + 1)",
+            atBats: "1",
+            runs: "0",
+            hits: "1",
+            runsBattedIn: "0",
+            homeRuns: "0",
+            walks: "0",
+            strikeouts: "0",
+            average: "0.999"
+        )
+    }
+    let homeBatters = (0..<(batterCount - awayBatters.count)).map { index in
+        GameCenterBattingLine(
+            battingOrder: "\(index + 1)",
+            position: "타",
+            name: "홈타자\(index + 1)",
+            atBats: "1",
+            runs: "0",
+            hits: "1",
+            runsBattedIn: "0",
+            homeRuns: "0",
+            walks: "0",
+            strikeouts: "0",
+            average: "0.999"
+        )
+    }
+    let awayPitchers = (0..<(pitcherCount / 2)).map { index in
+        GameCenterPitchingLine(
+            name: "원정투수\(index + 1)",
+            role: "선발",
+            result: nil,
+            innings: "1",
+            pitches: "12",
+            hitsAllowed: "0",
+            walksAllowed: "0",
+            hitBatters: "0",
+            strikeouts: "1",
+            homeRunsAllowed: "0",
+            runsAllowed: "0",
+            earnedRuns: "0",
+            earnedRunAverage: "0.00"
+        )
+    }
+    let homePitchers = (0..<(pitcherCount - awayPitchers.count)).map { index in
+        GameCenterPitchingLine(
+            name: "홈투수\(index + 1)",
+            role: "선발",
+            result: nil,
+            innings: "1",
+            pitches: "11",
+            hitsAllowed: "0",
+            walksAllowed: "0",
+            hitBatters: "0",
+            strikeouts: "1",
+            homeRunsAllowed: "0",
+            runsAllowed: "0",
+            earnedRuns: "0",
+            earnedRunAverage: "0.00"
+        )
+    }
+    return GameCenterReview(
+        summaryItems: [],
+        awayBatting: GameCenterBattingSection(lines: awayBatters, totals: nil),
+        homeBatting: GameCenterBattingSection(lines: homeBatters, totals: nil),
+        awayPitching: GameCenterPitchingSection(lines: awayPitchers),
+        homePitching: GameCenterPitchingSection(lines: homePitchers),
+        recordSource: .dbLiveTextRecords
     )
 }
 
