@@ -1342,6 +1342,61 @@ struct kboScoreTests {
         #expect(snapshot.first?.homeScore == 4)
     }
 
+    @Test func gameLookupUsesTransitiveProviderAliasesForSelectedDetailMatch() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let kt = try #require(teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let scheduledProviderID = "sched-202605101830-kt-hanwha"
+        let officialProviderID = "20260510KTHH0"
+        let scheduledStart = isoDate("2026-05-10T18:30:00+09:00")
+        let finalStart = isoDate("2026-05-11T18:30:00+09:00")
+        let scheduledShell = makeGameDetail(
+            id: UUID(uuidString: "16161616-1616-1616-1616-161616161601")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: scheduledProviderID
+        )
+        let officialFinal = makeGameDetail(
+            id: UUID(uuidString: "16161616-1616-1616-1616-161616161602")!,
+            scheduledStart: finalStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 6,
+            homeScore: 4,
+            status: .final,
+            providerGameID: officialProviderID
+        )
+        let bridge = makeGameDetail(
+            id: UUID(uuidString: "16161616-1616-1616-1616-161616161603")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 2,
+            homeScore: 1,
+            status: .live,
+            note: "official_provider_game_id=\(officialProviderID)",
+            providerGameID: scheduledProviderID
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [scheduledShell, officialFinal, bridge], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let selected = try #require(model.game(withIdentity: "provider:\(scheduledProviderID)"))
+
+        #expect(selected.status == .final)
+        #expect(selected.awayScore == 6)
+        #expect(selected.homeScore == 4)
+        #expect(selected.providerGameID == officialProviderID)
+    }
+
     @Test func gameLookupDoesNotChooseAmbiguousSamePriorityProviderMatch() throws {
         let first = try makeIdentityLookupGame(
             id: UUID(uuidString: "08080808-0808-0808-0808-080808080801")!,

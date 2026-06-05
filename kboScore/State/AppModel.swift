@@ -4213,8 +4213,18 @@ final class AppModel {
             return nil
         }
 
-        let selected = bestMatches.reduce(nil as GameDetail?) { preferred, match in
-            preferredKnownScheduleGame(existing: preferred, candidate: match.game)
+        let equivalentCandidates = bestMatches.flatMap { equivalentGames(to: $0.game) }
+        let equivalentPublicIDs = Set(equivalentCandidates.compactMap { nonBlank($0.publicGameID) })
+        if equivalentPublicIDs.count > 1 {
+            #if DEBUG
+            print("[GameDetailFetch] selectedGame ambiguousEquivalent selectedIdentity=\(gameIdentity) priority=\(bestPriority) token=\(bestMatches.map(\.token).sorted().joined(separator: ",")) publicIDs=\(equivalentPublicIDs.sorted().joined(separator: ","))")
+            #endif
+            return nil
+        }
+
+        let candidatePool = equivalentCandidates.isEmpty ? bestMatches.map(\.game) : equivalentCandidates
+        let selected = candidatePool.reduce(nil as GameDetail?) { preferred, game in
+            preferredKnownScheduleGame(existing: preferred, candidate: game)
         }
         guard let selected else { return nil }
         let reason = bestMatches.first?.reason ?? "unknown"
