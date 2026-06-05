@@ -1407,36 +1407,17 @@ final class AppModel {
         }
 
         let gamesByDayKey = groupedScheduleGamesByDay(for: month, filter: filter)
-        let monthStart = startOfMonth(for: month)
-        guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
-              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
-              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: monthRange.start),
-              let lastWeek = calendar.dateInterval(of: .weekOfMonth, for: monthEnd) else {
-            return []
-        }
-
-        var days: [MyTeamCalendarDay] = []
-        var cursor = firstWeek.start
-        while cursor < lastWeek.end {
-            let cursorKey = scheduleDayKey(for: cursor)
-            let dayGames = gamesByDayKey[cursorKey] ?? []
-            let myTeamDayGames = calendarMyTeamGames(for: dayGames)
-            days.append(
-                MyTeamCalendarDay(
-                    date: cursor,
-                    isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
-                    isToday: calendar.isDateInToday(cursor),
-                    gameCount: dayGames.count,
-                    hasAttendedGame: dayGames.contains(where: isGameAttended),
-                    dominantStatus: dominantStatus(for: myTeamDayGames),
-                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
-                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter),
-                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames)
-                )
-            )
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = nextDay
-        }
+        let days = ScheduleCalendarDayBuilder.makeDays(
+            monthStart: startOfMonth(for: month),
+            gamesByDate: gamesByDayKey,
+            filter: filter,
+            favoriteTeamID: settings.favoriteTeamID,
+            calendar: calendar,
+            dayKey: { [self] date in scheduleDayKey(for: date) },
+            isToday: { [self] date, _ in calendar.isDateInToday(date) },
+            hasAttendedGame: { [self] games in games.contains(where: isGameAttended) },
+            favoriteTeamResult: { [self] games, _ in calendarFavoriteTeamResult(for: games) }
+        )
         scheduleCalendarDaysCache[cacheKey] = days
         return days
     }
@@ -3651,51 +3632,12 @@ final class AppModel {
         HomeGameSelector.compareTodayGames(lhs, rhs, favoriteTeamID: settings.favoriteTeamID)
     }
 
-    private func dominantStatus(for games: [GameDetail]) -> GameStatus? {
-        ScheduleDayStatusResolver.dominantStatus(for: games)
-    }
-
-    private func calendarMyTeamGames(for games: [GameDetail]) -> [GameDetail] {
-        guard let favoriteTeamID = settings.favoriteTeamID else { return [] }
-        return games.filter { $0.involves(teamID: favoriteTeamID) }
-    }
-
-    private func calendarOpponentTeam(for games: [GameDetail], filter: ScheduleFilter) -> Team? {
-        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
-
-        for game in games {
-            if game.awayTeam.id == favoriteTeamID {
-                return game.homeTeam
-            }
-            if game.homeTeam.id == favoriteTeamID {
-                return game.awayTeam
-            }
-        }
-
-        return nil
-    }
-
     private func calendarFavoriteTeamResult(for games: [GameDetail]) -> TeamGameResult? {
         for game in games {
             if let result = game.finalResult(for: settings.favoriteTeamID) {
                 return result
             }
         }
-        return nil
-    }
-
-    private func calendarFavoriteTeamIsHome(for games: [GameDetail], filter: ScheduleFilter) -> Bool? {
-        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
-
-        for game in games {
-            if game.homeTeam.id == favoriteTeamID {
-                return true
-            }
-            if game.awayTeam.id == favoriteTeamID {
-                return false
-            }
-        }
-
         return nil
     }
 

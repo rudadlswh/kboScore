@@ -592,14 +592,21 @@ private struct SchedulePresentation: Sendable {
             filteredGamesByDate[selectedDayKey] ?? [],
             favoriteTeamID: favoriteTeamID
         )
-        let days = calendarDays(
-            for: monthStart,
+        let todayKey = dayKey(for: currentDate)
+        let days = ScheduleCalendarDayBuilder.makeDays(
+            monthStart: monthStart,
             gamesByDate: filteredGamesByDate,
             filter: filter,
             favoriteTeamID: favoriteTeamID,
-            attendedGameKeys: attendedGameKeys,
-            currentDate: currentDate,
-            calendar: calendar
+            calendar: calendar,
+            dayKey: dayKey(for:),
+            isToday: { _, cursorKey in cursorKey == todayKey },
+            hasAttendedGame: { games in
+                games.contains {
+                    attendedGameKeys.isDisjoint(with: $0.attendanceStorageAliases) == false
+                }
+            },
+            favoriteTeamResult: calendarFavoriteTeamResult(for:favoriteTeamID:)
         )
         let displayedMonthStart = startOfMonth(for: displayedMonth, calendar: calendar)
         let previousMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonthStart)
@@ -655,50 +662,6 @@ private struct SchedulePresentation: Sendable {
         }
     }
 
-    nonisolated private static func calendarDays(
-        for monthStart: Date,
-        gamesByDate: [String: [GameDetail]],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>,
-        currentDate: Date,
-        calendar: Calendar
-    ) -> [MyTeamCalendarDay] {
-        guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
-              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
-              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: monthRange.start),
-              let lastWeek = calendar.dateInterval(of: .weekOfMonth, for: monthEnd) else {
-            return []
-        }
-
-        let todayKey = dayKey(for: currentDate)
-        var days: [MyTeamCalendarDay] = []
-        var cursor = firstWeek.start
-        while cursor < lastWeek.end {
-            let cursorKey = dayKey(for: cursor)
-            let dayGames = gamesByDate[cursorKey] ?? []
-            let myTeamDayGames = favoriteTeamID.map { teamID in
-                dayGames.filter { $0.involves(teamID: teamID) }
-            } ?? []
-            days.append(
-                MyTeamCalendarDay(
-                    date: cursor,
-                    isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
-                    isToday: cursorKey == todayKey,
-                    gameCount: dayGames.count,
-                    hasAttendedGame: dayGames.contains { isGameAttended($0, attendedGameKeys: attendedGameKeys) },
-                    dominantStatus: dominantStatus(for: myTeamDayGames),
-                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
-                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
-                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames, favoriteTeamID: favoriteTeamID)
-                )
-            )
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = nextDay
-        }
-        return days
-    }
-
     nonisolated private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
@@ -706,23 +669,6 @@ private struct SchedulePresentation: Sendable {
 
     nonisolated private static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
         ScheduleGameSelector.sortSelectedGames(games, favoriteTeamID: favoriteTeamID)
-    }
-
-    nonisolated private static func dominantStatus(for games: [GameDetail]) -> GameStatus? {
-        ScheduleDayStatusResolver.dominantStatus(for: games)
-    }
-
-    nonisolated private static func calendarOpponentTeam(
-        for games: [GameDetail],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?
-    ) -> Team? {
-        guard filter == .myTeam, let favoriteTeamID else { return nil }
-        for game in games {
-            if game.awayTeam.id == favoriteTeamID { return game.homeTeam }
-            if game.homeTeam.id == favoriteTeamID { return game.awayTeam }
-        }
-        return nil
     }
 
     nonisolated private static func calendarFavoriteTeamResult(
@@ -741,23 +687,6 @@ private struct SchedulePresentation: Sendable {
             return favoriteTeamWon ? .win : .loss
         }
         return nil
-    }
-
-    nonisolated private static func calendarFavoriteTeamIsHome(
-        for games: [GameDetail],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?
-    ) -> Bool? {
-        guard filter == .myTeam, let favoriteTeamID else { return nil }
-        for game in games {
-            if game.homeTeam.id == favoriteTeamID { return true }
-            if game.awayTeam.id == favoriteTeamID { return false }
-        }
-        return nil
-    }
-
-    nonisolated private static func isGameAttended(_ game: GameDetail, attendedGameKeys: Set<String>) -> Bool {
-        attendedGameKeys.isDisjoint(with: game.attendanceStorageAliases) == false
     }
 }
 
