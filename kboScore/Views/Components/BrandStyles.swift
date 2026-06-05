@@ -656,29 +656,6 @@ struct BasesDiamondView: View {
     }
 }
 
-struct OutCountView: View {
-    @Environment(AppModel.self) private var appModel
-    let outs: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(index < outs ? activeColor : inactiveColor)
-                    .frame(width: 10, height: 10)
-            }
-        }
-    }
-
-    private var activeColor: Color {
-        appModel.favoriteStadiumPalette?.statusRed ?? KBOLivePalette.live
-    }
-
-    private var inactiveColor: Color {
-        appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.systemGray5)
-    }
-}
-
 private struct DiamondBase: View {
     @Environment(AppModel.self) private var appModel
     let isFilled: Bool

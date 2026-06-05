@@ -120,7 +120,6 @@ final class AppModel {
     private var notificationRegistrationSyncTaskKey: NotificationRegistrationKey?
     private var notificationRegistrationSyncGeneration = 0
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
-    private var notifiedGameContentKeys: Set<String> = []
     private var lastFavoriteTeamWidgetSemanticKey: String?
     private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
 
@@ -985,10 +984,6 @@ final class AppModel {
         }
     }
 
-    var isDoosanFavoriteSelected: Bool {
-        Self.canonicalTeamIdentifier(settings.favoriteTeamID) == "doosan"
-    }
-
     var favoriteTeam: Team? {
         teams.first { $0.id == settings.favoriteTeamID }
     }
@@ -1067,18 +1062,6 @@ final class AppModel {
             return "오늘 경기가 없어 기준일 이전 완료 경기로 표시합니다."
         }
         return "오늘 경기가 없어 직전주차 기준 순위를 표시합니다."
-    }
-
-    var todayGamesCount: Int {
-        homeTodayGames.count
-    }
-
-    var liveGamesCount: Int {
-        homeTodayGames.filter { $0.status.isLiveLike }.count
-    }
-
-    var myGamesCount: Int {
-        homeTodayGames.filter { $0.involves(teamID: settings.favoriteTeamID) }.count
     }
 
     var myTeamTodayGame: GameDetail? {
@@ -1390,15 +1373,6 @@ final class AppModel {
 
     func myTeamGames(on date: Date) -> [GameDetail] {
         scheduleGames(on: date, filter: .myTeam)
-    }
-
-    func scheduleHasAvailableMonths(filter: ScheduleFilter) -> Bool {
-        availableScheduleMonths(filter: filter).isEmpty == false
-    }
-
-    func isScheduleMonthAvailable(_ date: Date, filter: ScheduleFilter) -> Bool {
-        let monthStart = startOfMonth(for: date)
-        return availableScheduleMonths(filter: filter).contains(monthStart)
     }
 
     func nearestScheduleMonth(to date: Date, filter: ScheduleFilter) -> Date? {
@@ -1813,16 +1787,8 @@ final class AppModel {
         await loadScheduleIfNeeded(for: month)
     }
 
-    func refreshMyTeamSchedule(for month: Date) async {
-        await refreshSchedule(for: month)
-    }
-
     func isLoadingSchedule(for month: Date) -> Bool {
         loadingScheduleMonths.contains(KBOMonthScheduleKey(date: month, calendar: calendar))
-    }
-
-    func isLoadingMyTeamSchedule(for month: Date) -> Bool {
-        isLoadingSchedule(for: month)
     }
 
     func scheduleStatusMessage(for month: Date) -> String? {
@@ -1846,10 +1812,6 @@ final class AppModel {
             return "공식 월간 일정이 지연되어 현재 경기 목록 기반 일정으로 표시 중입니다."
         }
         return "월간 일정을 불러오지 못했습니다."
-    }
-
-    func myTeamScheduleStatusMessage(for month: Date) -> String? {
-        scheduleStatusMessage(for: month)
     }
 
     func scheduleDebugSummary(for month: Date) -> String? {
@@ -3677,10 +3639,6 @@ final class AppModel {
         return game.canonicalGameIdentityValue
     }
 
-    private func homePriority(for summary: GameSummary) -> Int {
-        HomeGameSelector.priority(for: summary)
-    }
-
     private func matchesHomeFilter(_ summary: GameSummary) -> Bool {
         HomeGameSelector.matches(summary, filter: homeFilter)
     }
@@ -3859,54 +3817,6 @@ final class AppModel {
             print("[NotificationPipeline] skipped reason=backendDriven game=\(debugGameIdentifier(for: updatedGame)) hadPreviousState=\(hadPreviousState)")
             #endif
         }
-    }
-
-    private func notificationEvent(
-        previous: GameContentNotificationState,
-        current: GameContentNotificationState
-    ) -> ScoreNotificationEventType? {
-        if previous.awayScore != current.awayScore || previous.homeScore != current.homeScore {
-            return .scoreChange
-        }
-        if current.status.isLiveLike,
-           nonBlank(current.currentBatterName) != nil,
-           nonBlank(current.currentPitcherName) != nil,
-           baseOccupancyCount(current.bases) > baseOccupancyCount(previous.bases),
-           (current.outs ?? previous.outs ?? 0) <= (previous.outs ?? current.outs ?? 0) {
-            return .onBase
-        }
-        return nil
-    }
-
-    private func notificationPreferenceAllows(_ event: ScoreNotificationEventType) -> Bool {
-        switch event {
-        case .gameStart:
-            return settings.notificationPreferences.gameStart
-        case .scoreChange:
-            return settings.notificationPreferences.scoreChange
-        case .onBase:
-            return settings.notificationPreferences.scoreChange
-        case .leadChange:
-            return settings.notificationPreferences.leadChange
-        case .gameEnd:
-            return settings.notificationPreferences.gameEnd
-        case .inningChange:
-            return settings.notificationPreferences.inningChangeEnabled
-        case .rainDelay:
-            return settings.notificationPreferences.rainDelay
-        case .general:
-            return true
-        }
-    }
-
-    private func baseOccupancyCount(_ bases: RunnerState?) -> Int {
-        guard let bases else { return 0 }
-        return (bases.first ? 1 : 0) + (bases.second ? 1 : 0) + (bases.third ? 1 : 0)
-    }
-
-    private func baseFingerprint(_ bases: RunnerState?) -> String {
-        guard let bases else { return "---" }
-        return "\(bases.first ? "1" : "-")\(bases.second ? "2" : "-")\(bases.third ? "3" : "-")"
     }
 
     private func notifyCancellationTransitions(

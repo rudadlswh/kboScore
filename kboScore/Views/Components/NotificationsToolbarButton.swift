@@ -106,12 +106,6 @@ struct StadiumNotificationChromeButton: View {
     }
 }
 
-struct DoosanNotificationChromeButton: View {
-    var body: some View {
-        StadiumNotificationChromeButton(palette: .doosan)
-    }
-}
-
 extension View {
     func notificationsToolbarButton() -> some View {
         modifier(NotificationsToolbarButtonModifier())
