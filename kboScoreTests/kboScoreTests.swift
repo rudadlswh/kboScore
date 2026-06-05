@@ -1287,6 +1287,61 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "provider:sched-202605130930-c5d5aa85-89747089")?.publicGameID == "20260513-KIW-HAN")
     }
 
+    @Test func scheduleMonthSnapshotMergesTransitiveProviderAliases() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let kt = try #require(teams.first(where: { $0.id == "kt" }))
+        let hanwha = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let scheduledProviderID = "sched-202605101830-kt-hanwha"
+        let officialProviderID = "20260510KTHH0"
+        let scheduledStart = isoDate("2026-05-10T18:30:00+09:00")
+        let finalStart = isoDate("2026-05-11T18:30:00+09:00")
+        let scheduledShell = makeGameDetail(
+            id: UUID(uuidString: "15151515-1515-1515-1515-151515151501")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: scheduledProviderID
+        )
+        let officialFinal = makeGameDetail(
+            id: UUID(uuidString: "15151515-1515-1515-1515-151515151502")!,
+            scheduledStart: finalStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 6,
+            homeScore: 4,
+            status: .final,
+            providerGameID: officialProviderID
+        )
+        let bridge = makeGameDetail(
+            id: UUID(uuidString: "15151515-1515-1515-1515-151515151503")!,
+            scheduledStart: scheduledStart,
+            venue: "대전",
+            awayTeam: kt,
+            homeTeam: hanwha,
+            awayScore: 2,
+            homeScore: 1,
+            status: .live,
+            note: "official_provider_game_id=\(officialProviderID)",
+            providerGameID: scheduledProviderID
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: teams, games: [scheduledShell, officialFinal, bridge], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let snapshot = model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: scheduledStart))
+
+        #expect(snapshot.count == 1)
+        #expect(snapshot.first?.status == .final)
+        #expect(snapshot.first?.awayScore == 6)
+        #expect(snapshot.first?.homeScore == 4)
+    }
+
     @Test func gameLookupDoesNotChooseAmbiguousSamePriorityProviderMatch() throws {
         let first = try makeIdentityLookupGame(
             id: UUID(uuidString: "08080808-0808-0808-0808-080808080801")!,

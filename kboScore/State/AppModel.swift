@@ -3961,16 +3961,24 @@ final class AppModel {
 
         for candidate in sourceGames {
             let candidateAliases = identityAliases(for: candidate)
-            let mergeKey = candidateAliases
-                .compactMap { mergeKeyByAlias[$0] }
-                .sorted()
-                .first ?? candidate.canonicalGameIdentityKey
+            let linkedMergeKeys = Set(candidateAliases.compactMap { mergeKeyByAlias[$0] })
+            let mergeKey = linkedMergeKeys.sorted().first ?? candidate.canonicalGameIdentityKey
+            var aliasesToRelink = candidateAliases
+            var selected = gamesByMergeKey[mergeKey].map {
+                preferredKnownScheduleGame(existing: $0, candidate: candidate)
+            } ?? candidate
 
-            let selected = preferredKnownScheduleGame(existing: gamesByMergeKey[mergeKey], candidate: candidate)
+            for linkedKey in linkedMergeKeys.sorted() where linkedKey != mergeKey {
+                guard let linkedGame = gamesByMergeKey[linkedKey] else { continue }
+                aliasesToRelink.formUnion(identityAliases(for: linkedGame))
+                selected = preferredKnownScheduleGame(existing: selected, candidate: linkedGame)
+                gamesByMergeKey[linkedKey] = nil
+            }
+
             gamesByMergeKey[mergeKey] = selected
 
             let selectedAliases = identityAliases(for: selected)
-            for alias in candidateAliases.union(selectedAliases) {
+            for alias in aliasesToRelink.union(selectedAliases) {
                 mergeKeyByAlias[alias] = mergeKey
             }
         }
