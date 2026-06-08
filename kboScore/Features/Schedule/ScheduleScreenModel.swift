@@ -497,10 +497,7 @@ private struct SchedulePresentation: Sendable {
     }
 
     nonisolated static func dayKey(for date: Date) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", components.year ?? 1970, components.month ?? 1, components.day ?? 1)
+        ScheduleDateKeyFormatter.dayKey(for: date)
     }
 
     nonisolated private static func buildSynchronously(
