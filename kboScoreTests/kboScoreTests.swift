@@ -24,6 +24,135 @@ struct kboScoreTests {
         #expect(games.first?.homeTeam.id == "lg")
     }
 
+    @Test func homeContentStateSelectsExpectedDisplayBranch() throws {
+        let bootstrap = MockKBOData.makeBootstrap()
+        let game = try #require(bootstrap.games.first)
+        let summary = game.summary(isMyTeamGame: false)
+        let snapshot = TeamStandingsSnapshot(
+            team: try #require(bootstrap.teams.first),
+            rank: 1,
+            wins: 1,
+            losses: 0,
+            ties: 0,
+            remainingRegularSeasonGames: 143,
+            recentResults: [.win]
+        )
+
+        if case .noGames = HomeContentState.make(
+            todayGames: [],
+            filteredGames: [],
+            filteredGameDetails: [],
+            fallbackTitle: "title",
+            fallbackSubtitle: "subtitle",
+            fallbackSnapshots: []
+        ) {
+        } else {
+            Issue.record("Expected noGames")
+        }
+
+        if case let .fallbackStandings(title, subtitle, snapshots) = HomeContentState.make(
+            todayGames: [],
+            filteredGames: [],
+            filteredGameDetails: [],
+            fallbackTitle: "title",
+            fallbackSubtitle: "subtitle",
+            fallbackSnapshots: [snapshot]
+        ) {
+            #expect(title == "title")
+            #expect(subtitle == "subtitle")
+            #expect(snapshots == [snapshot])
+        } else {
+            Issue.record("Expected fallbackStandings")
+        }
+
+        if case .noFilteredGames = HomeContentState.make(
+            todayGames: [game],
+            filteredGames: [],
+            filteredGameDetails: [],
+            fallbackTitle: "title",
+            fallbackSubtitle: "subtitle",
+            fallbackSnapshots: [snapshot]
+        ) {
+        } else {
+            Issue.record("Expected noFilteredGames")
+        }
+
+        if case let .games(games) = HomeContentState.make(
+            todayGames: [game],
+            filteredGames: [summary],
+            filteredGameDetails: [game],
+            fallbackTitle: "title",
+            fallbackSubtitle: "subtitle",
+            fallbackSnapshots: []
+        ) {
+            #expect(games.map(\.id) == [game.id])
+        } else {
+            Issue.record("Expected games")
+        }
+    }
+
+    @Test func homeHeroGamePresentationFormatsDisplayText() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let liveSummary = GameSummary(
+            id: UUID(uuidString: "93310000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 2,
+            homeScore: 3,
+            status: .live,
+            inningText: "Top 3",
+            recentEvent: nil,
+            isMyTeamGame: false,
+            awayStartingPitcherName: " ",
+            homeStartingPitcherName: "임찬규",
+            currentPitcherName: nil,
+            currentBatterName: nil,
+            bases: RunnerState(first: true, second: false, third: true),
+            baseRunners: nil,
+            balls: 4,
+            strikes: 3,
+            outs: 2
+        )
+
+        #expect(HomeHeroGamePresentation.timeText(for: liveSummary) == "3회 초")
+        #expect(HomeHeroGamePresentation.venueText(for: liveSummary) == "잠실 · 서울")
+        #expect(HomeHeroGamePresentation.countText(for: liveSummary) == "B 3 S 2 O 2")
+        #expect(HomeHeroGamePresentation.basesText(for: liveSummary) == "1루 3루")
+        #expect(HomeHeroGamePresentation.pitcherText(liveSummary.awayStartingPitcherName) == "선발 미정")
+        #expect(HomeHeroGamePresentation.accessibilityLabel(for: liveSummary).contains("원정 선발 선발 미정"))
+
+        let unknownVenueSummary = GameSummary(
+            id: UUID(uuidString: "93310000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-04-28T18:30:00+09:00"),
+            venue: "  ",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            inningText: nil,
+            recentEvent: nil,
+            isMyTeamGame: false,
+            awayStartingPitcherName: nil,
+            homeStartingPitcherName: nil,
+            currentPitcherName: nil,
+            currentBatterName: nil,
+            bases: nil,
+            baseRunners: nil,
+            balls: nil,
+            strikes: nil,
+            outs: nil
+        )
+
+        #expect(HomeHeroGamePresentation.venueText(for: unknownVenueSummary) == "장소 미정")
+        #expect(HomeHeroGamePresentation.countText(for: unknownVenueSummary) == nil)
+        #expect(HomeHeroGamePresentation.basesText(for: unknownVenueSummary) == nil)
+    }
+
     @Test func countDisplayNormalizesTransitionalValues() throws {
         #expect(KBOCountDisplay.balls(4) == 3)
         #expect(KBOCountDisplay.strikes(3) == 2)
@@ -13010,6 +13139,40 @@ struct kboScoreTests {
         #expect(row.code == "lg")
         #expect(row.name == "LG 트윈스")
         #expect(row.shortName == "LG")
+    }
+
+    @Test func standingsContentStateSelectsExpectedDisplayBranch() throws {
+        let team = try #require(MockKBOData.makeBootstrap().teams.first)
+        let snapshot = TeamStandingsSnapshot(
+            team: team,
+            rank: 1,
+            wins: 1,
+            losses: 0,
+            ties: 0,
+            remainingRegularSeasonGames: 143,
+            recentResults: [.win]
+        )
+
+        if case .empty = StandingsContentState.make(
+            rows: [],
+            revision: 7,
+            favoriteTeamID: "lg"
+        ) {
+        } else {
+            Issue.record("Expected empty standings content state")
+        }
+
+        if case let .table(rows, revision, favoriteTeamID) = StandingsContentState.make(
+            rows: [snapshot],
+            revision: 7,
+            favoriteTeamID: "lg"
+        ) {
+            #expect(rows == [snapshot])
+            #expect(revision == 7)
+            #expect(favoriteTeamID == "lg")
+        } else {
+            Issue.record("Expected table standings content state")
+        }
     }
 
     @Test func standingsTabRendersLocalTeamRankRowsImmediately() async throws {
