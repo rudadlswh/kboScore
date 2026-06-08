@@ -415,16 +415,11 @@ final class AppModel {
             await existingTask.value
             return
         }
-        let unthrottledReasons: Set<String> = [
-            "homeRefresh",
-            "favoriteTeamSelected",
-            "sceneBackground",
-            "backgroundTask"
-        ]
-        let shouldThrottleRecentRefresh = !unthrottledReasons.contains(reason)
-        if shouldThrottleRecentRefresh,
-           let refreshedAt = lastHomeFavoriteGameRefreshAt[refreshKey],
-           Date().timeIntervalSince(refreshedAt) < 15 {
+        if HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: reason,
+            lastRefreshedAt: lastHomeFavoriteGameRefreshAt[refreshKey],
+            now: Date()
+        ) {
             #if DEBUG
             print("HomeFavoriteGameRefresh skipped reason=recent date=\(dayKey) favoriteTeamId=\(favoriteTeamID)")
             #endif

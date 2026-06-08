@@ -153,6 +153,39 @@ struct kboScoreTests {
         #expect(HomeHeroGamePresentation.basesText(for: unknownVenueSummary) == nil)
     }
 
+    @Test func homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle() throws {
+        let now = isoDate("2026-06-09T12:00:00+09:00")
+        let recentRefresh = now.addingTimeInterval(-14)
+        let staleRefresh = now.addingTimeInterval(-15)
+
+        #expect(HomeFavoriteGameRefreshPolicy.shouldThrottleRecentRefresh(reason: "foreground") == true)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldThrottleRecentRefresh(reason: "homeRefresh") == false)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldThrottleRecentRefresh(reason: "favoriteTeamSelected") == false)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldThrottleRecentRefresh(reason: "sceneBackground") == false)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldThrottleRecentRefresh(reason: "backgroundTask") == false)
+
+        #expect(HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: "foreground",
+            lastRefreshedAt: recentRefresh,
+            now: now
+        ) == true)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: "foreground",
+            lastRefreshedAt: staleRefresh,
+            now: now
+        ) == false)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: "homeRefresh",
+            lastRefreshedAt: recentRefresh,
+            now: now
+        ) == false)
+        #expect(HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: "foreground",
+            lastRefreshedAt: nil,
+            now: now
+        ) == false)
+    }
+
     @Test func countDisplayNormalizesTransitionalValues() throws {
         #expect(KBOCountDisplay.balls(4) == 3)
         #expect(KBOCountDisplay.strikes(3) == 2)
