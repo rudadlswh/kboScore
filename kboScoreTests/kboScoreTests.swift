@@ -5866,13 +5866,76 @@ struct kboScoreTests {
     @Test func liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
-        let firstFingerprint = "4|3|7회말|B2|S1|O0|홍길동|김투수"
-        let changedFingerprint = "4|3|7회말|B2|S1|O0|박타자|김투수"
+        let firstKey = liveActivityContentStateKey()
 
-        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: firstFingerprint) == false)
-        deduper.record(gameID: gameID, contentFingerprint: firstFingerprint)
-        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: firstFingerprint))
-        #expect(deduper.isDuplicate(gameID: gameID, contentFingerprint: changedFingerprint) == false)
+        #expect(deduper.decision(gameID: gameID, contentStateKey: firstKey).shouldSkip == false)
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+        #expect(deduper.decision(gameID: gameID, contentStateKey: firstKey).shouldSkip)
+    }
+
+    @Test func liveActivityUpdateDeduperUpdatesWhenScoreChanges() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstKey = liveActivityContentStateKey(favoriteScoreText: "4")
+        let changedKey = liveActivityContentStateKey(favoriteScoreText: "5")
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+
+        let decision = deduper.decision(gameID: gameID, contentStateKey: changedKey)
+
+        #expect(decision.shouldSkip == false)
+        #expect(decision.changedFields == ["favoriteScoreText"])
+    }
+
+    @Test func liveActivityUpdateDeduperUpdatesWhenCountChanges() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstKey = liveActivityContentStateKey(balls: 1, strikes: 1, outs: 0)
+        let changedKey = liveActivityContentStateKey(balls: 2, strikes: 2, outs: 1)
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+
+        let decision = deduper.decision(gameID: gameID, contentStateKey: changedKey)
+
+        #expect(decision.shouldSkip == false)
+        #expect(decision.changedFields == ["balls", "strikes", "outs"])
+    }
+
+    @Test func liveActivityUpdateDeduperUpdatesWhenBasesChange() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstKey = liveActivityContentStateKey(runnerOnFirst: false, runnerOnSecond: false, runnerOnThird: false)
+        let changedKey = liveActivityContentStateKey(runnerOnFirst: true, runnerOnSecond: false, runnerOnThird: true)
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+
+        let decision = deduper.decision(gameID: gameID, contentStateKey: changedKey)
+
+        #expect(decision.shouldSkip == false)
+        #expect(decision.changedFields == ["runnerOnFirst", "runnerOnThird"])
+    }
+
+    @Test func liveActivityUpdateDeduperUpdatesWhenBatterOrPitcherChanges() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstKey = liveActivityContentStateKey(currentBatterName: "홍길동", currentPitcherName: "김투수")
+        let changedKey = liveActivityContentStateKey(currentBatterName: "박타자", currentPitcherName: "이투수")
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+
+        let decision = deduper.decision(gameID: gameID, contentStateKey: changedKey)
+
+        #expect(decision.shouldSkip == false)
+        #expect(decision.changedFields == ["currentBatterName", "currentPitcherName"])
+    }
+
+    @Test func liveActivityUpdateDeduperUpdatesWhenRunnerStateChangesWithSameScoreAndInning() async throws {
+        let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
+        var deduper = FavoriteTeamLiveActivityUpdateDeduper()
+        let firstKey = liveActivityContentStateKey(favoriteScoreText: "4", opponentScoreText: "3", inningText: "7회 말", runnerOnFirst: false)
+        let changedKey = liveActivityContentStateKey(favoriteScoreText: "4", opponentScoreText: "3", inningText: "7회 말", runnerOnFirst: true)
+        deduper.record(gameID: gameID, contentStateKey: firstKey)
+
+        let decision = deduper.decision(gameID: gameID, contentStateKey: changedKey)
+
+        #expect(decision.shouldSkip == false)
+        #expect(decision.changedFields == ["runnerOnFirst"])
     }
 
     @Test func liveActivityToggleUsesSupportedControllerForFavoriteLiveGame() async throws {
@@ -16275,6 +16338,42 @@ private func makeRoundRobinProbabilitySchedule(
     }
 
     return games
+}
+
+private func liveActivityContentStateKey(
+    isPreGame: Bool = false,
+    favoriteScoreText: String = "4",
+    opponentScoreText: String = "3",
+    inningText: String = "7회 말",
+    summaryText: String = "LIVE",
+    favoriteStartingPitcherName: String? = "임찬규",
+    opponentStartingPitcherName: String? = "문동주",
+    balls: Int? = 1,
+    strikes: Int? = 1,
+    outs: Int? = 0,
+    runnerOnFirst: Bool? = false,
+    runnerOnSecond: Bool? = false,
+    runnerOnThird: Bool? = false,
+    currentBatterName: String? = "홍길동",
+    currentPitcherName: String? = "김투수"
+) -> FavoriteTeamLiveActivityContentStateKey {
+    FavoriteTeamLiveActivityContentStateKey(
+        isPreGame: isPreGame,
+        favoriteScoreText: favoriteScoreText,
+        opponentScoreText: opponentScoreText,
+        inningText: inningText,
+        summaryText: summaryText,
+        favoriteStartingPitcherName: favoriteStartingPitcherName,
+        opponentStartingPitcherName: opponentStartingPitcherName,
+        balls: balls,
+        strikes: strikes,
+        outs: outs,
+        runnerOnFirst: runnerOnFirst,
+        runnerOnSecond: runnerOnSecond,
+        runnerOnThird: runnerOnThird,
+        currentBatterName: currentBatterName,
+        currentPitcherName: currentPitcherName
+    )
 }
 
 private func roundRobinPairings(teamCount: Int) -> [[(first: Int, second: Int)]] {

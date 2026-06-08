@@ -18,7 +18,7 @@ enum RemoteNotificationRegistrationClientError: Error, Sendable {
 }
 
 enum NotificationRegistrationClientFactory {
-    static func makeAppClient() -> any NotificationRegistrationClient {
+    static func configuredNotificationRegistrationURL() -> URL? {
         let processValue = ProcessInfo.processInfo.environment["KBO_NOTIFICATION_REGISTRATION_URL"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let bundleValue = (Bundle.main.object(forInfoDictionaryKey: "NotificationRegistrationURL") as? String)?
@@ -27,6 +27,13 @@ enum NotificationRegistrationClientFactory {
                 .compactMap({ $0 })
                 .first(where: { $0.isEmpty == false && $0.hasPrefix("$(") == false }),
               let endpointURL = URL(string: endpointText) else {
+            return nil
+        }
+        return endpointURL
+    }
+
+    static func makeAppClient() -> any NotificationRegistrationClient {
+        guard let endpointURL = configuredNotificationRegistrationURL() else {
             #if DEBUG
             print("[NotificationPipeline] notification registration skipped: registration URL missing")
             #endif
