@@ -6,6 +6,7 @@
 //
 
 enum StandingsContentState {
+    case loading
     case empty
     case table(
         rows: [TeamStandingsSnapshot],
@@ -15,9 +16,13 @@ enum StandingsContentState {
 
     static func make(
         rows: [TeamStandingsSnapshot],
+        isLoading: Bool,
         revision: Int,
         favoriteTeamID: String?
     ) -> StandingsContentState {
+        if isLoading, rows.isEmpty {
+            return .loading
+        }
         guard rows.isEmpty == false else { return .empty }
         return .table(
             rows: rows,

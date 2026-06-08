@@ -13188,6 +13188,7 @@ struct kboScoreTests {
 
         if case .empty = StandingsContentState.make(
             rows: [],
+            isLoading: false,
             revision: 7,
             favoriteTeamID: "lg"
         ) {
@@ -13195,8 +13196,19 @@ struct kboScoreTests {
             Issue.record("Expected empty standings content state")
         }
 
+        if case .loading = StandingsContentState.make(
+            rows: [],
+            isLoading: true,
+            revision: 7,
+            favoriteTeamID: "lg"
+        ) {
+        } else {
+            Issue.record("Expected loading standings content state")
+        }
+
         if case let .table(rows, revision, favoriteTeamID) = StandingsContentState.make(
             rows: [snapshot],
+            isLoading: true,
             revision: 7,
             favoriteTeamID: "lg"
         ) {

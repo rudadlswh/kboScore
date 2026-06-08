@@ -50,6 +50,9 @@ struct StandingsView: View {
             }
 #endif
             switch standingsContentState {
+            case .loading:
+                ProgressView("순위 데이터를 불러오는 중")
+                    .frame(maxWidth: .infinity, minHeight: 220)
             case .empty:
                 EmptyStateView(
                     systemImage: "list.number",
@@ -71,6 +74,7 @@ struct StandingsView: View {
     private var standingsContentState: StandingsContentState {
         StandingsContentState.make(
             rows: appModel.standingsSnapshots,
+            isLoading: appModel.isLoading && appModel.games.isEmpty,
             revision: appModel.standingsRowsRevision,
             favoriteTeamID: appModel.settings.favoriteTeamID
         )
