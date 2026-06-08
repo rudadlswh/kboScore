@@ -49,25 +49,40 @@ struct StandingsView: View {
                 DataStatusBannerView(message: debugMessage)
             }
 #endif
-            if appModel.standingsSnapshots.isEmpty {
+            switch standingsContentState {
+            case .empty:
                 EmptyStateView(
                     systemImage: "list.number",
                     title: "정규시즌 순위 데이터 없음",
                     message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
                 )
-            } else {
-                standingsTable
+            case let .table(rows, revision, favoriteTeamID):
+                standingsTable(
+                    rows: rows,
+                    revision: revision,
+                    favoriteTeamID: favoriteTeamID
+                )
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
 
-    private var standingsTable: some View {
-        let rows = appModel.standingsSnapshots
-        let rowsRevision = appModel.standingsRowsRevision
+    private var standingsContentState: StandingsContentState {
+        StandingsContentState.make(
+            rows: appModel.standingsSnapshots,
+            revision: appModel.standingsRowsRevision,
+            favoriteTeamID: appModel.settings.favoriteTeamID
+        )
+    }
+
+    private func standingsTable(
+        rows: [TeamStandingsSnapshot],
+        revision: Int,
+        favoriteTeamID: String?
+    ) -> some View {
 #if DEBUG
-        let _ = Self.logVisibleRows(rows, revision: rowsRevision)
+        let _ = Self.logVisibleRows(rows, revision: revision)
 #endif
 
         return GeometryReader { proxy in
@@ -82,14 +97,14 @@ struct StandingsView: View {
                         StandingsRowView(
                             snapshot: snapshot,
                             leaderSnapshot: leaderSnapshot,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
+                            favoriteTeamID: favoriteTeamID,
                             metrics: metrics
                         )
                         .id(StandingsRowRenderIdentity(snapshot: snapshot))
                     }
                 }
             }
-            .id(rowsRevision)
+            .id(revision)
         }
         .frame(height: CGFloat(rows.count) * 57 + 18)
     }
