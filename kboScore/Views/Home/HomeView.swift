@@ -62,29 +62,28 @@ struct HomeView: View {
             SectionTitleView(title: "직관 기록")
             MyTeamAttendanceSummaryView(summary: appModel.myTeamAttendanceSummary)
 
-            if appModel.todayGames.isEmpty {
-                if appModel.homeFallbackStandingsSnapshots.isEmpty {
-                    EmptyStateView(
-                        systemImage: "sportscourt",
-                        title: "표시할 경기가 없습니다",
-                        message: "오늘 경기가 없고 최근 완료 경기 데이터도 없습니다."
-                    )
-                } else {
-                    HomeFallbackStandingsSection(
-                        title: appModel.homeFallbackTitleText,
-                        subtitle: appModel.homeFallbackSubtitleText,
-                        snapshots: appModel.homeFallbackStandingsSnapshots
-                    )
-                }
-            } else if appModel.filteredHomeGames.isEmpty {
+            switch homeContentState {
+            case .noGames:
+                EmptyStateView(
+                    systemImage: "sportscourt",
+                    title: "표시할 경기가 없습니다",
+                    message: "오늘 경기가 없고 최근 완료 경기 데이터도 없습니다."
+                )
+            case let .fallbackStandings(title, subtitle, snapshots):
+                HomeFallbackStandingsSection(
+                    title: title,
+                    subtitle: subtitle,
+                    snapshots: snapshots
+                )
+            case .noFilteredGames:
                 EmptyStateView(
                     systemImage: "sportscourt",
                     title: "표시할 경기가 없습니다",
                     message: "선택한 필터에 맞는 오늘 경기가 없습니다."
                 )
-            } else {
+            case let .games(games):
                 LazyVStack(spacing: 8) {
-                    ForEach(appModel.filteredHomeGameDetails) { game in
+                    ForEach(games) { game in
                         NavigationLink(value: game) {
                             GameCardView(
                                 summary: game.summary(isMyTeamGame: game.involves(teamID: appModel.settings.favoriteTeamID)),
@@ -113,28 +112,27 @@ struct HomeView: View {
             }
 #endif
 
-            if appModel.todayGames.isEmpty {
-                if appModel.homeFallbackStandingsSnapshots.isEmpty {
-                    EmptyStateView(
-                        systemImage: "sportscourt",
-                        title: "표시할 경기가 없습니다",
-                        message: "오늘 경기가 없고 최근 완료 경기 데이터도 없습니다."
-                    )
-                } else {
-                    HomeFallbackStandingsSection(
-                        title: appModel.homeFallbackTitleText,
-                        subtitle: appModel.homeFallbackSubtitleText,
-                        snapshots: appModel.homeFallbackStandingsSnapshots
-                    )
-                }
-            } else if appModel.filteredHomeGames.isEmpty {
+            switch homeContentState {
+            case .noGames:
+                EmptyStateView(
+                    systemImage: "sportscourt",
+                    title: "표시할 경기가 없습니다",
+                    message: "오늘 경기가 없고 최근 완료 경기 데이터도 없습니다."
+                )
+            case let .fallbackStandings(title, subtitle, snapshots):
+                HomeFallbackStandingsSection(
+                    title: title,
+                    subtitle: subtitle,
+                    snapshots: snapshots
+                )
+            case .noFilteredGames:
                 EmptyStateView(
                     systemImage: "sportscourt",
                     title: "표시할 경기가 없습니다",
                     message: "선택한 필터에 맞는 오늘 경기가 없습니다."
                 )
-            } else {
-                if let featuredHomeGame {
+            case let .games(games):
+                if let featuredHomeGame = games.first {
                     Text("오늘의 메인 보드")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(palette.secondary)
@@ -160,8 +158,15 @@ struct HomeView: View {
         .padding(.vertical, 10)
     }
 
-    private var featuredHomeGame: GameDetail? {
-        appModel.filteredHomeGameDetails.first
+    private var homeContentState: HomeContentState {
+        HomeContentState.make(
+            todayGames: appModel.todayGames,
+            filteredGames: appModel.filteredHomeGames,
+            filteredGameDetails: appModel.filteredHomeGameDetails,
+            fallbackTitle: appModel.homeFallbackTitleText,
+            fallbackSubtitle: appModel.homeFallbackSubtitleText,
+            fallbackSnapshots: appModel.homeFallbackStandingsSnapshots
+        )
     }
 
 }
