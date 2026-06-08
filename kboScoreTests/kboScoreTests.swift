@@ -2941,7 +2941,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -2997,7 +2997,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3048,7 +3048,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3106,7 +3106,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3160,7 +3160,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3216,7 +3216,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3269,7 +3269,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
@@ -3325,7 +3325,7 @@ struct kboScoreTests {
             usePersistedSettings: false,
             currentDateProvider: { referenceNow },
             cancellationNotificationScheduler: { request in
-                await collector.append(request)
+                collector.append(request)
             }
         )
         model.settings.favoriteTeamID = "lg"
