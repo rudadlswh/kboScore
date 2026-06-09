@@ -688,15 +688,15 @@ private struct BaseRunnerList: View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(runners) { runner in
                 HStack(spacing: 6) {
-//                    Text(runner.base)
-//                        .font(.caption.weight(.heavy))
-//                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
-//                        .frame(width: 24, alignment: .leading)
-//                    Text("점유")
-//                        .font(.subheadline.weight(.semibold))
-//                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
-//                        .lineLimit(1)
-//                        .minimumScaleFactor(0.8)
+                    Text(runner.base)
+                        .font(.caption.weight(.heavy))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
+                        .frame(width: 24, alignment: .leading)
+                    Text("점유")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
         }
