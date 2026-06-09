@@ -1481,8 +1481,9 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 
     private func officialDateText(for game: GameDetail) -> String {
-        if let officialGameID = game.officialGameCenterID,
-           officialGameID.count >= 8 {
+        if let officialGameID = game.officialGameCenterID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           officialGameID.count >= 8,
+           officialGameID.prefix(8).allSatisfy(\.isNumber) {
             return String(officialGameID.prefix(8))
         }
         let components = calendar.dateComponents([.year, .month, .day], from: game.scheduledStart)

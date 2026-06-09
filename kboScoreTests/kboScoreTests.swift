@@ -6792,6 +6792,47 @@ struct kboScoreTests {
         #expect(body?.contains("date=20260323") == true)
     }
 
+    @Test func officialGameCenterClientUsesScheduledDateWhenProviderIDIsSchedulePlaceholder() async throws {
+        let officialGameList = """
+        {
+          "game": [],
+          "code": "100",
+          "msg": "성공"
+        }
+        """.data(using: .utf8)!
+        let session = makeStubSession()
+        let client = OfficialKBOGameCenterClient(
+            baseURL: URL(string: "https://www.koreabaseball.com/")!,
+            session: session
+        )
+        URLProtocolStub.testResponses = [
+            "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList": StubResponse(statusCode: 200, data: officialGameList)
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let game = try makeIdentityLookupGame(
+            id: UUID(uuidString: "13131313-1313-1313-1313-131313131303")!,
+            publicGameID: "20260513-KIW-HAN",
+            providerGameID: "sched-202605130930-c5d5aa85-89747089",
+            officialProviderGameID: nil,
+            scheduledStart: isoDate("2026-05-13T18:30:00+09:00"),
+            awayTeamID: "kiwoom",
+            homeTeamID: "hanwha"
+        )
+
+        _ = await client.reconcileScheduledStartTimes(in: [game])
+
+        let request = try #require(URLProtocolStub.lastRequest)
+        let body = String(data: request.httpBody ?? Data(), encoding: .utf8)
+        #expect(request.url?.absoluteString == "https://www.koreabaseball.com/ws/Main.asmx/GetKboGameList")
+        #expect(body?.contains("date=20260513") == true)
+        #expect(body?.contains("date=sched-20") == false)
+    }
+
     @Test func officialGameCenterClientReconcilesScheduleStartTimeFromOfficialGameList() async throws {
         let officialGameList = """
         {
