@@ -77,19 +77,6 @@ enum StandingsRowBuilder {
             return nil
         }
 
-        let lowered = raw.lowercased()
-        if TeamIdentity.catalog[lowered] != nil {
-            return lowered
-        }
-
-        if let matched = TeamIdentity.catalog.first(where: { _, identity in
-            identity.shortLabel.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.monogram.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.displayName == raw
-        })?.key {
-            return matched
-        }
-
-        return lowered
+        return Team.canonicalID(for: raw) ?? raw.lowercased()
     }
 }

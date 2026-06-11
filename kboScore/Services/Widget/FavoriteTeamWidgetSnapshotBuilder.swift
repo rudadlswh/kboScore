@@ -113,12 +113,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
     }
 
     private static func scheduleDayKey(for date: Date) -> String {
-        var scheduleCalendar = Calendar(identifier: .gregorian)
-        scheduleCalendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-        let components = scheduleCalendar.dateComponents([.year, .month, .day], from: date)
-        let year = components.year ?? 1970
-        let month = components.month ?? 1
-        let day = components.day ?? 1
-        return String(format: "%04d-%02d-%02d", year, month, day)
+        ScheduleDateKeyFormatter.dayKey(for: date)
     }
 }

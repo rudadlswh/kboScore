@@ -1208,7 +1208,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
     }
 
     nonisolated private static func canonicalTeamIdentifier(_ rawValue: String) -> String {
-        rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        Team.canonicalID(for: rawValue) ?? rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
