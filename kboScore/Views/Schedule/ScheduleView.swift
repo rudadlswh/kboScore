@@ -28,7 +28,7 @@ enum ScheduleDayResultAppearance: Equatable, Sendable {
     }
 }
 
-private struct ScheduleGameDetailRoute: Hashable {
+struct ScheduleGameDetailRoute: Hashable {
     let stableIdentity: String
     let initialGame: GameDetail
 

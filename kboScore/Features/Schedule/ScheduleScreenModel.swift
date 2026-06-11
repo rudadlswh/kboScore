@@ -32,9 +32,7 @@ final class ScheduleViewModel: ObservableObject {
     private(set) var debugSummary: String?
 #endif
 
-    private var cachedMonths: [KBOMonthScheduleKey: ScheduleMonthCacheEntry] = [:]
-    private var failedMonths: Set<KBOMonthScheduleKey> = []
-    private var inFlightMonthTasks: [KBOMonthScheduleKey: Task<ScheduleMonthCacheEntry, Error>] = [:]
+    private let refreshCoordinator = ScheduleRefreshCoordinator()
     private var pendingAutomaticSelectionMonthKey: KBOMonthScheduleKey?
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
@@ -71,26 +69,25 @@ final class ScheduleViewModel: ObservableObject {
             forceRefresh: true,
             appModel: appModel
         )
-        if SchedulePresentation.dayKey(for: selectedDate) == SchedulePresentation.dayKey(for: Date()) {
-            await appModel.refreshScheduleDay(for: selectedDate)
-            let key = displayedMonthKey
-            let refreshedSnapshot = appModel.currentScheduleMonthSnapshot(for: key)
-            let mergedGames = mergeSelectedDayRefresh(
-                refreshedSnapshot,
-                into: cachedMonths[key]?.games ?? [],
-                selectedDayKey: SchedulePresentation.dayKey(for: selectedDate)
-            )
-            cachedMonths[key] = await ScheduleMonthCacheEntry.build(
-                key: key,
-                games: mergedGames
-            )
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-        }
-
-        await reconcileStalePastGamesIfNeeded(appModel: appModel)
+        await refreshCoordinator.refreshTodayLiveIfNeeded(
+            selectedDate: selectedDate,
+            displayedMonthKey: displayedMonthKey,
+            appModel: appModel,
+            callSite: "ScheduleViewModel.refreshDisplayedMonth"
+        )
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
+        await refreshCoordinator.reconcileStalePastGamesIfNeeded(
+            displayedMonthKey: displayedMonthKey,
+            appModel: appModel,
+            callSite: "ScheduleViewModel.refreshDisplayedMonth"
+        )
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
     }
 
     func changeDisplayedMonth(
@@ -106,7 +103,7 @@ final class ScheduleViewModel: ObservableObject {
 #if DEBUG
         print("ScheduleMonthChanged from=\(previousKey.yearMonthText) to=\(requestedKey.yearMonthText)")
 #endif
-        let hasCachedRequestedMonth = cachedMonths[requestedKey] != nil
+        let hasCachedRequestedMonth = refreshCoordinator.hasCachedMonth(requestedKey)
         setLoadingDisplayedMonth(hasCachedRequestedMonth == false)
         displayedMonth = requestedMonth
         selectedDate = preferredSelectedDate(for: requestedKey)
@@ -124,6 +121,7 @@ final class ScheduleViewModel: ObservableObject {
         favoriteTeamID: String?,
         attendedGameKeys: Set<String>
     ) {
+        let startedAt = Date()
         selectedDate = date
         pendingAutomaticSelectionMonthKey = nil
         Task {
@@ -131,6 +129,14 @@ final class ScheduleViewModel: ObservableObject {
                 favoriteTeamID: favoriteTeamID,
                 attendedGameKeys: attendedGameKeys
             )
+            refreshCoordinator.logDateSelectionLocalOnly(
+                date: date,
+                selectedGame: selectedDateGames.first,
+                callSite: "ScheduleViewModel.selectDate"
+            )
+            #if DEBUG
+            print("[ScheduleRefreshCoordinator] callSite=ScheduleViewModel.selectDate reason=dateSelection durationMs=\(Int(Date().timeIntervalSince(startedAt) * 1_000))")
+            #endif
         }
     }
 
@@ -144,10 +150,8 @@ final class ScheduleViewModel: ObservableObject {
             filter: scheduleFilter,
             favoriteTeamID: favoriteTeamID,
             attendedGameKeys: attendedGameKeys,
-            cachedMonthEntries: Dictionary(
-                uniqueKeysWithValues: cachedMonths.map { ($0.key.yearMonthText, $0.value) }
-            ),
-            failedMonthKeys: Set(failedMonths.map(\.yearMonthText)),
+            cachedMonthEntries: refreshCoordinator.cachedMonthEntries,
+            failedMonthKeys: refreshCoordinator.failedMonthKeys,
             currentDate: Date()
         )
         apply(presentation)
@@ -170,67 +174,17 @@ final class ScheduleViewModel: ObservableObject {
     ) async {
         let key = monthKey(for: month)
 
-        if forceRefresh == false, cachedMonths[key] != nil {
-            logLocalMonthIfNeeded(key)
-            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
-            setLoadingDisplayedMonth(false)
-            applyPendingAutomaticSelectionIfNeeded(for: key)
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-            return
-        }
-
-        if let task = inFlightMonthTasks[key] {
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight")
-#endif
-            setLoadingDisplayedMonth(cachedMonths[key] == nil)
-            defer {
-                setLoadingDisplayedMonth(false)
-            }
-            do {
-                cachedMonths[key] = try await task.value
-                failedMonths.remove(key)
-            } catch {
-                failedMonths.insert(key)
-            }
-            applyPendingAutomaticSelectionIfNeeded(for: key)
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-            return
-        }
-
-        setLoadingDisplayedMonth(cachedMonths[key] == nil)
-        let task = Task<ScheduleMonthCacheEntry, Error> { @MainActor in
-            let fetched = try await appModel.fetchIsolatedScheduleMonth(
-                for: key,
-                bypassingCache: forceRefresh
-            )
-            return await ScheduleMonthCacheEntry.build(key: key, games: fetched)
-        }
-        inFlightMonthTasks[key] = task
+        setLoadingDisplayedMonth(forceRefresh || refreshCoordinator.hasCachedMonth(key) == false)
         defer {
-            inFlightMonthTasks[key] = nil
             setLoadingDisplayedMonth(false)
         }
-
-        do {
-            let entry = try await task.value
-            cachedMonths[key] = entry
-            failedMonths.remove(key)
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository gameCount=\(entry.games.count)")
-#endif
-        } catch {
-            failedMonths.insert(key)
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository failed error=\(error)")
-#endif
-        }
+        await refreshCoordinator.loadMonth(
+            key,
+            forceRefresh: forceRefresh,
+            appModel: appModel,
+            callSite: "ScheduleViewModel.loadMonth",
+            reason: forceRefresh ? "refreshDisplayedMonth" : "loadDisplayedMonth"
+        )
 
         applyPendingAutomaticSelectionIfNeeded(for: key)
         await rebuildPresentation(
@@ -260,12 +214,6 @@ final class ScheduleViewModel: ObservableObject {
         isLoadingDisplayedMonth = isLoading
     }
 
-    private func logLocalMonthIfNeeded(_ key: KBOMonthScheduleKey) {
-#if DEBUG
-        print("[ScheduleCache] month=\(key.yearMonthText) source=local")
-#endif
-    }
-
     private func applyPendingAutomaticSelectionIfNeeded(for key: KBOMonthScheduleKey) {
         guard pendingAutomaticSelectionMonthKey == key else { return }
         selectedDate = preferredSelectedDate(for: key)
@@ -287,7 +235,7 @@ final class ScheduleViewModel: ObservableObject {
         if monthKey(for: today) == key {
             return today
         }
-        if let firstGameDate = cachedMonths[key]?.games.first?.scheduledStart {
+        if let firstGameDate = refreshCoordinator.firstGameDate(in: key) {
             return calendar.startOfDay(for: firstGameDate)
         }
         return monthStart
@@ -299,143 +247,6 @@ final class ScheduleViewModel: ObservableObject {
 
     private func monthKey(for date: Date) -> KBOMonthScheduleKey {
         KBOMonthScheduleKey(date: date, calendar: calendar)
-    }
-
-    private func mergeSelectedDayRefresh(
-        _ refreshedSnapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        selectedDayKey: String
-    ) -> [GameDetail] {
-        guard existingMonthGames.isEmpty == false else {
-            return refreshedSnapshot.sorted { $0.scheduledStart < $1.scheduledStart }
-        }
-
-        var mergedGames = existingMonthGames
-        let refreshedDayGames = refreshedSnapshot.filter {
-            SchedulePresentation.dayKey(for: $0.scheduledStart) == selectedDayKey
-        }
-
-        for refreshedGame in refreshedDayGames {
-            let refreshedAliases = refreshedGame.gameIdentityAliases
-            if let index = mergedGames.firstIndex(where: { $0.gameIdentityAliases.isDisjoint(with: refreshedAliases) == false }) {
-                mergedGames[index] = refreshedGame
-            } else {
-                mergedGames.append(refreshedGame)
-            }
-        }
-
-        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    private func mergeAppModelMonthSnapshot(
-        _ snapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        for key: KBOMonthScheduleKey
-    ) -> [GameDetail] {
-        ScheduleMonthOverlayResolver.merge(
-            existingMonthGames: existingMonthGames,
-            incomingGames: snapshot,
-            monthKey: key,
-            calendar: calendar
-        )
-    }
-
-    private func mergePostReconciliationDateRefresh(
-        _ refreshedSnapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        refreshedDayKeys: Set<String>
-    ) -> [GameDetail] {
-        guard refreshedDayKeys.isEmpty == false else {
-            return existingMonthGames.sorted { $0.scheduledStart < $1.scheduledStart }
-        }
-
-        let preservedGames = existingMonthGames.filter {
-            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart)) == false
-        }
-        let refreshedGames = refreshedSnapshot.filter {
-            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart))
-        }
-        return (preservedGames + refreshedGames).sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    private func reconcileStalePastGamesIfNeeded(appModel: AppModel) async {
-        guard appModel.isScheduleStaleReconciliationInFlight() == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=inFlight")
-#endif
-            return
-        }
-
-        let key = displayedMonthKey
-        let visibleGames = cachedMonths[key]?.games ?? []
-        let dates = ScheduleStaleGameReconciliationResolver.staleGameDates(
-            in: visibleGames,
-            today: appModel.currentScheduleRefreshDate(),
-            calendar: calendar
-        )
-
-        guard dates.isEmpty == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=noCandidates")
-#endif
-            return
-        }
-
-        let selectedDates = Array(dates.prefix(3))
-        let droppedOlderDateCount = dates.count - selectedDates.count
-#if DEBUG
-        print("[ScheduleRefresh] stale reconciliation totalStaleDateCount=\(dates.count) selectedDateCount=\(selectedDates.count) droppedOlderDateCount=\(droppedOlderDateCount) selectedDates=\(selectedDates.joined(separator: ","))")
-#endif
-        let preflightResult = await appModel.preflightRefreshStaleScheduleDates(selectedDates)
-        if displayedMonthKey == key {
-            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
-#if DEBUG
-            print("[ScheduleRefresh] stale preflight visibleMonth updated month=\(key.yearMonthText)")
-#endif
-        } else {
-#if DEBUG
-            print("[ScheduleRefresh] stale preflight visibleMonth skipped reason=differentMonth month=\(key.yearMonthText) current=\(displayedMonthKey.yearMonthText)")
-#endif
-        }
-        await rebuildPresentation(
-            favoriteTeamID: appModel.settings.favoriteTeamID,
-            attendedGameKeys: appModel.attendedGameKeys
-        )
-
-        let reconciliationDates = preflightResult.remainingStaleDateKeys
-        guard reconciliationDates.isEmpty == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=freshDataResolvedStaleDates")
-#endif
-            return
-        }
-
-        do {
-            let reconciledDates = try await appModel.reconcileStaleScheduleGameDates(reconciliationDates)
-            guard reconciledDates.isEmpty == false else {
-                return
-            }
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation success dates=\(reconciledDates.joined(separator: ","))")
-#endif
-            appModel.startPostReconciliationForceRefresh(reconciledDates)
-        } catch {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation failure dates=\(reconciliationDates.joined(separator: ",")) error=\(error)")
-#endif
-        }
-    }
-
-    private func syncCachedMonthFromAppModelIfNeeded(_ key: KBOMonthScheduleKey, appModel: AppModel) async {
-        let snapshot = appModel.currentScheduleMonthSnapshot(for: key)
-        guard snapshot.isEmpty == false else { return }
-        let currentGames = cachedMonths[key]?.games ?? []
-        let mergedGames = mergeAppModelMonthSnapshot(snapshot, into: currentGames, for: key)
-        guard currentGames != mergedGames else { return }
-        cachedMonths[key] = await ScheduleMonthCacheEntry.build(key: key, games: mergedGames)
-#if DEBUG
-        print("[ScheduleCache] month=\(key.yearMonthText) source=appModelSync incoming=\(snapshot.count) before=\(currentGames.count) after=\(mergedGames.count)")
-#endif
     }
 
     func adjacentMonth(offset: Int) -> Date {
