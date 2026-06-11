@@ -46,6 +46,10 @@ extension KBOMonthScheduleDataSource {
     }
 }
 
+protocol KBOScheduleTabMonthDataSource: Sendable {
+    nonisolated func fetchScheduleTabMonth(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail]
+}
+
 protocol KBODailyScheduleDataSource: Sendable {
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail]
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail]

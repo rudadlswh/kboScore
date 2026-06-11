@@ -109,7 +109,7 @@ actor SupabaseTeamRowCache {
 
 // Read-only overlay: the iOS app only selects public data from Supabase.
 // Inserts/updates/deletes must stay in trusted backend, admin, or scheduled jobs.
-struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReading>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, Sendable {
+struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReading>: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, Sendable {
     let base: Base
     let source: Source
     let runtimeState: RepositoryRuntimeState?
@@ -182,16 +182,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         print("[SupabaseKBO] fetchMonthlySchedule start month=\(month.yearMonthText)")
         #endif
         do {
-            let teamsTask = Task { try await cachedTeamRows() }
-            let games = try await source.fetchGames(month: month)
-            let teams = try await teamsTask.value
-            let mapped = SupabaseKBOMapper.mapGames(gameRows: games, teamRows: teams)
-                .sorted { $0.scheduledStart < $1.scheduledStart }
-            await runtimeState?.record(source: .supabase, delivery: .supabase)
-            #if DEBUG
-            print("[SupabaseKBO] fetchMonthlySchedule success month=\(month.yearMonthText) count=\(mapped.count)")
-            #endif
-            return mapped
+            return try await fetchSupabaseMonthlySchedule(for: month)
         } catch is CancellationError {
             #if DEBUG
             print("[SupabaseKBO] fetchMonthlySchedule cancelled month=\(month.yearMonthText)")
@@ -203,6 +194,41 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
             #endif
             return try await base.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
         }
+    }
+
+    nonisolated func fetchScheduleTabMonth(
+        for month: KBOMonthScheduleKey,
+        bypassingCache _: Bool
+    ) async throws -> [GameDetail] {
+        #if DEBUG
+        print("[SupabaseKBO] fetchScheduleTabMonth start month=\(month.yearMonthText) fallbackSuppressed=true officialRequestsAvoided=true")
+        #endif
+        do {
+            return try await fetchSupabaseMonthlySchedule(for: month)
+        } catch is CancellationError {
+            #if DEBUG
+            print("[SupabaseKBO] fetchScheduleTabMonth cancelled month=\(month.yearMonthText)")
+            #endif
+            throw CancellationError()
+        } catch {
+            #if DEBUG
+            print("[SupabaseKBO] fetchScheduleTabMonth failed month=\(month.yearMonthText) fallbackSuppressed=true officialRequestsAvoided=true error=\(error)")
+            #endif
+            throw error
+        }
+    }
+
+    nonisolated private func fetchSupabaseMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        let teamsTask = Task { try await cachedTeamRows() }
+        let games = try await source.fetchGames(month: month)
+        let teams = try await teamsTask.value
+        let mapped = SupabaseKBOMapper.mapGames(gameRows: games, teamRows: teams)
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        await runtimeState?.record(source: .supabase, delivery: .supabase)
+        #if DEBUG
+        print("[SupabaseKBO] fetchMonthlySchedule success month=\(month.yearMonthText) count=\(mapped.count)")
+        #endif
+        return mapped
     }
 
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
@@ -642,9 +668,9 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             print("[GameDetailFetch] fallback fetched count=\(rows.count)")
             #endif
             guard let row = rows.first else { continue }
-            let snapshot = try await source.fetchLatestSnapshot(gameID: row.id)
             let mappedGames = SupabaseKBOMapper.mapGames(gameRows: [row], teamRows: fetchedTeamRows)
             guard let baseMapped = mappedGames.first else { continue }
+            let snapshot = try await latestSnapshotIfNeeded(for: row, fallbackGame: baseMapped)
             let mapped = SupabaseKBOMapper.mapGame(
                 row: row,
                 teamRows: fetchedTeamRows,
@@ -699,7 +725,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             }
             #endif
             guard let row = rows.first else { continue }
-            let snapshot = try await source.fetchLatestSnapshot(gameID: row.id)
+            let snapshot = try await latestSnapshotIfNeeded(for: row, fallbackGame: game)
             await runtimeState?.record(source: .supabase, delivery: .supabase)
             let mapped = SupabaseKBOMapper.mapGame(row: row, teamRows: fetchedTeamRows, snapshot: snapshot, fallbackGame: game)
             #if DEBUG
@@ -725,7 +751,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             }
             #endif
             guard let row = rows.first else { continue }
-            let snapshot = try await source.fetchLatestSnapshot(gameID: row.id)
+            let snapshot = try await latestSnapshotIfNeeded(for: row, fallbackGame: game)
             await runtimeState?.record(source: .supabase, delivery: .supabase)
             let mapped = SupabaseKBOMapper.mapGame(row: row, teamRows: fetchedTeamRows, snapshot: snapshot, fallbackGame: game)
             #if DEBUG
@@ -741,6 +767,22 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         }
 
         return nil
+    }
+
+    nonisolated private func latestSnapshotIfNeeded(
+        for row: SupabaseGameRow,
+        fallbackGame: GameDetail
+    ) async throws -> SupabaseLatestGameSnapshotRow? {
+        let status = row.status.map {
+            KBODataMapper.mapGameStatus(code: $0, text: nil)
+        } ?? fallbackGame.status
+        guard status != .upcoming else {
+            #if DEBUG
+            print("[GameDetailFetch] latestSnapshot skipped reason=scheduledNoSnapshot game_id=\(row.id.uuidString) publicGameID=\(row.publicGameID ?? "<nil>") providerGameID=\(row.providerGameID ?? "<nil>")")
+            #endif
+            return nil
+        }
+        return try await source.fetchLatestSnapshot(gameID: row.id)
     }
 
     nonisolated private func identityFallbackDetailLookups(for identity: String) -> [SupabaseGameLookup] {

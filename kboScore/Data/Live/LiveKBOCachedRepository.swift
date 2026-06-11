@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -85,6 +85,32 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOFavoriteTeamS
 #if DEBUG
             print("[RepositorySource] monthlySchedule source=live backend month=\(month.yearMonthText) count=\(result.value.count)")
 #endif
+        }
+        return result.value
+    }
+
+    nonisolated func fetchScheduleTabMonth(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
+        let fetchFromBase: @Sendable () async throws -> [GameDetail] = {
+            if let scheduleTabMonthSource = base as? any KBOScheduleTabMonthDataSource {
+                return try await scheduleTabMonthSource.fetchScheduleTabMonth(
+                    for: month,
+                    bypassingCache: bypassingCache
+                )
+            }
+            return try await base.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+        }
+
+        if bypassingCache {
+            let result = try await cache.refreshMonthlyScheduleValue(for: month, fetch: fetchFromBase)
+            if result.isCacheHit {
+                await runtimeState?.recordCacheHit(refreshedAt: result.cachedAt, isStale: result.isStale)
+            }
+            return result.value
+        }
+
+        let result = try await cache.monthlyScheduleValue(for: month, ttl: configuration.monthlyScheduleTTL, fetch: fetchFromBase)
+        if result.isCacheHit {
+            await runtimeState?.recordCacheHit(refreshedAt: result.cachedAt, isStale: result.isStale)
         }
         return result.value
     }

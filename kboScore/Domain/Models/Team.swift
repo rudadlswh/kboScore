@@ -46,7 +46,15 @@ nonisolated struct Team: Identifiable, Hashable, Codable, Sendable {
             return lowered
         }
 
-        return canonicalTeamIDsByAlias[lowered]
+        if let canonicalID = canonicalTeamIDsByAlias[lowered] {
+            return canonicalID
+        }
+
+        return TeamIdentity.catalog.first(where: { _, identity in
+            identity.shortLabel.caseInsensitiveCompare(raw) == .orderedSame ||
+                identity.monogram.caseInsensitiveCompare(raw) == .orderedSame ||
+                identity.displayName == raw
+        })?.key
     }
 
     nonisolated static func displayName(forTeamID teamID: String?, fallback: String) -> String {

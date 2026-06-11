@@ -7,11 +7,13 @@
 
 import Foundation
 
-struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
     private let fetchMonthlyScheduleBlock: @Sendable (KBOMonthScheduleKey) async throws -> [GameDetail]
+    private let fetchMonthlyScheduleBypassingCacheBlock: @Sendable (KBOMonthScheduleKey, Bool) async throws -> [GameDetail]
+    private let fetchScheduleTabMonthBlock: (@Sendable (KBOMonthScheduleKey, Bool) async throws -> [GameDetail])?
     private let fetchScheduleByDateBlock: @Sendable (Date, Bool) async throws -> [GameDetail]
     private let fetchStandingsBlock: @Sendable () async throws -> [TeamStandingsSnapshot]
     private let fetchStandingsSourceBlock: (@Sendable (Int) async throws -> [GameDetail])?
@@ -35,6 +37,16 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
         fetchGamesBlock = { try await base.fetchGames() }
         fetchNotificationsBlock = { try await base.fetchNotifications() }
         fetchMonthlyScheduleBlock = { month in try await base.fetchMonthlySchedule(for: month) }
+        fetchMonthlyScheduleBypassingCacheBlock = { month, bypassingCache in
+            try await base.fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+        }
+        if let scheduleTabMonthSource = base as? any KBOScheduleTabMonthDataSource {
+            fetchScheduleTabMonthBlock = { month, bypassingCache in
+                try await scheduleTabMonthSource.fetchScheduleTabMonth(for: month, bypassingCache: bypassingCache)
+            }
+        } else {
+            fetchScheduleTabMonthBlock = nil
+        }
         fetchScheduleByDateBlock = { date, bypassingCache in
             try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
         }
@@ -158,6 +170,17 @@ struct AnyKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, KBOSt
 
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleBlock(month)
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await fetchMonthlyScheduleBypassingCacheBlock(month, bypassingCache)
+    }
+
+    nonisolated func fetchScheduleTabMonth(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
+        guard let fetchScheduleTabMonthBlock else {
+            return try await fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
+        }
+        return try await fetchScheduleTabMonthBlock(month, bypassingCache)
     }
 
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
