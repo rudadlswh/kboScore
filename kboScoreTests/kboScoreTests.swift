@@ -153,6 +153,148 @@ struct kboScoreTests {
         #expect(HomeHeroGamePresentation.basesText(for: unknownVenueSummary) == nil)
     }
 
+    @Test func gameMergeResolverUsesPublicGameIDBeforeWeakerIdentities() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let existing = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000001")!,
+            scheduledStart: isoDate("2026-05-01T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            note: "public_game_id=public-win",
+            providerGameID: "existing-provider"
+        )
+        let providerOnly = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-05-02T18:30:00+09:00"),
+            venue: "광주",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 9,
+            homeScore: 8,
+            status: .final,
+            providerGameID: "public-win"
+        )
+        let publicMatch = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000003")!,
+            scheduledStart: isoDate("2026-05-01T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 4,
+            homeScore: 3,
+            status: .final,
+            note: "public_game_id=public-win updated_at=2026-05-01T15:00:00Z",
+            providerGameID: "updated-provider"
+        )
+
+        let equivalent = try #require(GameMergeResolver.equivalentGame(to: existing, in: [providerOnly, publicMatch]))
+        let selected = try #require(SelectedGameResolver.match(for: "public-win", in: [providerOnly, existing, publicMatch])?.game)
+
+        #expect(equivalent.id == publicMatch.id)
+        #expect(selected.status == .final)
+        #expect(selected.awayScore == 4)
+        #expect(selected.providerGameID == "updated-provider")
+    }
+
+    @Test func gameMergeResolverMatchesProviderDatabaseAndStableIdentity() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "kia" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "hanwha" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000011")!,
+            scheduledStart: isoDate("2026-05-03T14:00:00+09:00"),
+            venue: "대전",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 5,
+            homeScore: 2,
+            status: .final,
+            providerGameID: "provider-113"
+        )
+        let stableOnlyGame = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000012")!,
+            scheduledStart: isoDate("2026-05-05T14:00:00+09:00"),
+            venue: "대전",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+
+        #expect(SelectedGameResolver.match(for: "provider:provider-113", in: [game])?.game.id == game.id)
+        #expect(SelectedGameResolver.match(for: game.id.uuidString, in: [game])?.game.id == game.id)
+        #expect(SelectedGameResolver.match(for: stableOnlyGame.stableDetailIdentity, in: [stableOnlyGame])?.game.id == stableOnlyGame.id)
+    }
+
+    @Test func selectedGameResolverUsesBestEquivalentCandidateAndTransitiveAliases() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let scheduledShell = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000021")!,
+            scheduledStart: isoDate("2026-05-04T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            note: "public_game_id=chain-public"
+        )
+        let bridge = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000022")!,
+            scheduledStart: isoDate("2026-05-04T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 1,
+            homeScore: 1,
+            status: .live,
+            providerGameID: "chain-provider"
+        )
+        let officialFinal = makeGameDetail(
+            id: UUID(uuidString: "99010000-0000-0000-0000-000000000023")!,
+            scheduledStart: isoDate("2026-05-04T18:35:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: 7,
+            homeScore: 6,
+            status: .final,
+            providerGameID: "chain-provider"
+        )
+
+        let match = try #require(SelectedGameResolver.match(for: "public:chain-public", in: [scheduledShell, bridge, officialFinal]))
+
+        #expect(match.reason == "publicGameID")
+        #expect(match.game.status == .final)
+        #expect(match.game.awayScore == 7)
+        #expect(match.game.providerGameID == "chain-provider")
+    }
+
+    @Test func scheduleDateKeyFormatterUsesKSTDayBoundary() throws {
+        #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-04-30T14:59:59Z")) == "2026-04-30")
+        #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-04-30T15:00:00Z")) == "2026-05-01")
+        #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-05-01T14:59:59Z")) == "2026-05-01")
+    }
+
+    @Test func teamCanonicalIDRecognizesAppAliases() throws {
+        #expect(Team.canonicalID(for: "LG") == "lg")
+        #expect(Team.canonicalID(for: "KT 위즈") == "kt")
+        #expect(Team.canonicalID(for: "KIA 타이거즈") == "kia")
+        #expect(Team.canonicalID(for: "두산 베어스") == "doosan")
+        #expect(Team.canonicalID(for: "DOO") == "doosan")
+        #expect(Team.canonicalID(for: "HAN") == "hanwha")
+        #expect(Team.canonicalID(for: "SAM") == "samsung")
+    }
+
     @Test func homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle() throws {
         let now = isoDate("2026-06-09T12:00:00+09:00")
         let recentRefresh = now.addingTimeInterval(-14)
@@ -651,11 +793,13 @@ struct kboScoreTests {
             currentDateProvider: { referenceDate }
         )
         let viewModel = GameDetailViewModel(gameIdentity: selected.canonicalGameIdentityValue, initialGame: selected)
+        let standingsRevisionBeforeRefresh = model.standingsRowsRevision
 
         let refreshed = await viewModel.refreshIfNeeded(appModel: model, bypassAutomaticThrottle: true)
 
         #expect(await detailFetchCounter.value == 1)
         #expect(await allGamesFetchCounter.value == 0)
+        #expect(model.standingsRowsRevision == standingsRevisionBeforeRefresh)
         #expect(refreshed?.status == .live)
         #expect(refreshed?.currentBatterName == "홍길동")
         #expect(refreshed?.currentPitcherName == "김투수")
@@ -890,6 +1034,14 @@ struct kboScoreTests {
         #expect(display.runners.first == "주자")
         #expect(display.runners.second == nil)
         #expect(display.source == "fallback")
+
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: display
+        )
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "1B", name: "점유")])
     }
 
     @Test func baseRunnerDisplayCarriesForwardSameBaseName() throws {
@@ -1034,7 +1186,7 @@ struct kboScoreTests {
         #expect(display.runners.third == "3루주자")
     }
 
-    @Test func gameDetailBaseSituationHidesOccupiedSecondBaseRunnerName() throws {
+    @Test func gameDetailBaseSituationShowsOccupiedSecondBaseRunnerName() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: false, second: true, third: false),
@@ -1049,10 +1201,10 @@ struct kboScoreTests {
         )
 
         #expect(resolvedDisplay.runners.second == "홍창기")
-        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B")])
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "홍창기")])
     }
 
-    @Test func gameDetailBaseSituationKeepsOccupiedBasesWhenNamesAreHidden() throws {
+    @Test func gameDetailBaseSituationShowsOccupiedBaseRunnerNames() throws {
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: true, second: true, third: true),
             baseRunners: GameBaseRunners(first: "정수빈", second: "홍창기", third: "오스틴")
@@ -1068,13 +1220,13 @@ struct kboScoreTests {
         )
 
         #expect(presentation.displayBaseRunners == [
-            BaseRunnerDisplayItem(base: "1B"),
-            BaseRunnerDisplayItem(base: "2B"),
-            BaseRunnerDisplayItem(base: "3B")
+            BaseRunnerDisplayItem(base: "1B", name: "정수빈"),
+            BaseRunnerDisplayItem(base: "2B", name: "홍창기"),
+            BaseRunnerDisplayItem(base: "3B", name: "오스틴")
         ])
     }
 
-    @Test func gameDetailBaseSituationKeepsEmptyBasesEmptyWhenNamesAreHidden() throws {
+    @Test func gameDetailBaseSituationKeepsEmptyBasesEmptyWhenNamesAreShown() throws {
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: false, second: true, third: false),
             baseRunners: GameBaseRunners(first: "정수빈", second: "홍창기", third: "오스틴")
@@ -1089,7 +1241,93 @@ struct kboScoreTests {
             )
         )
 
-        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B")])
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "홍창기")])
+    }
+
+    @Test func gameDetailBaseSituationRendersSnapshotRunnerNameInsteadOfOccupiedFallback() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "이유찬", second: nil, third: nil)
+        )
+        let resolvedDisplay = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: resolvedDisplay
+        )
+
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "1B", name: "이유찬")])
+    }
+
+    @Test func gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let game = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: false, second: true, third: true),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+        let fallbackDisplay = resolver.resolve(gameIdentity: game.stableDetailIdentity, game: game)
+        let officialPayload = sampleGameCenterDetailPayload(
+            game: game,
+            baseRunners: GameCenterBaseRunners(first: nil, second: "김주원", third: "최정원")
+        )
+
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: officialPayload,
+            boxscore: nil,
+            baseRunnerDisplay: fallbackDisplay
+        )
+
+        #expect(fallbackDisplay.runners.second == "주자")
+        #expect(fallbackDisplay.runners.third == "주자")
+        #expect(presentation.displayBaseRunners == [
+            BaseRunnerDisplayItem(base: "2B", name: "김주원"),
+            BaseRunnerDisplayItem(base: "3B", name: "최정원")
+        ])
+        #expect(presentation.baseRunnerDisplay.source == "official")
+    }
+
+    @Test func gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache() throws {
+        var resolver = BaseRunnerDisplayResolver()
+        let before = try makeBaseRunnerDisplayGame(
+            bases: RunnerState(first: true, second: true, third: false),
+            baseRunners: GameBaseRunners(first: "레이예스", second: "고승민", third: nil)
+        )
+        _ = resolver.resolve(gameIdentity: before.stableDetailIdentity, game: before)
+
+        let after = try makeBaseRunnerDisplayGame(
+            id: before.id,
+            providerGameID: before.providerGameID ?? "20260506WOLT0",
+            bases: RunnerState(first: false, second: true, third: true),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+        let cachedDisplay = resolver.resolve(gameIdentity: after.stableDetailIdentity, game: after)
+        let officialPayload = sampleGameCenterDetailPayload(
+            game: after,
+            baseRunners: GameCenterBaseRunners(first: nil, second: "레이예스", third: "고승민")
+        )
+
+        let presentation = GameDetailPresentation(
+            game: after,
+            payload: officialPayload,
+            boxscore: nil,
+            baseRunnerDisplay: cachedDisplay
+        )
+
+        #expect(presentation.displayBaseRunners == [
+            BaseRunnerDisplayItem(base: "2B", name: "레이예스"),
+            BaseRunnerDisplayItem(base: "3B", name: "고승민")
+        ])
+        #expect(presentation.displayBaseRunners != [
+            BaseRunnerDisplayItem(base: "2B", name: "고승민"),
+            BaseRunnerDisplayItem(base: "3B", name: "고승민")
+        ])
+        #expect(presentation.baseRunnerDisplay.runners.first == nil)
+        #expect(presentation.baseRunnerDisplay.runners.second == "레이예스")
+        #expect(presentation.baseRunnerDisplay.runners.third == "고승민")
+        #expect(presentation.baseRunnerDisplay.source == "official")
     }
 
     @Test func gameDetailBaseSituationDoesNotHideCurrentBatterOrPitcher() throws {
@@ -1693,6 +1931,79 @@ struct kboScoreTests {
             .providerGameID("20260509LGHH0"),
             .officialProviderGameID("20260509LGHH0")
         ])
+    }
+
+    @Test func gameDetailRefreshResolvesRouteInitialSnapshotWithoutGlobalGame() async throws {
+        let game = try makeBoxscoreDetailGame()
+        let emptyBootstrap = KBOBootstrapData(
+            teams: MockKBOData.makeBootstrap().teams,
+            games: [],
+            notifications: [],
+            settings: .default
+        )
+        let model = AppModel(
+            repository: StubRepository(fetchBootstrapData: { emptyBootstrap }),
+            bootstrap: emptyBootstrap,
+            usePersistedSettings: false
+        )
+
+        #expect(model.game(withIdentity: game.stableDetailIdentity) == nil)
+
+        let refreshed = await model.refreshGameDetailResult(
+            for: game.stableDetailIdentity,
+            initialGame: game,
+            forceRefresh: false
+        )
+
+        #expect(refreshed?.game.id == game.id)
+        #expect(refreshed?.game.publicGameID == game.publicGameID)
+    }
+
+    @MainActor
+    @Test func upcomingGameDetailAppliesStartingPitchersFromSingleSupabaseRefresh() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let initial = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let refreshed = makeGameDetail(
+            id: initial.id,
+            scheduledStart: initial.scheduledStart,
+            venue: initial.venue,
+            awayTeam: initial.awayTeam,
+            homeTeam: initial.homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: initial.note,
+            providerGameID: initial.providerGameID,
+            awayStartingPitcherName: "곽빈",
+            homeStartingPitcherName: "김광현"
+        )
+        let detailFetchCounter = FetchCounter()
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [initial], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in
+                await detailFetchCounter.increment()
+                return refreshed
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [initial], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-10T10:00:00+09:00") }
+        )
+        let viewModel = GameDetailViewModel(gameIdentity: initial.stableDetailIdentity, initialGame: initial)
+
+        let result = try #require(await viewModel.refreshIfNeeded(appModel: model, bypassAutomaticThrottle: true))
+        let presentation = GameDetailPresentation(game: result, payload: nil, boxscore: nil)
+
+        #expect(await detailFetchCounter.value == 1)
+        #expect(viewModel.game?.awayStartingPitcherName == "곽빈")
+        #expect(viewModel.game?.homeStartingPitcherName == "김광현")
+        #expect(presentation.probableStarters?.away == "곽빈")
+        #expect(presentation.probableStarters?.home == "김광현")
     }
 
     @Test func gameDetailFallbackByOfficialProviderUsesPublicGameIDForBoxscore() async throws {
@@ -2616,6 +2927,184 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 1)
         #expect(await tracker.monthlyScheduleFetches == 0)
         #expect(await tracker.remoteCountChecks == 1)
+    }
+
+    @Test func scheduleScreenLoadUsesScheduleTabMonthlySourceOnly() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let game = try #require(base.games.first(where: {
+            KBOMonthScheduleKey(date: $0.scheduledStart).yearMonthText == "202603"
+        }))
+        let tracker = ScheduleTabMonthTestTracker()
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: base,
+            scheduleTabGames: [game],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: base,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-01T09:00:00+09:00") }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = isoDate("2026-03-01T09:00:00+09:00")
+        viewModel.selectedDate = game.scheduledStart
+        let standingsRevisionBeforeLoad = model.standingsRowsRevision
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.selectedDateGames.map(\.id) == [game.id])
+        #expect(model.standingsRowsRevision == standingsRevisionBeforeLoad)
+        #expect(await tracker.scheduleTabMonthFetches == 1)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+        #expect(await tracker.dailyScheduleFetches == 0)
+    }
+
+    @Test func scheduleScreenMonthLoadDoesNotPopulateAppModelMonthSnapshot() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let game = try #require(base.games.first(where: {
+            KBOMonthScheduleKey(date: $0.scheduledStart).yearMonthText == "202603"
+        }))
+        let emptyBootstrap = KBOBootstrapData(
+            teams: base.teams,
+            games: [],
+            notifications: [],
+            settings: .default
+        )
+        let tracker = ScheduleTabMonthTestTracker()
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: emptyBootstrap,
+            scheduleTabGames: [game],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: emptyBootstrap,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-01T09:00:00+09:00") }
+        )
+        let viewModel = ScheduleViewModel()
+        let monthKey = KBOMonthScheduleKey(date: game.scheduledStart)
+        viewModel.displayedMonth = game.scheduledStart
+        viewModel.selectedDate = game.scheduledStart
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.selectedDateGames.map(\.id) == [game.id])
+        #expect(model.currentScheduleMonthSnapshot(for: monthKey).isEmpty)
+        #expect(model.game(withIdentity: game.stableDetailIdentity) == nil)
+        #expect(await tracker.scheduleTabMonthFetches == 1)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+        #expect(await tracker.dailyScheduleFetches == 0)
+    }
+
+    @Test func scheduleGameDetailRouteCarriesInitialGameSnapshot() async throws {
+        let game = try makeBoxscoreDetailGame()
+        let route = ScheduleGameDetailRoute(game: game)
+
+        #expect(route.stableIdentity == game.stableDetailIdentity)
+        #expect(route.initialGame == game)
+    }
+
+    @MainActor
+    @Test func todayLiveRefreshUpdatesScheduleMonthCacheStartingPitchers() async throws {
+        let selectedDate = isoDate("2026-05-10T10:00:00+09:00")
+        let monthKey = KBOMonthScheduleKey(date: selectedDate)
+        let cachedGame = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let refreshedGame = makeGameDetail(
+            id: cachedGame.id,
+            scheduledStart: cachedGame.scheduledStart,
+            venue: cachedGame.venue,
+            awayTeam: cachedGame.awayTeam,
+            homeTeam: cachedGame.homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: cachedGame.note,
+            providerGameID: cachedGame.providerGameID,
+            awayStartingPitcherName: "곽빈",
+            homeStartingPitcherName: "김광현"
+        )
+        let tracker = ScheduleTabMonthTestTracker()
+        let bootstrap = KBOBootstrapData(
+            teams: MockKBOData.makeBootstrap().teams,
+            games: [refreshedGame],
+            notifications: [],
+            settings: .default
+        )
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: bootstrap,
+            scheduleTabGames: [cachedGame],
+            tracker: tracker
+        )
+        let appModel = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { selectedDate }
+        )
+        let coordinator = ScheduleRefreshCoordinator()
+
+        await coordinator.loadMonth(
+            monthKey,
+            forceRefresh: false,
+            appModel: appModel,
+            callSite: "test",
+            reason: "initialLoad"
+        )
+        #expect(coordinator.cachedMonthEntries[monthKey.yearMonthText]?.games.first?.awayStartingPitcherName == nil)
+
+        await coordinator.refreshTodayLiveIfNeeded(
+            selectedDate: selectedDate,
+            displayedMonthKey: monthKey,
+            appModel: appModel,
+            callSite: "test"
+        )
+
+        let cached = try #require(coordinator.cachedMonthEntries[monthKey.yearMonthText]?.games.first)
+        #expect(cached.awayStartingPitcherName == "곽빈")
+        #expect(cached.homeStartingPitcherName == "김광현")
+        #expect(await tracker.scheduleTabMonthFetches == 1)
+        #expect(await tracker.dailyScheduleFetches == 1)
+    }
+
+    @Test func scheduleScreenDateSelectionDoesNotFetchNetworkData() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-03-23T09:00:00+09:00"))
+        let marchGames = base.games.filter {
+            KBOMonthScheduleKey(date: $0.scheduledStart).yearMonthText == "202603"
+        }
+        let firstGame = try #require(marchGames.first)
+        let secondGame = try #require(marchGames.dropFirst().first)
+        let tracker = ScheduleTabMonthTestTracker()
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: base,
+            scheduleTabGames: marchGames,
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: base,
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-03-23T09:00:00+09:00") }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = isoDate("2026-03-01T09:00:00+09:00")
+        viewModel.selectedDate = firstGame.scheduledStart
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let monthlyFetchesAfterLoad = await tracker.scheduleTabMonthFetches
+        viewModel.selectDate(
+            secondGame.scheduledStart,
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(viewModel.selectedDateGames.contains { $0.id == secondGame.id })
+        #expect(await tracker.scheduleTabMonthFetches == monthlyFetchesAfterLoad)
+        #expect(await tracker.monthlyScheduleFetches == 0)
+        #expect(await tracker.dailyScheduleFetches == 0)
     }
 
     @Test func finalGameDerivesWinnerScoreAndTeamResult() async throws {
@@ -9980,6 +10469,35 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    @Test func finalGameDetailChecksDatabaseRecordsBeforeOfficialFallback() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeBoxscoreDetailGame()
+        let databaseReview = try makeSampleDatabaseRecordReview(game: game)
+        let boxscoreState = RecordingBoxscoreState(result: .success(GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")))
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: boxscoreState),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game) },
+            fetchDatabaseRecordReview: { _ in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                return databaseReview
+            },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+        #expect(await officialFallback.fetchCount == 0)
+
+        await model.waitForDatabaseRecordLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(model.databaseRecordReview?.recordSource == .dbLiveTextRecords)
+        #expect(model.officialFallbackReview == nil)
+        #expect(await officialFallback.fetchCount == 0)
+    }
+
     @Test func gameDetailScreenModelKeepsKeyplayerFallbackWhenDatabaseRecordsAreEmpty() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
@@ -10495,6 +11013,99 @@ struct kboScoreTests {
         #expect(final.liveRefreshTaskID.hasPrefix("idle:"))
         #expect(cancelled.shouldAutoRefreshLiveGame == false)
         #expect(cancelled.liveRefreshTaskID.hasPrefix("idle:"))
+    }
+
+    @Test func upcomingGameDetailSkipsAutomaticOfficialPreviewLoad() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            awayStartingPitcherName: "곽빈",
+            homeStartingPitcherName: "김광현"
+        )
+        let detailFetcher = RecordingDetailPayloadFetcher(
+            payload: sampleGameCenterDetailPayload(game: game)
+        )
+        let officialFallback = RecordingOfficialFallback(
+            result: .success(sampleOfficialFallbackReview())
+        )
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(
+                state: RecordingBoxscoreState(
+                    result: .success(GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG"))
+                )
+            ),
+            fetchDetail: { game in try await detailFetcher.fetch(game: game) },
+            fetchDatabaseRecordReview: { _ in
+                Issue.record("upcoming GameDetail should not fetch database records automatically")
+                return nil
+            },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: game)
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(model.detail == nil)
+        #expect(model.databaseRecordReview == nil)
+        #expect(model.officialFallbackReview == nil)
+        #expect(await detailFetcher.fetchCount == 0)
+        #expect(await officialFallback.fetchCount == 0)
+    }
+
+    @Test func upcomingGameDetailRefreshSkipsSupabaseSnapshotLookup() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let awayTeamID = supabaseTeamUUID(for: "doosan")
+        let homeTeamID = supabaseTeamUUID(for: "ssg")
+        let row = try makeSupabaseGameRow(
+            id: game.id,
+            publicGameID: game.publicGameID ?? "20260510-DOO-SSG",
+            providerGameID: game.providerGameID ?? "20260510SKOB0",
+            gameDate: "2026-05-10",
+            scheduledAt: "2026-05-10T14:00:00+09:00",
+            status: "scheduled",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Scheduled"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            source: TrackingSupabaseSource(
+                teamRows: [
+                    supabaseTeamRow(code: "doosan", id: awayTeamID),
+                    supabaseTeamRow(code: "ssg", id: homeTeamID)
+                ],
+                gameRows: [row],
+                tracker: tracker
+            ),
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetailResult(for: game.stableDetailIdentity, forceRefresh: false)
+
+        #expect(refreshed?.game.id == game.id)
+        #expect(await tracker.singleLookups.isEmpty)
+        #expect(await tracker.latestSnapshotGameIDs.isEmpty)
     }
 
     @Test func failedBoxscoreFetchDoesNotFailDetailLoad() async throws {
@@ -13278,7 +13889,7 @@ struct kboScoreTests {
         #expect(await state.remoteFetchCount == 0)
     }
 
-    @Test func standingsTabAlignsCurrentRanksWithGameSourceWhenRankRowsAreCached() async throws {
+    @Test func standingsTabUsesCachedRankRowsWithoutStandingsSourceFetch() async throws {
         let fixture = try makeStandingsMovementFixture()
         let staleRankRows = sampleTeamRankRows(
             teams: fixture.teams,
@@ -13307,29 +13918,27 @@ struct kboScoreTests {
         let risingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
         let fallingSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
 
-        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(await state.standingsSourceFetchCount == 0)
         #expect(model.standingsSnapshots.map(\.team.id) == [
             fixture.leader.id,
-            fixture.rising.id,
-            fixture.falling.id
+            fixture.falling.id,
+            fixture.rising.id
         ])
-        #expect(risingSnapshot.rankMovement == .up(1))
-        #expect(risingSnapshot.rankMovement.displayText == "▲1")
-        #expect(fallingSnapshot.rankMovement == .down(1))
-        #expect(fallingSnapshot.rankMovement.displayText == "▼1")
+        #expect(risingSnapshot.rankMovement == .unchanged)
+        #expect(risingSnapshot.rankMovement.displayText == "-")
+        #expect(fallingSnapshot.rankMovement == .unchanged)
+        #expect(fallingSnapshot.rankMovement.displayText == "-")
     }
 
-    @Test func standingsSourceArrivalPublishesRankMovementWithoutRefresh() async throws {
+    @Test func cachedRankRowsDoNotStartBackgroundStandingsSourceLoad() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
             teams: fixture.teams,
             games: fixture.games,
             previousRanks: fixture.previousRanks
         )
-        let sourceGate = RankFetchGate()
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(teams: fixture.teams, ranks: currentRanks),
-            standingsSourceGate: sourceGate,
             standingsGames: fixture.games
         )
         let repository = TeamRankFlowRepository(state: state)
@@ -13345,83 +13954,26 @@ struct kboScoreTests {
             currentDateProvider: { isoDate("2026-05-28T09:00:00+09:00") }
         )
 
-        let loadTask = Task { await model.loadStandingsIfNeeded() }
-        await sourceGate.waitUntilStarted()
-
-        let doosanInitial = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        let ssgInitial = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
-        #expect(fixture.games.count == 245)
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(doosanInitial.rankMovement == RankingMovement.unchanged)
-        #expect(doosanInitial.rankMovement.displayText == "-")
-        #expect(ssgInitial.rankMovement == RankingMovement.unchanged)
-        let initialRevision = model.standingsRowsRevision
-
-        await sourceGate.release()
-        await loadTask.value
-
-        let doosanUpdated = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        let ssgUpdated = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(model.standingsRowsRevision > initialRevision)
-        #expect(doosanUpdated.rankMovement == RankingMovement.up(1))
-        #expect(doosanUpdated.rankMovement.displayText == "▲1")
-        #expect(ssgUpdated.rankMovement == RankingMovement.down(1))
-        #expect(ssgUpdated.rankMovement.displayText == "▼1")
-    }
-
-    @Test func standingsSourceArrivalChangesObservableRowsRevision() async throws {
-        let fixture = try makeDoosanSSGStandingsMovementFixture()
-        let currentRanks = currentStandingsRanks(
-            teams: fixture.teams,
-            games: fixture.games,
-            previousRanks: fixture.previousRanks
-        )
-        let sourceGate = RankFetchGate()
-        let state = TeamRankFlowState(
-            localRanks: sampleTeamRankRows(teams: fixture.teams, ranks: currentRanks),
-            standingsSourceGate: sourceGate,
-            standingsGames: fixture.games
-        )
-        let repository = TeamRankFlowRepository(state: state)
-        let model = AppModel(
-            repository: repository,
-            bootstrap: KBOBootstrapData(
-                teams: fixture.teams,
-                games: [],
-                notifications: [],
-                settings: .default
-            ),
-            usePersistedSettings: false,
-            currentDateProvider: { isoDate("2026-05-28T09:00:00+09:00") }
-        )
-
-        let loadTask = Task { await model.loadStandingsIfNeeded() }
-        await sourceGate.waitUntilStarted()
-        let revisionBeforeSource = model.standingsRowsRevision
-
-        await sourceGate.release()
-        await loadTask.value
+        await model.loadStandingsIfNeeded()
 
         let doosanSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
         let ssgSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
-        #expect(model.standingsRowsRevision > revisionBeforeSource)
-        #expect(model.standingsSnapshots.filter { $0.rankMovement != .unchanged }.count == 2)
-        #expect(doosanSnapshot.rankMovement.displayText == "▲1")
-        #expect(ssgSnapshot.rankMovement.displayText == "▼1")
+        #expect(fixture.games.count == 245)
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
+        #expect(doosanSnapshot.rankMovement.displayText == "-")
+        #expect(ssgSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
-    @Test func repeatedStandingsAppearSharesInFlightStandingsSourceFetch() async throws {
+    @Test func cachedRankRowsDoNotChangeRevisionFromBackgroundSourceArrival() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
             teams: fixture.teams,
             games: fixture.games,
             previousRanks: fixture.previousRanks
         )
-        let sourceGate = RankFetchGate()
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(teams: fixture.teams, ranks: currentRanks),
-            standingsSourceGate: sourceGate,
             standingsGames: fixture.games
         )
         let repository = TeamRankFlowRepository(state: state)
@@ -13437,24 +13989,54 @@ struct kboScoreTests {
             currentDateProvider: { isoDate("2026-05-28T09:00:00+09:00") }
         )
 
-        let firstLoad = Task { await model.loadStandingsIfNeeded() }
-        await sourceGate.waitUntilStarted()
-        let secondLoad = Task { await model.loadStandingsIfNeeded() }
-
-        let doosanBeforeRelease = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(doosanBeforeRelease.rankMovement == RankingMovement.unchanged)
-
-        await sourceGate.release()
-        await firstLoad.value
-        await secondLoad.value
+        await model.loadStandingsIfNeeded()
+        let revisionAfterLoad = model.standingsRowsRevision
+        await model.prefetchStandingsSourceIfNeeded()
 
         let doosanSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(doosanSnapshot.rankMovement == RankingMovement.up(1))
+        let ssgSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(model.standingsRowsRevision == revisionAfterLoad)
+        #expect(model.standingsSnapshots.filter { $0.rankMovement != .unchanged }.isEmpty)
+        #expect(doosanSnapshot.rankMovement.displayText == "-")
+        #expect(ssgSnapshot.rankMovement.displayText == "-")
     }
 
-    @Test func manualStandingsRefreshRecomputesRankMovementFromSourceGames() async throws {
+    @Test func repeatedStandingsAppearDoesNotStartStandingsSourceFetch() async throws {
+        let fixture = try makeDoosanSSGStandingsMovementFixture()
+        let currentRanks = currentStandingsRanks(
+            teams: fixture.teams,
+            games: fixture.games,
+            previousRanks: fixture.previousRanks
+        )
+        let state = TeamRankFlowState(
+            localRanks: sampleTeamRankRows(teams: fixture.teams, ranks: currentRanks),
+            standingsGames: fixture.games
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: fixture.teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-28T09:00:00+09:00") }
+        )
+
+        await model.loadStandingsIfNeeded()
+        let revisionAfterFirstLoad = model.standingsRowsRevision
+        await model.loadStandingsIfNeeded()
+
+        let doosanSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(model.standingsRowsRevision == revisionAfterFirstLoad)
+        #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
+    }
+
+    @Test func manualStandingsRefreshUsesRemoteRankRowsWithoutSourceGames() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
             teams: fixture.teams,
@@ -13486,13 +14068,13 @@ struct kboScoreTests {
         let doosanSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
         let ssgSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
         #expect(await state.remoteFetchCount == 1)
-        #expect(doosanSnapshot.rankMovement == RankingMovement.up(1))
-        #expect(ssgSnapshot.rankMovement == RankingMovement.down(1))
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
+        #expect(ssgSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
-    @Test func standingsSourcePrefetchPublishesMovementForFirstStandingsLoad() async throws {
+    @Test func launchDoesNotPrefetchStandingsSourceWhenRankRowsExist() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
-        let sourceGate = RankFetchGate()
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(
                 teams: fixture.teams,
@@ -13502,7 +14084,6 @@ struct kboScoreTests {
                     previousRanks: fixture.previousRanks
                 )
             ),
-            standingsSourceGate: sourceGate,
             standingsGames: fixture.games
         )
         let repository = TeamRankFlowRepository(state: state)
@@ -13519,38 +14100,32 @@ struct kboScoreTests {
         )
 
         await model.loadIfNeeded()
-        await sourceGate.waitUntilStarted()
-        #expect(await state.standingsSourceFetchCount == 1)
-
-        await sourceGate.release()
         await model.loadStandingsIfNeeded()
 
-        let revisionAfterSource = model.standingsRowsRevision
-        let doosanPrefetched = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        let ssgPrefetched = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(doosanPrefetched.rankMovement == RankingMovement.up(1))
-        #expect(ssgPrefetched.rankMovement == RankingMovement.down(1))
+        let revisionAfterRankRows = model.standingsRowsRevision
+        let doosanRankRow = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
+        let ssgRankRow = try #require(model.standingsSnapshots.first { $0.team.id == fixture.falling.id })
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(doosanRankRow.rankMovement == RankingMovement.unchanged)
+        #expect(ssgRankRow.rankMovement == RankingMovement.unchanged)
 
         await model.loadStandingsIfNeeded()
 
         let doosanAfterAppear = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(model.standingsRowsRevision == revisionAfterSource)
-        #expect(doosanAfterAppear.rankMovement.displayText == "▲1")
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(model.standingsRowsRevision == revisionAfterRankRows)
+        #expect(doosanAfterAppear.rankMovement.displayText == "-")
     }
 
-    @Test func standingsAppearJoinsInFlightPrefetchWithoutDuplicateSourceFetch() async throws {
+    @Test func standingsAppearDoesNotJoinLaunchStandingsSourcePrefetch() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
             teams: fixture.teams,
             games: fixture.games,
             previousRanks: fixture.previousRanks
         )
-        let sourceGate = RankFetchGate()
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(teams: fixture.teams, ranks: currentRanks),
-            standingsSourceGate: sourceGate,
             standingsGames: fixture.games
         )
         let repository = TeamRankFlowRepository(state: state)
@@ -13567,21 +14142,15 @@ struct kboScoreTests {
         )
 
         await model.loadIfNeeded()
-        await sourceGate.waitUntilStarted()
-        let standingsLoadTask = Task { await model.loadStandingsIfNeeded() }
-
-        #expect(await state.standingsSourceFetchCount == 1)
-        await sourceGate.release()
-        await standingsLoadTask.value
+        await model.loadStandingsIfNeeded()
 
         let doosanSnapshot = try #require(model.standingsSnapshots.first { $0.team.id == fixture.rising.id })
-        #expect(await state.standingsSourceFetchCount == 1)
-        #expect(doosanSnapshot.rankMovement == RankingMovement.up(1))
+        #expect(await state.standingsSourceFetchCount == 0)
+        #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
-    @Test func rankMovementSourceFetchDoesNotUseGeneralGamesFallback() async throws {
+    @Test func rankRowsDoNotUseStandingsSourceOrGeneralGamesFallback() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
-        let sourceGate = RankFetchGate()
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(
                 teams: fixture.teams,
@@ -13591,7 +14160,6 @@ struct kboScoreTests {
                     previousRanks: fixture.previousRanks
                 )
             ),
-            standingsSourceGate: sourceGate,
             standingsGames: fixture.games
         )
         let repository = TeamRankFlowRepository(state: state)
@@ -13608,11 +14176,9 @@ struct kboScoreTests {
         )
 
         await model.loadIfNeeded()
-        await sourceGate.waitUntilStarted()
-        await sourceGate.release()
         await model.loadStandingsIfNeeded()
 
-        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(await state.standingsSourceFetchCount == 0)
         #expect(await state.generalGamesFetchCount == 0)
     }
 
@@ -13629,6 +14195,7 @@ struct kboScoreTests {
         await model.loadStandingsIfNeeded()
 
         #expect(await state.remoteFetchCount == 1)
+        #expect(await state.standingsSourceFetchCount == 0)
         #expect(await state.cachedRanksCount == 2)
         #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
     }
@@ -14188,6 +14755,7 @@ private actor DetailFetchTracker {
     private(set) var singleLookups: [SupabaseGameLookup] = []
     private(set) var dateFetches = 0
     private(set) var teamFetches = 0
+    private(set) var latestSnapshotGameIDs: [UUID] = []
     private(set) var batterRecordGameIDs: [UUID] = []
     private(set) var pitcherRecordGameIDs: [UUID] = []
     private(set) var eventRecordGameIDs: [UUID] = []
@@ -14202,6 +14770,10 @@ private actor DetailFetchTracker {
 
     func recordTeamFetch() {
         teamFetches += 1
+    }
+
+    func recordLatestSnapshotFetch(gameID: UUID) {
+        latestSnapshotGameIDs.append(gameID)
     }
 
     func recordBatterRecordFetch(gameID: UUID) {
@@ -14313,7 +14885,8 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
     }
 
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
-        nil
+        await tracker.recordLatestSnapshotFetch(gameID: gameID)
+        return nil
     }
 
     nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
@@ -14358,6 +14931,73 @@ private actor ScheduleSyncTestTracker {
 
     func recordDailyScheduleFetch() {
         dailyScheduleFetches += 1
+    }
+}
+
+private actor ScheduleTabMonthTestTracker {
+    private(set) var scheduleTabMonthFetches = 0
+    private(set) var monthlyScheduleFetches = 0
+    private(set) var dailyScheduleFetches = 0
+
+    func recordScheduleTabMonthFetch() {
+        scheduleTabMonthFetches += 1
+    }
+
+    func recordMonthlyScheduleFetch() {
+        monthlyScheduleFetches += 1
+    }
+
+    func recordDailyScheduleFetch() {
+        dailyScheduleFetches += 1
+    }
+}
+
+private struct ScheduleTabMonthTestRepository: KBORepository, KBOScheduleTabMonthDataSource, Sendable {
+    let bootstrap: KBOBootstrapData
+    let scheduleTabGames: [GameDetail]
+    let tracker: ScheduleTabMonthTestTracker
+
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        bootstrap
+    }
+
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        bootstrap.games
+    }
+
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        bootstrap.notifications
+    }
+
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        await tracker.recordMonthlyScheduleFetch()
+        return bootstrap.games.filter {
+            KBOMonthScheduleKey(date: $0.scheduledStart) == month
+        }
+    }
+
+    nonisolated func fetchScheduleTabMonth(
+        for month: KBOMonthScheduleKey,
+        bypassingCache _: Bool
+    ) async throws -> [GameDetail] {
+        await tracker.recordScheduleTabMonthFetch()
+        return scheduleTabGames.filter {
+            KBOMonthScheduleKey(date: $0.scheduledStart) == month
+        }
+    }
+
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        await tracker.recordDailyScheduleFetch()
+        let calendar = Calendar(identifier: .gregorian)
+        return bootstrap.games.filter { calendar.isDate($0.scheduledStart, inSameDayAs: date) }
+    }
+
+    nonisolated func fetchSchedule(for date: Date, bypassingCache _: Bool) async throws -> [GameDetail] {
+        try await fetchSchedule(for: date)
+    }
+
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        []
     }
 }
 
@@ -14974,7 +15614,8 @@ private func supabaseGameDate(from publicGameID: String) -> String {
 private func sampleGameCenterDetailPayload(
     game: GameDetail,
     lineScore: GameCenterLineScore? = nil,
-    review: GameCenterReview? = nil
+    review: GameCenterReview? = nil,
+    baseRunners: GameCenterBaseRunners? = nil
 ) -> GameCenterDetailPayload {
     GameCenterDetailPayload(
         summary: GameCenterSummary(
@@ -14993,7 +15634,7 @@ private func sampleGameCenterDetailPayload(
             strikes: game.strikes,
             outs: game.outs,
             bases: game.bases,
-            baseRunners: nil,
+            baseRunners: baseRunners,
             probableStarters: nil,
             winningPitcher: nil,
             losingPitcher: nil,

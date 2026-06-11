@@ -98,8 +98,22 @@ struct GameDetailView: View {
         .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
         .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
         .task(id: viewModel.stableIdentity) {
+            let initialRenderStartedAt = Date()
             viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
             let inputLocalGameID = viewModel.game?.id
+            if let initialGame = viewModel.game {
+                #if DEBUG
+                print("[GameDetail] initialRenderCompleted stableIdentity=\(viewModel.stableIdentity) publicGameID=\(initialGame.publicGameID ?? "<nil>") providerGameID=\(initialGame.providerGameID ?? "<nil>") durationMs=\(Int(Date().timeIntervalSince(initialRenderStartedAt) * 1_000))")
+                #endif
+                await screenModel.load(
+                    for: initialGame,
+                    forceRefresh: false,
+                    fetchDatabaseRecordReview: { game in
+                        await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
+                    }
+                )
+            }
+            await Task.yield()
             let refreshedGame = await viewModel.refreshIfNeeded(
                 appModel: appModel,
                 bypassAutomaticThrottle: true
@@ -196,19 +210,12 @@ struct GameDetailView: View {
         rawSupabasePublicGameID: String?,
         forceRefresh: Bool
     ) async {
-        await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
-            inputLocalGameId: inputLocalGameId,
-            resolvedGame: game,
-            rawSupabaseGameID: rawSupabaseGameID,
-            rawSupabaseProviderGameID: rawSupabaseProviderGameID,
-            rawSupabasePublicGameID: rawSupabasePublicGameID,
-            fetchDatabaseRecordReviewResult: appModel.fetchGameDetailDatabaseReviewResult,
-            fetchDatabaseRecordReviewResultByRawSupabaseID: appModel.fetchGameDetailDatabaseReviewResult
-        )
         await screenModel.load(
             for: game,
             forceRefresh: forceRefresh,
-            fetchDatabaseRecordReview: appModel.fetchGameDetailDatabaseReview
+            fetchDatabaseRecordReview: { game in
+                await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
+            }
         )
         await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
             inputLocalGameId: inputLocalGameId,
@@ -283,11 +290,11 @@ struct GameDetailView: View {
             }
 
             if let preview = presentation.preview {
-                if preview.probableStarters?.away != nil || preview.probableStarters?.home != nil {
+                if presentation.probableStarters?.away != nil || presentation.probableStarters?.home != nil {
                     ProbableStartersCard(
                         awayTeam: presentation.game.awayTeam,
                         homeTeam: presentation.game.homeTeam,
-                        starters: preview.probableStarters
+                        starters: presentation.probableStarters
                     )
                 }
 
@@ -296,8 +303,8 @@ struct GameDetailView: View {
                     MatchupComparisonCard(awayMatchup: awayMatchup, homeMatchup: homeMatchup)
                 }
 
-                if preview.probableStarters?.away == nil,
-                   preview.probableStarters?.home == nil,
+                if presentation.probableStarters?.away == nil,
+                   presentation.probableStarters?.home == nil,
                    preview.awayMatchup == nil,
                    preview.homeMatchup == nil {
                     EmptyStateView(
@@ -307,11 +314,19 @@ struct GameDetailView: View {
                     )
                 }
             } else {
-                EmptyStateView(
-                    systemImage: "person.crop.circle.badge.questionmark",
-                    title: "공식 프리뷰 정보 준비 중",
-                    message: "현재 데이터 소스에서 프리뷰 정보를 아직 제공하지 않습니다."
-                )
+                if presentation.probableStarters?.away != nil || presentation.probableStarters?.home != nil {
+                    ProbableStartersCard(
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam,
+                        starters: presentation.probableStarters
+                    )
+                } else {
+                    EmptyStateView(
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        title: "공식 프리뷰 정보 준비 중",
+                        message: "현재 데이터 소스에서 프리뷰 정보를 아직 제공하지 않습니다."
+                    )
+                }
             }
         }
     }
@@ -405,10 +420,15 @@ struct GameDetailPresentation {
         strikes = summary?.strikes ?? game.strikes
         outs = summary?.outs ?? game.outs
         bases = summary?.bases ?? game.bases
-        baseRunners = summary?.baseRunners.map {
+        let officialBaseRunners = summary?.baseRunners.map {
             GameBaseRunners(first: $0.first, second: $0.second, third: $0.third)
-        } ?? game.baseRunners
-        self.baseRunnerDisplay = baseRunnerDisplay
+        }
+        baseRunners = officialBaseRunners ?? game.baseRunners
+        self.baseRunnerDisplay = baseRunnerDisplay.mergingOfficialNames(
+            snapshot: game.baseRunners,
+            official: officialBaseRunners,
+            bases: summary?.bases ?? game.bases
+        )
         currentBatterName = game.currentBatterName?.nilIfBlank
         currentPitcherName = game.currentPitcherName?.nilIfBlank
         winningPitcher = summary?.winningPitcher?.nilIfBlank
@@ -417,7 +437,13 @@ struct GameDetailPresentation {
         endTimeText = summary?.endTime?.nilIfBlank
         durationText = summary?.durationText?.nilIfBlank
         crowdText = summary?.crowdText?.nilIfBlank
-        probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
+        let gameStarterMetadata: GameCenterProbableStarters? = {
+            let away = game.awayStartingPitcherName?.nilIfBlank
+            let home = game.homeStartingPitcherName?.nilIfBlank
+            guard away != nil || home != nil else { return nil }
+            return GameCenterProbableStarters(away: away, home: home)
+        }()
+        probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters ?? gameStarterMetadata
         lineScore = payload?.lineScore ?? cachedLineScore
         review = databaseRecordReview?.enrichingBatterPositions(from: payload?.review) ??
             boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
@@ -486,13 +512,13 @@ struct GameDetailPresentation {
 
     var visibleBaseRunners: [BaseRunnerDisplayItem] {
         [
-            ("1B", bases?.first == true),
-            ("2B", bases?.second == true),
-            ("3B", bases?.third == true)
+            ("1B", bases?.first == true, baseRunnerDisplay.runners.first),
+            ("2B", bases?.second == true, baseRunnerDisplay.runners.second),
+            ("3B", bases?.third == true, baseRunnerDisplay.runners.third)
         ]
         .compactMap { item in
             guard item.1 else { return nil }
-            return BaseRunnerDisplayItem(base: item.0)
+            return BaseRunnerDisplayItem(base: item.0, name: renderedBaseRunnerName(item.2))
         }
     }
 
@@ -516,15 +542,24 @@ struct GameDetailPresentation {
         #if DEBUG
         print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
         let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
-            result[item.base] = "occupied(no-name)"
+            result[item.base] = item.name
         }
         print("[BaseRunners] rendered first=\(rendered["1B"] ?? "unknown") second=\(rendered["2B"] ?? "unknown") third=\(rendered["3B"] ?? "unknown") source=\(baseRunnerDisplay.source)")
         #endif
+    }
+
+    private func renderedBaseRunnerName(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, trimmed.isEmpty == false, trimmed != "주자" else {
+            return "점유"
+        }
+        return trimmed
     }
 }
 
 struct BaseRunnerDisplayItem: Identifiable, Equatable {
     let base: String
+    let name: String
 
     var id: String { base }
 }
@@ -692,7 +727,7 @@ private struct BaseRunnerList: View {
                         .font(.caption.weight(.heavy))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
                         .frame(width: 24, alignment: .leading)
-                    Text("점유")
+                    Text(runner.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                         .lineLimit(1)
