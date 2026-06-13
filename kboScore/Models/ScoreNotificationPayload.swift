@@ -92,6 +92,41 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     let stableGameIdentity: String?
     let teamIDs: [String]
     let routeHint: NotificationRouteHint
+    let scoringBatterName: String?
+    let scoringResultText: String?
+    let scoringHitBaseCount: Int?
+    let scoringRunsScored: Int?
+    let scoringRBI: Int?
+    let scoringInning: Int?
+    let scoringInningHalf: String?
+    let scoringBattingTeamID: String?
+    let scoringBattingTeamName: String?
+    let scoringAwayScoreAfter: Int?
+    let scoringHomeScoreAfter: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case gameID
+        case eventType
+        case title
+        case body
+        case publicGameID
+        case providerGameID
+        case gameDatabaseID
+        case stableGameIdentity
+        case teamIDs
+        case routeHint
+        case scoringBatterName
+        case scoringResultText
+        case scoringHitBaseCount
+        case scoringRunsScored
+        case scoringRBI = "scoringRbi"
+        case scoringInning
+        case scoringInningHalf
+        case scoringBattingTeamID = "scoringBattingTeamId"
+        case scoringBattingTeamName
+        case scoringAwayScoreAfter
+        case scoringHomeScoreAfter
+    }
 
     nonisolated init(
         gameID: String?,
@@ -103,7 +138,18 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         gameDatabaseID: String? = nil,
         stableGameIdentity: String? = nil,
         teamIDs: [String] = [],
-        routeHint: NotificationRouteHint = .gameDetail
+        routeHint: NotificationRouteHint = .gameDetail,
+        scoringBatterName: String? = nil,
+        scoringResultText: String? = nil,
+        scoringHitBaseCount: Int? = nil,
+        scoringRunsScored: Int? = nil,
+        scoringRBI: Int? = nil,
+        scoringInning: Int? = nil,
+        scoringInningHalf: String? = nil,
+        scoringBattingTeamID: String? = nil,
+        scoringBattingTeamName: String? = nil,
+        scoringAwayScoreAfter: Int? = nil,
+        scoringHomeScoreAfter: Int? = nil
     ) {
         self.gameID = gameID
         self.eventType = eventType
@@ -115,6 +161,17 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         self.stableGameIdentity = stableGameIdentity
         self.teamIDs = teamIDs
         self.routeHint = routeHint
+        self.scoringBatterName = scoringBatterName
+        self.scoringResultText = scoringResultText
+        self.scoringHitBaseCount = scoringHitBaseCount
+        self.scoringRunsScored = scoringRunsScored
+        self.scoringRBI = scoringRBI
+        self.scoringInning = scoringInning
+        self.scoringInningHalf = scoringInningHalf
+        self.scoringBattingTeamID = scoringBattingTeamID
+        self.scoringBattingTeamName = scoringBattingTeamName
+        self.scoringAwayScoreAfter = scoringAwayScoreAfter
+        self.scoringHomeScoreAfter = scoringHomeScoreAfter
     }
 
     func userInfo() -> [AnyHashable: Any] {
@@ -129,7 +186,18 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
                 "gameDatabaseId": gameDatabaseID as Any,
                 "stableGameIdentity": stableGameIdentity as Any,
                 "teamIds": teamIDs,
-                "routeHint": routeHint.rawValue
+                "routeHint": routeHint.rawValue,
+                "scoringBatterName": scoringBatterName as Any,
+                "scoringResultText": scoringResultText as Any,
+                "scoringHitBaseCount": scoringHitBaseCount as Any,
+                "scoringRunsScored": scoringRunsScored as Any,
+                "scoringRbi": scoringRBI as Any,
+                "scoringInning": scoringInning as Any,
+                "scoringInningHalf": scoringInningHalf as Any,
+                "scoringBattingTeamId": scoringBattingTeamID as Any,
+                "scoringBattingTeamName": scoringBattingTeamName as Any,
+                "scoringAwayScoreAfter": scoringAwayScoreAfter as Any,
+                "scoringHomeScoreAfter": scoringHomeScoreAfter as Any
             ]
         ]
     }
@@ -194,7 +262,18 @@ enum ScoreNotificationPayloadExtractor {
             gameDatabaseID: stringValue(for: ["gameDatabaseId", "gameDatabaseID", "databaseGameId", "databaseGameID"], in: dictionary),
             stableGameIdentity: stringValue(for: ["stableGameIdentity", "gameStableIdentity"], in: dictionary),
             teamIDs: teamIDs,
-            routeHint: routeHint
+            routeHint: routeHint,
+            scoringBatterName: stringValue(for: ["scoringBatterName"], in: dictionary),
+            scoringResultText: stringValue(for: ["scoringResultText"], in: dictionary),
+            scoringHitBaseCount: intValue(for: ["scoringHitBaseCount"], in: dictionary),
+            scoringRunsScored: intValue(for: ["scoringRunsScored"], in: dictionary),
+            scoringRBI: intValue(for: ["scoringRbi", "scoringRBI"], in: dictionary),
+            scoringInning: intValue(for: ["scoringInning"], in: dictionary),
+            scoringInningHalf: stringValue(for: ["scoringInningHalf"], in: dictionary),
+            scoringBattingTeamID: stringValue(for: ["scoringBattingTeamId", "scoringBattingTeamID"], in: dictionary),
+            scoringBattingTeamName: stringValue(for: ["scoringBattingTeamName"], in: dictionary),
+            scoringAwayScoreAfter: intValue(for: ["scoringAwayScoreAfter"], in: dictionary),
+            scoringHomeScoreAfter: intValue(for: ["scoringHomeScoreAfter"], in: dictionary)
         )
     }
 
@@ -204,6 +283,22 @@ enum ScoreNotificationPayloadExtractor {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty == false {
                 return trimmed
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func intValue(for keys: [String], in dictionary: [String: Any]) -> Int? {
+        for key in keys {
+            if let value = dictionary[key] as? Int {
+                return value
+            }
+            if let value = dictionary[key] as? NSNumber {
+                return value.intValue
+            }
+            if let value = dictionary[key] as? String,
+               let intValue = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return intValue
             }
         }
         return nil

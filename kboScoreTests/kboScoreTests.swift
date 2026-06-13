@@ -5335,6 +5335,45 @@ struct kboScoreTests {
         #expect(payload?.teamIDs == ["lotte", "hanwha"])
     }
 
+    @Test func scoreNotificationPayloadExtractorAcceptsScoringPlayFields() async throws {
+        let payload = ScoreNotificationPayloadExtractor.payload(
+            from: [
+                "aps": [
+                    "alert": [
+                        "title": "롯데 득점",
+                        "body": "7회초 레이예스 2루타, 2득점 · 롯데 4-2 한화"
+                    ]
+                ],
+                "data": [
+                    "gameId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "publicGameId": "20260409LTHT0",
+                    "eventType": "SCORE_CHANGED",
+                    "awayTeamId": "lotte",
+                    "homeTeamId": "hanwha",
+                    "eventTeamId": "lotte",
+                    "scoringBatterName": "레이예스",
+                    "scoringResultText": "2루타",
+                    "scoringHitBaseCount": 2,
+                    "scoringRunsScored": "2",
+                    "scoringRbi": 2,
+                    "scoringInning": 7,
+                    "scoringInningHalf": "top",
+                    "scoringBattingTeamId": "lotte",
+                    "scoringBattingTeamName": "롯데",
+                    "scoringAwayScoreAfter": 4,
+                    "scoringHomeScoreAfter": 2
+                ]
+            ]
+        )
+
+        #expect(payload?.title == "롯데 득점")
+        #expect(payload?.scoringBatterName == "레이예스")
+        #expect(payload?.scoringResultText == "2루타")
+        #expect(payload?.scoringRunsScored == 2)
+        #expect(payload?.scoringBattingTeamID == "lotte")
+        #expect(payload?.preferredGameNavigationIdentity == "20260409LTHT0")
+    }
+
     @Test func notificationHistoryDecodesOldRecordsSafely() throws {
         let id = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
         let data = """
