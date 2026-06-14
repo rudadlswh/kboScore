@@ -181,9 +181,23 @@ extension GameCenterBattingSection {
                 let positions = Set(matches.map(\.position).filter { GameRecordPositionFormatter.display($0) != "-" })
                 return positions.count == 1 ? positions.first : nil
             }
+        let orderedSourceLines = source.lines.compactMap { line -> (order: String, position: String)? in
+            guard let order = line.battingOrderNumber else { return nil }
+            return (order, line.position)
+        }
+        let sourcePositionsByOrder = Dictionary(grouping: orderedSourceLines, by: \.order)
+            .compactMapValues { matches -> String? in
+                let positions = Set(matches.map(\.position).filter { GameRecordPositionFormatter.display($0) != "-" })
+                return positions.count == 1 ? positions.first : nil
+            }
 
         let enrichedLines = lines.map { line -> GameCenterBattingLine in
-            let candidate = sourcePositions[line.name.normalizedPositionLookupName]
+            let nameCandidate = sourcePositions[line.name.normalizedPositionLookupName]
+            let orderCandidate = line.battingOrderNumber.flatMap { sourcePositionsByOrder[$0] }
+            let adjacentOrderCandidate = line.battingOrderNumber == nil
+                ? inferredAdjacentOrderPosition(for: line, in: lines, sourcePositionsByOrder: sourcePositionsByOrder)
+                : nil
+            let candidate = nameCandidate ?? orderCandidate ?? adjacentOrderCandidate
             let position = candidate.flatMap {
                 GameRecordPositionFormatter.isRicher($0, than: line.position) ? $0 : nil
             } ?? line.position
@@ -202,6 +216,39 @@ extension GameCenterBattingSection {
         }
 
         return GameCenterBattingSection(lines: enrichedLines, totals: totals)
+    }
+
+    private func inferredAdjacentOrderPosition(
+        for line: GameCenterBattingLine,
+        in lines: [GameCenterBattingLine],
+        sourcePositionsByOrder: [String: String]
+    ) -> String? {
+        guard let index = lines.firstIndex(where: { $0.id == line.id }) else {
+            return nil
+        }
+
+        if index > lines.startIndex {
+            for previousIndex in stride(from: lines.index(before: index), through: lines.startIndex, by: -1) {
+                if let order = lines[previousIndex].battingOrderNumber,
+                   let position = sourcePositionsByOrder[order],
+                   GameRecordPositionFormatter.display(position) != "-" {
+                    return position
+                }
+            }
+        }
+
+        let nextIndex = lines.index(after: index)
+        if nextIndex < lines.endIndex {
+            for followingIndex in nextIndex..<lines.endIndex {
+                if let order = lines[followingIndex].battingOrderNumber,
+                   let position = sourcePositionsByOrder[order],
+                   GameRecordPositionFormatter.display(position) != "-" {
+                    return position
+                }
+            }
+        }
+
+        return nil
     }
 }
 

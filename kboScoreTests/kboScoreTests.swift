@@ -9282,9 +9282,9 @@ struct kboScoreTests {
         )
     }
 
-    private func makePositionBattingLine(name: String, position: String) -> GameCenterBattingLine {
+    private func makePositionBattingLine(order: String = "1", name: String, position: String) -> GameCenterBattingLine {
         GameCenterBattingLine(
-            battingOrder: "1",
+            battingOrder: order,
             position: position,
             name: name,
             atBats: nil,
@@ -9949,6 +9949,52 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display(enriched.lines[0].position) == "2B·SS")
         #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "SS·3B")
         #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "PR·2B")
+    }
+
+    @Test func gameRecordPositionEnrichmentFallsBackToBattingOrderForSubstitutes() throws {
+        let current = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(order: "8", name: "김지찬", position: ""),
+                makePositionBattingLine(order: "9", name: "김도환", position: "")
+            ],
+            totals: nil
+        )
+        let source = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(order: "8", name: "장승현", position: "포수"),
+                makePositionBattingLine(order: "9", name: "김상준", position: "유격수")
+            ],
+            totals: nil
+        )
+
+        let enriched = current.enrichingPositions(from: source, sideLabel: "home")
+
+        #expect(GameRecordPositionFormatter.display(enriched.lines[0].position) == "C")
+        #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "SS")
+    }
+
+    @Test func gameRecordPositionEnrichmentInfersBlankSubstituteOrderFromAdjacentRows() throws {
+        let current = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(order: "7", name: "손호영", position: ""),
+                makePositionBattingLine(order: "", name: "김세민", position: ""),
+                makePositionBattingLine(order: "", name: "노진혁", position: ""),
+                makePositionBattingLine(order: "8", name: "손성빈", position: "")
+            ],
+            totals: nil
+        )
+        let source = GameCenterBattingSection(
+            lines: [
+                makePositionBattingLine(order: "7", name: "손호영", position: "3루수"),
+                makePositionBattingLine(order: "8", name: "손성빈", position: "포수")
+            ],
+            totals: nil
+        )
+
+        let enriched = current.enrichingPositions(from: source, sideLabel: "away")
+
+        #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "3B")
+        #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "3B")
     }
 
     @Test func gameRecordPositionDebugLogsAreDedupedForSamePlayerAndGame() throws {
