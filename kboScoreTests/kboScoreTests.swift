@@ -4830,6 +4830,50 @@ struct kboScoreTests {
         #expect(model.homeFallbackStandingsSnapshots.first?.wins == 1)
     }
 
+    @Test func homeFallbackRefreshLoadsStandingsSourceWhenTodayHasNoGames() async throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let completedGame = makeGameDetail(
+            id: UUID(uuidString: "92500000-0000-0000-0000-000000000002")!,
+            scheduledStart: isoDate("2026-04-26T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 6,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "provider_game_id=20260426OBLG0"
+        )
+        let state = TeamRankFlowState(
+            localRanks: [],
+            standingsGames: [completedGame]
+        )
+        let repository = TeamRankFlowRepository(state: state)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-04-27T09:00:00+09:00") }
+        )
+
+        #expect(model.todayGames.isEmpty)
+        #expect(model.homeFallbackStandingsSnapshots.isEmpty)
+
+        await model.refreshHome()
+
+        let lgSnapshot = try #require(model.homeFallbackStandingsSnapshots.first(where: { $0.team.id == "lg" }))
+        #expect(await state.standingsSourceFetchCount == 1)
+        #expect(lgSnapshot.wins == 1)
+        #expect(lgSnapshot.gamesPlayed == 1)
+    }
+
     @Test func homeFallbackCompletedResolverIncludesFinalGamesBeforeToday() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))

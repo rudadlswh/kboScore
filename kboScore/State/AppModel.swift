@@ -741,7 +741,35 @@ final class AppModel {
     }
 
     private func loadHomeFallbackStandingsSourceIfNeeded(reason: String) async {
-        logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "homeFallback:\(reason)")
+        let season = currentStandingsSeason()
+        if standingsSourceGamesBySeason[season]?.isEmpty == false ||
+            homeFallbackReferenceWeekCompletedGames.isEmpty == false {
+            logStandingsLocalCalculationSkipped(reason: "homeFallbackSourceAvailable", source: "homeFallback:\(reason)")
+            return
+        }
+
+        do {
+            #if DEBUG
+            print("[HomeFallback] standings source fetch start season=\(season) reason=\(reason)")
+            #endif
+            let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
+            storeStandingsSourceGames(normalizedGames, season: season)
+            refreshLocalStandingsProbabilitySignals(for: normalizedGames)
+            markRefreshSuccess(for: .games, at: Date(), isStale: false)
+            await refreshRepositoryDebugInfo(dataSets: [])
+            #if DEBUG
+            print("[HomeFallback] standings source fetch success season=\(season) count=\(normalizedGames.count) reason=\(reason)")
+            #endif
+        } catch is CancellationError {
+            #if DEBUG
+            print("[HomeFallback] standings source fetch cancelled season=\(season) reason=\(reason)")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[HomeFallback] standings source fetch failed season=\(season) reason=\(reason) error=\(error)")
+            #endif
+            markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
+        }
     }
 
     private func fetchStandingsSourceGames(season: Int) async throws -> [GameDetail] {
