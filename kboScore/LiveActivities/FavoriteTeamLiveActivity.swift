@@ -1,6 +1,10 @@
 //
 //  FavoriteTeamLiveActivity.swift
 //  kboScore
+//  기능 설명: 마이팀 경기 Live Activity의 시작, 갱신, 종료 제어를 담당합니다.
+//  앱 밖에서도 마이팀 경기 흐름을 이어서 볼 수 있도록 Live Activity와 위젯용 스냅샷을 분리합니다.
+//  확장 프로세스, App Group 저장소, 푸시 토큰, 시스템 권한 상태에 따라 갱신이 실패할 수 있습니다.
+//  TODO : 실기기 권한 상태별 동작과 종료 조건을 더 촘촘히 검증합니다.
 //
 //  Created by Codex on 3/26/26.
 //
@@ -18,6 +22,7 @@ private extension String {
     }
 }
 
+// FavoriteTeamLiveActivitySnapshot 구조체는 FavoriteTeamLiveActivitySnapshot 타입의 역할과 값을 정의합니다.
 struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     let gameID: UUID
     let favoriteTeamID: String
@@ -68,6 +73,7 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
         )
     }
 
+    // make 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func make(from game: GameDetail, favoriteTeamID: String?) -> FavoriteTeamLiveActivitySnapshot? {
         guard let favoriteTeamID else { return nil }
 
@@ -134,6 +140,7 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     }
 
     #if canImport(ActivityKit)
+    // activityAttributes 메서드는 이 타입의 주요 동작을 수행합니다.
     func activityAttributes() -> FavoriteTeamGameActivityAttributes {
         FavoriteTeamGameActivityAttributes(
             gameID: gameID.uuidString,
@@ -148,6 +155,7 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
         )
     }
 
+    // contentState 메서드는 이 타입의 주요 동작을 수행합니다.
     func contentState() -> FavoriteTeamGameActivityAttributes.ContentState {
         FavoriteTeamGameActivityAttributes.ContentState(
             isPreGame: isPreGame,
@@ -170,6 +178,7 @@ struct FavoriteTeamLiveActivitySnapshot: Hashable, Sendable {
     #endif
 }
 
+// FavoriteTeamLiveActivityContentStateKey 구조체는 FavoriteTeamLiveActivityContentStateKey 타입의 역할과 값을 정의합니다.
 nonisolated struct FavoriteTeamLiveActivityContentStateKey: Hashable, Sendable, CustomStringConvertible {
     let isPreGame: Bool
     let favoriteScoreText: String
@@ -207,6 +216,7 @@ nonisolated struct FavoriteTeamLiveActivityContentStateKey: Hashable, Sendable, 
         ].joined(separator: "|")
     }
 
+    // changedFields 메서드는 이 타입의 주요 동작을 수행합니다.
     func changedFields(comparedTo previous: FavoriteTeamLiveActivityContentStateKey?) -> [String] {
         guard let previous else {
             return ["initialContentState"]
@@ -231,6 +241,7 @@ nonisolated struct FavoriteTeamLiveActivityContentStateKey: Hashable, Sendable, 
     }
 }
 
+// FavoriteTeamLiveActivityDedupeDecision 구조체는 FavoriteTeamLiveActivityDedupeDecision 타입의 역할과 값을 정의합니다.
 nonisolated struct FavoriteTeamLiveActivityDedupeDecision: Sendable {
     let shouldSkip: Bool
     let previousContentStateKey: FavoriteTeamLiveActivityContentStateKey?
@@ -238,12 +249,15 @@ nonisolated struct FavoriteTeamLiveActivityDedupeDecision: Sendable {
     let changedFields: [String]
 }
 
+// FavoriteTeamLiveActivityUpdateDeduper 구조체는 FavoriteTeamLiveActivityUpdateDeduper 타입의 역할과 값을 정의합니다.
 struct FavoriteTeamLiveActivityUpdateDeduper: Sendable {
     private var activeGameID: UUID?
     private var contentStateKey: FavoriteTeamLiveActivityContentStateKey?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init() {}
 
+    // decision 메서드는 이 타입의 주요 동작을 수행합니다.
     func decision(gameID: UUID, contentStateKey newContentStateKey: FavoriteTeamLiveActivityContentStateKey) -> FavoriteTeamLiveActivityDedupeDecision {
         let previousContentStateKey = activeGameID == gameID ? contentStateKey : nil
         let changedFields = newContentStateKey.changedFields(comparedTo: previousContentStateKey)
@@ -255,11 +269,13 @@ struct FavoriteTeamLiveActivityUpdateDeduper: Sendable {
         )
     }
 
+    // record 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     mutating func record(gameID: UUID, contentStateKey: FavoriteTeamLiveActivityContentStateKey) {
         activeGameID = gameID
         self.contentStateKey = contentStateKey
     }
 
+    // reset 메서드는 저장된 상태나 캐시 값을 정리합니다.
     mutating func reset() {
         activeGameID = nil
         contentStateKey = nil
@@ -271,7 +287,9 @@ protocol FavoriteTeamLiveActivityControlling: AnyObject {
     var isSupported: Bool { get }
     var activeGameID: UUID? { get }
 
+    // startOrUpdate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdate(using snapshot: FavoriteTeamLiveActivitySnapshot) async throws
+    // endCurrent 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func endCurrent() async
 }
 
@@ -280,12 +298,16 @@ final class NoOpFavoriteTeamLiveActivityController: FavoriteTeamLiveActivityCont
     let isSupported: Bool = false
     let activeGameID: UUID? = nil
 
+    // startOrUpdate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdate(using snapshot: FavoriteTeamLiveActivitySnapshot) async throws {}
 
+    // endCurrent 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func endCurrent() async {}
 }
 
+// FavoriteTeamLiveActivitySupport 열거형는 FavoriteTeamLiveActivitySupport 타입의 역할과 값을 정의합니다.
 enum FavoriteTeamLiveActivitySupport {
+    // hasWidgetExtension 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     static func hasWidgetExtension(in bundle: Bundle = .main) -> Bool {
         guard let pluginsURL = bundle.builtInPlugInsURL,
               let pluginURLs = try? FileManager.default.contentsOfDirectory(
@@ -328,11 +350,13 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
     private var pushTokenObservationTask: Task<Void, Never>?
     private var registeredTokenKeys: Set<LiveActivityTokenRegistrationKey> = []
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(tokenRegistrationClient: (any LiveActivityTokenRegistrationClient)? = nil) {
         self.isSupported = FavoriteTeamLiveActivitySupport.isSupported
         self.tokenRegistrationClient = tokenRegistrationClient ?? LiveActivityTokenRegistrationClientFactory.makeAppClient()
     }
 
+    // startOrUpdate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdate(using snapshot: FavoriteTeamLiveActivitySnapshot) async throws {
         guard isSupported else { return }
 
@@ -390,6 +414,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         updateDeduper.record(gameID: snapshot.gameID, contentStateKey: contentStateKey)
     }
 
+    // endCurrent 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func endCurrent() async {
         guard let activity else { return }
         await activity.end(nil, dismissalPolicy: .immediate)
@@ -400,6 +425,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         pushTokenObservationTask = nil
     }
 
+    // observePushTokens 메서드는 이 타입의 주요 동작을 수행합니다.
     private func observePushTokens(for activity: Activity<FavoriteTeamGameActivityAttributes>, snapshot: FavoriteTeamLiveActivitySnapshot) {
         pushTokenObservationTask?.cancel()
         pushTokenObservationTask = Task { [tokenRegistrationClient] in

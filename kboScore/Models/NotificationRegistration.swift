@@ -1,12 +1,17 @@
 //
 //  NotificationRegistration.swift
 //  kboScore
+//  기능 설명: 알림 등록 요청에 필요한 사용자 설정과 기기 상태 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
 import Foundation
 
+// NotificationAlertType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
     case gameStart
     case scoreChange
@@ -15,16 +20,19 @@ nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable 
     case rainDelay
 }
 
+// NotificationRegistrationQuietHours 구조체는 NotificationRegistrationQuietHours 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
     let startHour: Int
     let endHour: Int
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(startHour: Int, endHour: Int) {
         self.startHour = startHour
         self.endHour = endHour
     }
 }
 
+// NotificationRegistrationPayload 구조체는 NotificationRegistrationPayload 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     let platform: String
     let environment: String
@@ -43,6 +51,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case platform
         case environment
@@ -62,6 +71,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         case muteWhenLosingEnabled
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         platform: String = "ios",
         environment: String = NotificationRegistrationEnvironment.current,
@@ -98,6 +108,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init?(
         deviceToken: String?,
         settings: AppSettings,
@@ -127,6 +138,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         )
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         platform = try container.decodeIfPresent(String.self, forKey: .platform) ?? "ios"
@@ -147,6 +159,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
     }
 
+    // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(platform, forKey: .platform)
@@ -183,6 +196,7 @@ extension NotificationRegistrationPayload {
     }
 }
 
+// NotificationRegistrationKey 구조체는 NotificationRegistrationKey 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
     let deviceToken: String
     let environment: String
@@ -198,6 +212,7 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         deviceToken: String,
         environment: String,
@@ -228,6 +243,7 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         payload: NotificationRegistrationPayload,
         endpointDescription: String?
@@ -268,16 +284,19 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
     }
 }
 
+// NotificationRegistrationStartDecision 열거형는 NotificationRegistrationStartDecision 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationRegistrationStartDecision: Equatable, Sendable {
     case start(keyChanged: Bool)
     case skipInFlight
     case skipAlreadyRegistered
 }
 
+// NotificationRegistrationDeduplicationState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
     private(set) var inFlightRegistrationKeys: Set<NotificationRegistrationKey> = []
     private(set) var lastSuccessfulRegistrationKey: NotificationRegistrationKey?
 
+    // start 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     mutating func start(_ key: NotificationRegistrationKey, force: Bool = false) -> NotificationRegistrationStartDecision {
         if inFlightRegistrationKeys.contains(key) {
             return .skipInFlight
@@ -292,6 +311,7 @@ nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
         return .start(keyChanged: keyChanged)
     }
 
+    // complete 메서드는 이 타입의 주요 동작을 수행합니다.
     mutating func complete(_ key: NotificationRegistrationKey, status: NotificationRegistrationSyncStatus) {
         inFlightRegistrationKeys.remove(key)
         if status == .synced {
@@ -299,11 +319,13 @@ nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
         }
     }
 
+    // fail 메서드는 이 타입의 주요 동작을 수행합니다.
     mutating func fail(_ key: NotificationRegistrationKey) {
         inFlightRegistrationKeys.remove(key)
     }
 }
 
+// NotificationInstallationID 열거형는 NotificationInstallationID 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationInstallationID {
     nonisolated static var current: String {
         let storageKey = "notificationInstallationID"
@@ -318,6 +340,7 @@ nonisolated enum NotificationInstallationID {
     }
 }
 
+// NotificationRegistrationEnvironment 열거형는 NotificationRegistrationEnvironment 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationRegistrationEnvironment {
     nonisolated static var current: String {
         #if DEBUG
@@ -329,6 +352,7 @@ nonisolated enum NotificationRegistrationEnvironment {
 }
 
 extension NotificationAlertType {
+    // enabled 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func enabled(from preferences: NotificationPreferences) -> [NotificationAlertType] {
         var alertTypes: [NotificationAlertType] = []
         if preferences.gameStartEnabled { alertTypes.append(.gameStart) }
@@ -340,6 +364,7 @@ extension NotificationAlertType {
     }
 }
 
+// NotificationRegistrationSyncStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 nonisolated enum NotificationRegistrationSyncStatus: String, Sendable {
     case idle = "대기"
     case waitingForToken = "토큰 대기"

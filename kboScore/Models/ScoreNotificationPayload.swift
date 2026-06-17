@@ -1,6 +1,10 @@
 //
 //  ScoreNotificationPayload.swift
 //  kboScore
+//  기능 설명: 스코어 변경 푸시 알림 페이로드를 앱 알림 모델로 변환합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
@@ -8,6 +12,7 @@
 import Foundation
 import UserNotifications
 
+// ScoreNotificationEventType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum ScoreNotificationEventType: String, Codable, Sendable {
     case gameStart
     case scoreChange
@@ -18,6 +23,7 @@ nonisolated enum ScoreNotificationEventType: String, Codable, Sendable {
     case rainDelay
     case general
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(remoteValue: String?) {
         switch remoteValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "game_start", "game_started", "gamestart":
@@ -40,12 +46,14 @@ nonisolated enum ScoreNotificationEventType: String, Codable, Sendable {
     }
 }
 
+// NotificationRouteHint 열거형는 NotificationRouteHint 타입의 역할과 값을 정의합니다.
 enum NotificationRouteHint: String, Codable, Sendable {
     case gameDetail
     case notifications
     case home
 }
 
+// AppNotificationAuthorizationStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 enum AppNotificationAuthorizationStatus: String, Sendable {
     case notDetermined = "미요청"
     case denied = "거부됨"
@@ -54,6 +62,7 @@ enum AppNotificationAuthorizationStatus: String, Sendable {
     case ephemeral = "일시 허용"
     case unsupported = "확인 불가"
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(_ status: UNAuthorizationStatus) {
         switch status {
         case .notDetermined:
@@ -81,6 +90,7 @@ enum AppNotificationAuthorizationStatus: String, Sendable {
     }
 }
 
+// ScoreNotificationPayload 구조체는 ScoreNotificationPayload 타입의 역할과 값을 정의합니다.
 struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     let gameID: String?
     let eventType: ScoreNotificationEventType
@@ -104,6 +114,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     let scoringAwayScoreAfter: Int?
     let scoringHomeScoreAfter: Int?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case gameID
         case eventType
@@ -128,6 +139,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         case scoringHomeScoreAfter
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         gameID: String?,
         eventType: ScoreNotificationEventType,
@@ -174,6 +186,7 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
         self.scoringHomeScoreAfter = scoringHomeScoreAfter
     }
 
+    // userInfo 메서드는 이 타입의 주요 동작을 수행합니다.
     func userInfo() -> [AnyHashable: Any] {
         [
             "kbo_live": [
@@ -203,13 +216,16 @@ struct ScoreNotificationPayload: Codable, Equatable, Sendable {
     }
 }
 
+// AppNotificationRoute 열거형는 AppNotificationRoute 타입의 역할과 값을 정의합니다.
 enum AppNotificationRoute: Equatable, Sendable {
     case gameDetail(String)
     case notifications
     case home
 }
 
+// ScoreNotificationPayloadExtractor 열거형는 ScoreNotificationPayloadExtractor 타입의 역할과 값을 정의합니다.
 enum ScoreNotificationPayloadExtractor {
+    // payload 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func payload(from userInfo: [AnyHashable: Any]) -> ScoreNotificationPayload? {
         let normalizedRoot = userInfo.reduce(into: [String: Any]()) { partialResult, entry in
             if let key = entry.key as? String {
@@ -227,6 +243,7 @@ enum ScoreNotificationPayloadExtractor {
         return payload(from: normalizedRoot, aps: normalizedRoot["aps"] as? [String: Any])
     }
 
+    // route 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func route(from payload: ScoreNotificationPayload) -> AppNotificationRoute? {
         switch payload.routeHint {
         case .gameDetail:
@@ -241,6 +258,7 @@ enum ScoreNotificationPayloadExtractor {
         }
     }
 
+    // payload 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func payload(from dictionary: [String: Any], aps: [String: Any]?) -> ScoreNotificationPayload? {
         let alert = aps?["alert"] as? [String: Any]
         let title = (dictionary["title"] as? String) ?? (alert?["title"] as? String)
@@ -277,6 +295,7 @@ enum ScoreNotificationPayloadExtractor {
         )
     }
 
+    // stringValue 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func stringValue(for keys: [String], in dictionary: [String: Any]) -> String? {
         for key in keys {
             guard let value = dictionary[key] as? String else { continue }
@@ -288,6 +307,7 @@ enum ScoreNotificationPayloadExtractor {
         return nil
     }
 
+    // intValue 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func intValue(for keys: [String], in dictionary: [String: Any]) -> Int? {
         for key in keys {
             if let value = dictionary[key] as? Int {
@@ -304,6 +324,7 @@ enum ScoreNotificationPayloadExtractor {
         return nil
     }
 
+    // notificationTeamIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func notificationTeamIDs(from dictionary: [String: Any]) -> [String] {
         if let teamIDs = dictionary["teamIds"] as? [String] {
             return teamIDs
@@ -341,6 +362,7 @@ extension ScoreNotificationPayload {
         return gameID
     }
 
+    // databaseIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func databaseIdentity(from value: String?) -> String? {
         guard let value = nonBlank(value) else { return nil }
         if value.hasPrefix("id:") {
@@ -351,6 +373,7 @@ extension ScoreNotificationPayload {
         return UUID(uuidString: value).map { GameIdentifier.idKey($0) }
     }
 
+    // realStableIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func realStableIdentity(_ value: String?) -> String? {
         guard let value = nonBlank(value) else { return nil }
         if value.hasPrefix("public:") || value.hasPrefix("provider:") {
@@ -362,6 +385,7 @@ extension ScoreNotificationPayload {
         return nil
     }
 
+    // nonBlank 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func nonBlank(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               value.isEmpty == false else { return nil }
