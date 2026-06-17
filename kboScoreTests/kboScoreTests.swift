@@ -1,5 +1,9 @@
 //
 //  kboScoreTests.swift
+//  기능 설명: 전체 앱 동작을 검증하는 단위 테스트 모음을 담습니다.
+//  회귀를 빠르게 찾고 핵심 사용자 흐름이 깨지지 않도록 테스트 의도를 코드 가까이에 둡니다.
+//  테스트 데이터와 시뮬레이터 환경 차이에 따라 결과가 달라질 수 있어 고정 fixture와 명확한 대기 조건을 우선합니다.
+//  TODO : 반복 실패가 발견되면 원인별 fixture와 경계 케이스를 보강합니다.
 //  kboScoreTests
 //
 //  Created by 조경민 on 3/25/26.
@@ -10,9 +14,11 @@ import Testing
 import UserNotifications
 @testable import kboScore
 
+// kboScoreTests 구조체는 kboScoreTests 타입의 역할과 값을 정의합니다.
 @MainActor
 struct kboScoreTests {
 
+    // homeSortingPrioritizesFavoriteTeamLiveGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeSortingPrioritizesFavoriteTeamLiveGame() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap())
 
@@ -24,6 +30,7 @@ struct kboScoreTests {
         #expect(games.first?.homeTeam.id == "lg")
     }
 
+    // homeContentStateSelectsExpectedDisplayBranch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeContentStateSelectsExpectedDisplayBranch() throws {
         let bootstrap = MockKBOData.makeBootstrap()
         let game = try #require(bootstrap.games.first)
@@ -91,6 +98,7 @@ struct kboScoreTests {
         }
     }
 
+    // homeHeroGamePresentationFormatsDisplayText 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeHeroGamePresentationFormatsDisplayText() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -153,6 +161,7 @@ struct kboScoreTests {
         #expect(HomeHeroGamePresentation.basesText(for: unknownVenueSummary) == nil)
     }
 
+    // gameMergeResolverUsesPublicGameIDBeforeWeakerIdentities 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameMergeResolverUsesPublicGameIDBeforeWeakerIdentities() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
@@ -202,6 +211,7 @@ struct kboScoreTests {
         #expect(selected.providerGameID == "updated-provider")
     }
 
+    // gameMergeResolverMatchesProviderDatabaseAndStableIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameMergeResolverMatchesProviderDatabaseAndStableIdentity() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "kia" }))
@@ -233,6 +243,7 @@ struct kboScoreTests {
         #expect(SelectedGameResolver.match(for: stableOnlyGame.stableDetailIdentity, in: [stableOnlyGame])?.game.id == stableOnlyGame.id)
     }
 
+    // selectedGameResolverUsesBestEquivalentCandidateAndTransitiveAliases 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     @Test func selectedGameResolverUsesBestEquivalentCandidateAndTransitiveAliases() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
@@ -279,12 +290,14 @@ struct kboScoreTests {
         #expect(match.game.providerGameID == "chain-provider")
     }
 
+    // scheduleDateKeyFormatterUsesKSTDayBoundary 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDateKeyFormatterUsesKSTDayBoundary() throws {
         #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-04-30T14:59:59Z")) == "2026-04-30")
         #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-04-30T15:00:00Z")) == "2026-05-01")
         #expect(ScheduleDateKeyFormatter.dayKey(for: isoDate("2026-05-01T14:59:59Z")) == "2026-05-01")
     }
 
+    // teamCanonicalIDRecognizesAppAliases 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func teamCanonicalIDRecognizesAppAliases() throws {
         #expect(Team.canonicalID(for: "LG") == "lg")
         #expect(Team.canonicalID(for: "KT 위즈") == "kt")
@@ -295,6 +308,7 @@ struct kboScoreTests {
         #expect(Team.canonicalID(for: "SAM") == "samsung")
     }
 
+    // homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle() throws {
         let now = isoDate("2026-06-09T12:00:00+09:00")
         let recentRefresh = now.addingTimeInterval(-14)
@@ -328,6 +342,7 @@ struct kboScoreTests {
         ) == false)
     }
 
+    // countDisplayNormalizesTransitionalValues 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func countDisplayNormalizesTransitionalValues() throws {
         #expect(KBOCountDisplay.balls(4) == 3)
         #expect(KBOCountDisplay.strikes(3) == 2)
@@ -336,6 +351,7 @@ struct kboScoreTests {
         #expect(KBOCountDisplay.strikes(nil) == nil)
     }
 
+    // inningFormatterUsesKoreanBaseballNotation 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func inningFormatterUsesKoreanBaseballNotation() throws {
         #expect(KBOInningFormatter.korean("Top 1") == "1회 초")
         #expect(KBOInningFormatter.korean("Bottom 10") == "10회 말")
@@ -343,12 +359,14 @@ struct kboScoreTests {
         #expect(KBOInningFormatter.korean(nil) == nil)
     }
 
+    // gameDetailOnlyExposesOverviewSection 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailOnlyExposesOverviewSection() throws {
         for status in GameStatus.allCases {
             #expect(GameDetailSection.availableSections(for: status) == [.overview])
         }
     }
 
+    // gameDetailOverviewUsesPreviewOnlyBeforeGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailOverviewUsesPreviewOnlyBeforeGame() throws {
         #expect(GameDetailOverviewContentKind.contentKind(for: .upcoming) == .preview)
         #expect(GameDetailOverviewContentKind.contentKind(for: .live) == .overview)
@@ -357,6 +375,7 @@ struct kboScoreTests {
         #expect(GameDetailOverviewContentKind.contentKind(for: .cancelled) == .overview)
     }
 
+    // homeSummaryUsesStartingPitchersFromSupabaseRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeSummaryUsesStartingPitchersFromSupabaseRows() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -413,6 +432,7 @@ struct kboScoreTests {
         #expect(summary.homeStartingPitcherName == "김진욱")
     }
 
+    // refreshHomeUpsertsTodaySchedulePitchersIntoLocalGames 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @Test func refreshHomeUpsertsTodaySchedulePitchersIntoLocalGames() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -465,6 +485,7 @@ struct kboScoreTests {
         #expect(model.games.count == 1)
     }
 
+    // refreshHomeDoesNotEraseExistingPitchersWhenTodayScheduleHasNilPitchers 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @Test func refreshHomeDoesNotEraseExistingPitchersWhenTodayScheduleHasNilPitchers() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -519,6 +540,7 @@ struct kboScoreTests {
         #expect(summary.homeStartingPitcherName == "김진욱")
     }
 
+    // todayRefreshUpdatesExistingScheduledGameToLiveScoreAndInning 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func todayRefreshUpdatesExistingScheduledGameToLiveScoreAndInning() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -572,6 +594,7 @@ struct kboScoreTests {
         #expect(summary.inningText == "Top 6")
     }
 
+    // localMonthCacheDoesNotOverwriteTodayLiveStatus 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localMonthCacheDoesNotOverwriteTodayLiveStatus() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -625,6 +648,7 @@ struct kboScoreTests {
         #expect(game.inningText == "Bottom 5")
     }
 
+    // todayOnlyScheduleRefreshPreservesOtherMonthGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func todayOnlyScheduleRefreshPreservesOtherMonthGames() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let otherDate = isoDate("2026-04-29T18:30:00+09:00")
@@ -694,6 +718,7 @@ struct kboScoreTests {
         #expect(tomorrowGame.status == .upcoming)
     }
 
+    // detailLookupResolvesLatestMatchingGameInsteadOfStaleSelectedID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func detailLookupResolvesLatestMatchingGameInsteadOfStaleSelectedID() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -737,6 +762,7 @@ struct kboScoreTests {
         #expect(resolved.inningText == "Top 5")
     }
 
+    // gameDetailViewModelRefreshesSelectedGameWithoutFetchingAllGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailViewModelRefreshesSelectedGameWithoutFetchingAllGames() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -805,6 +831,7 @@ struct kboScoreTests {
         #expect(refreshed?.currentPitcherName == "김투수")
     }
 
+    // supabaseGameRowDecodesWithoutOfficialProviderGameID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseGameRowDecodesWithoutOfficialProviderGameID() throws {
         let awayTeamID = UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!
         let homeTeamID = UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!
@@ -842,6 +869,7 @@ struct kboScoreTests {
         #expect(row.homeScore == 5)
     }
 
+    // supabaseMapperPreservesScheduledAndOfficialProviderIdentifiers 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseMapperPreservesScheduledAndOfficialProviderIdentifiers() throws {
         let awayTeamID = UUID(uuidString: "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa")!
         let homeTeamID = UUID(uuidString: "bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb")!
@@ -870,6 +898,7 @@ struct kboScoreTests {
         #expect(game.publicGameID == "20260508-LOT-KIA")
     }
 
+    // supabaseLatestSnapshotMapsCurrentBatterAndPitcherFields 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseLatestSnapshotMapsCurrentBatterAndPitcherFields() throws {
         let gameID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
         let row = try JSONDecoder().decode(
@@ -897,6 +926,7 @@ struct kboScoreTests {
         #expect(row.currentBatterName == "홍길동")
     }
 
+    // supabaseLatestSnapshotDecodesBaseRunnerNames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseLatestSnapshotDecodesBaseRunnerNames() throws {
         let gameID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
         let row = try JSONDecoder().decode(
@@ -921,6 +951,7 @@ struct kboScoreTests {
         #expect(row.thirdBaseRunnerName == nil)
     }
 
+    // supabaseSnapshotRunnerNameMapsIntoGameDetailWhenBaseIsOccupied 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseSnapshotRunnerNameMapsIntoGameDetailWhenBaseIsOccupied() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -967,6 +998,7 @@ struct kboScoreTests {
         #expect(game.baseRunners?.third == nil)
     }
 
+    // supabaseSnapshotWithOccupiedBaseAndNilRunnerNameKeepsFallbackState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseSnapshotWithOccupiedBaseAndNilRunnerNameKeepsFallbackState() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -1009,6 +1041,7 @@ struct kboScoreTests {
         #expect(game.summary(isMyTeamGame: false).baseRunners?.first == nil)
     }
 
+    // baseRunnerDisplayUsesSnapshotNameWhenFirstBaseOccupied 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayUsesSnapshotNameWhenFirstBaseOccupied() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1022,6 +1055,7 @@ struct kboScoreTests {
         #expect(display.source == "snapshot")
     }
 
+    // baseRunnerDisplayFallsBackForOccupiedFirstBaseWithNilName 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayFallsBackForOccupiedFirstBaseWithNilName() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1044,6 +1078,7 @@ struct kboScoreTests {
         #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "1B", name: "점유")])
     }
 
+    // baseRunnerDisplayCarriesForwardSameBaseName 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayCarriesForwardSameBaseName() throws {
         var resolver = BaseRunnerDisplayResolver()
         let firstSnapshot = try makeBaseRunnerDisplayGame(
@@ -1063,6 +1098,7 @@ struct kboScoreTests {
         #expect(display.source == "carryForward")
     }
 
+    // baseRunnerDisplayClearsNameWhenBaseEmpties 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayClearsNameWhenBaseEmpties() throws {
         var resolver = BaseRunnerDisplayResolver()
         let occupied = try makeBaseRunnerDisplayGame(
@@ -1082,6 +1118,7 @@ struct kboScoreTests {
         #expect(display.source == "empty")
     }
 
+    // baseRunnerDisplayStateIsKeyedByGameIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayStateIsKeyedByGameIdentity() throws {
         var resolver = BaseRunnerDisplayResolver()
         let firstGame = try makeBaseRunnerDisplayGame(
@@ -1103,6 +1140,7 @@ struct kboScoreTests {
         #expect(display.runners.first == "주자")
     }
 
+    // baseRunnerDisplaySnapshotNameOverridesPriorFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplaySnapshotNameOverridesPriorFallback() throws {
         var resolver = BaseRunnerDisplayResolver()
         let unknown = try makeBaseRunnerDisplayGame(
@@ -1122,6 +1160,7 @@ struct kboScoreTests {
         #expect(display.source == "snapshot")
     }
 
+    // baseRunnerDisplayResolvesMultipleBasesIndependently 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayResolvesMultipleBasesIndependently() throws {
         var resolver = BaseRunnerDisplayResolver()
         let previous = try makeBaseRunnerDisplayGame(
@@ -1143,6 +1182,7 @@ struct kboScoreTests {
         #expect(display.source == "snapshot+carryForward+fallback")
     }
 
+    // baseRunnerDisplayDoesNotCopyFirstRunnerNameToUnknownThirdBase 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayDoesNotCopyFirstRunnerNameToUnknownThirdBase() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1157,6 +1197,7 @@ struct kboScoreTests {
         #expect(display.runners.third == "주자")
     }
 
+    // baseRunnerDisplayKeepsEmptyBasesHidden 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayKeepsEmptyBasesHidden() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1172,6 +1213,7 @@ struct kboScoreTests {
         #expect(display.source == "empty")
     }
 
+    // baseRunnerDisplayShowsAllThreeOccupiedBaseNames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerDisplayShowsAllThreeOccupiedBaseNames() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1186,6 +1228,7 @@ struct kboScoreTests {
         #expect(display.runners.third == "3루주자")
     }
 
+    // gameDetailBaseSituationShowsOccupiedSecondBaseRunnerName 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationShowsOccupiedSecondBaseRunnerName() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1204,6 +1247,7 @@ struct kboScoreTests {
         #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "홍창기")])
     }
 
+    // gameDetailBaseSituationShowsOccupiedBaseRunnerNames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationShowsOccupiedBaseRunnerNames() throws {
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: true, second: true, third: true),
@@ -1226,6 +1270,7 @@ struct kboScoreTests {
         ])
     }
 
+    // gameDetailBaseSituationKeepsEmptyBasesEmptyWhenNamesAreShown 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationKeepsEmptyBasesEmptyWhenNamesAreShown() throws {
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: false, second: true, third: false),
@@ -1244,6 +1289,7 @@ struct kboScoreTests {
         #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "홍창기")])
     }
 
+    // gameDetailBaseSituationRendersSnapshotRunnerNameInsteadOfOccupiedFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationRendersSnapshotRunnerNameInsteadOfOccupiedFallback() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1261,6 +1307,7 @@ struct kboScoreTests {
         #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "1B", name: "이유찬")])
     }
 
+    // gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1289,6 +1336,7 @@ struct kboScoreTests {
         #expect(presentation.baseRunnerDisplay.source == "official")
     }
 
+    // gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache() throws {
         var resolver = BaseRunnerDisplayResolver()
         let before = try makeBaseRunnerDisplayGame(
@@ -1330,6 +1378,7 @@ struct kboScoreTests {
         #expect(presentation.baseRunnerDisplay.source == "official")
     }
 
+    // gameDetailBaseSituationDoesNotHideCurrentBatterOrPitcher 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBaseSituationDoesNotHideCurrentBatterOrPitcher() throws {
         let game = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: false, second: true, third: false),
@@ -1346,6 +1395,7 @@ struct kboScoreTests {
         #expect(presentation.currentPitcherName == "보쉴리")
     }
 
+    // gameDetailRefreshDoesNotEraseExistingRunnerNameWhenBaseStaysOccupied 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func gameDetailRefreshDoesNotEraseExistingRunnerNameWhenBaseStaysOccupied() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-06T18:30:00+09:00"))
@@ -1375,6 +1425,7 @@ struct kboScoreTests {
         #expect(refreshed?.baseRunners?.first == "전민재")
     }
 
+    // gameDetailRefreshRecoversUnconfirmedFinalWhenIncomingLiveIsNewer 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func gameDetailRefreshRecoversUnconfirmedFinalWhenIncomingLiveIsNewer() async throws {
         let referenceDate = isoDate("2026-05-19T21:20:00+09:00")
@@ -1435,6 +1486,7 @@ struct kboScoreTests {
         #expect(refreshed.currentBatterName == "황영묵")
     }
 
+    // gameDetailRefreshRecoversUnconfirmedFinalFromLiveLikeSnapshotWithoutFreshness 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func gameDetailRefreshRecoversUnconfirmedFinalFromLiveLikeSnapshotWithoutFreshness() async throws {
         let teams = MockKBOData.makeBootstrap().teams
@@ -1490,6 +1542,7 @@ struct kboScoreTests {
         #expect(refreshed.inningText == "Bottom 9")
     }
 
+    // gameDetailRefreshKeepsConfirmedFinalWhenIncomingLiveIsOlder 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func gameDetailRefreshKeepsConfirmedFinalWhenIncomingLiveIsOlder() async throws {
         let teams = MockKBOData.makeBootstrap().teams
@@ -1543,6 +1596,7 @@ struct kboScoreTests {
         #expect(refreshed.inningText == "경기 종료")
     }
 
+    // liveActivityAutoStartUsesRecoveredLiveStateAfterFalseFinalMerge 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func liveActivityAutoStartUsesRecoveredLiveStateAfterFalseFinalMerge() async throws {
         let controller = TestLiveActivityController(isSupported: true)
@@ -1606,6 +1660,7 @@ struct kboScoreTests {
         #expect(model.isLiveActivityOn(for: refreshed.id))
     }
 
+    // gameLookupResolvesProviderStableIdentityAndPublicRawID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupResolvesProviderStableIdentityAndPublicRawID() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let lotte = try #require(teams.first(where: { $0.id == "lotte" }))
@@ -1632,6 +1687,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "public:20260509-LOT-KIA")?.providerGameID == "20260509HTLT0")
     }
 
+    // gameLookupResolvesOfficialAndScheduledProviderIdentities 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupResolvesOfficialAndScheduledProviderIdentities() throws {
         let game = try makeIdentityLookupGame(
             id: UUID(uuidString: "08080808-0808-0808-0808-080808080808")!,
@@ -1653,6 +1709,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "20260508-LOT-KIA")?.publicGameID == "20260508-LOT-KIA")
     }
 
+    // gameLookupResolvesRawOfficialProviderIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupResolvesRawOfficialProviderIdentity() throws {
         let game = try makeIdentityLookupGame(
             id: UUID(uuidString: "09090909-0909-0909-0909-090909090901")!,
@@ -1669,6 +1726,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "20260509HTLT0")?.publicGameID == "20260509-LOT-KIA")
     }
 
+    // gameLookupKeepsKnownScheduledProviderStableIdentityWorking 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupKeepsKnownScheduledProviderStableIdentityWorking() throws {
         let game = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131313")!,
@@ -1687,6 +1745,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "provider:sched-202605130930-c5d5aa85-89747089")?.publicGameID == "20260513-KIW-HAN")
     }
 
+    // scheduleMonthSnapshotMergesTransitiveProviderAliases 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthSnapshotMergesTransitiveProviderAliases() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let kt = try #require(teams.first(where: { $0.id == "kt" }))
@@ -1742,6 +1801,7 @@ struct kboScoreTests {
         #expect(snapshot.first?.homeScore == 4)
     }
 
+    // gameLookupUsesTransitiveProviderAliasesForSelectedDetailMatch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupUsesTransitiveProviderAliasesForSelectedDetailMatch() throws {
         let teams = MockKBOData.makeBootstrap().teams
         let kt = try #require(teams.first(where: { $0.id == "kt" }))
@@ -1797,6 +1857,7 @@ struct kboScoreTests {
         #expect(selected.providerGameID == officialProviderID)
     }
 
+    // gameLookupDoesNotChooseAmbiguousSamePriorityProviderMatch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameLookupDoesNotChooseAmbiguousSamePriorityProviderMatch() throws {
         let first = try makeIdentityLookupGame(
             id: UUID(uuidString: "08080808-0808-0808-0808-080808080801")!,
@@ -1822,6 +1883,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: "provider:20260508HTLT0") == nil)
     }
 
+    // gameDetailBoxscoreUsesPublicIDAfterOfficialProviderResolution 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBoxscoreUsesPublicIDAfterOfficialProviderResolution() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let game = try makeIdentityLookupGame(
@@ -1850,6 +1912,7 @@ struct kboScoreTests {
         #expect(await state.requestedGameIDs == ["20260508-LOT-KIA"])
     }
 
+    // gameDetailRefreshFallsBackToRepositoryWhenOfficialProviderMissingLocally 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshFallsBackToRepositoryWhenOfficialProviderMissingLocally() async throws {
         let unrelated = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131301")!,
@@ -1891,6 +1954,7 @@ struct kboScoreTests {
         ])
     }
 
+    // gameDetailViewModelWithoutInitialGameUsesFallbackForRequestedIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailViewModelWithoutInitialGameUsesFallbackForRequestedIdentity() async throws {
         let unrelated = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131306")!,
@@ -1933,6 +1997,7 @@ struct kboScoreTests {
         ])
     }
 
+    // gameDetailRefreshResolvesRouteInitialSnapshotWithoutGlobalGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshResolvesRouteInitialSnapshotWithoutGlobalGame() async throws {
         let game = try makeBoxscoreDetailGame()
         let emptyBootstrap = KBOBootstrapData(
@@ -1959,6 +2024,7 @@ struct kboScoreTests {
         #expect(refreshed?.game.publicGameID == game.publicGameID)
     }
 
+    // upcomingGameDetailAppliesStartingPitchersFromSingleSupabaseRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func upcomingGameDetailAppliesStartingPitchersFromSingleSupabaseRefresh() async throws {
         let teams = MockKBOData.makeBootstrap().teams
@@ -2006,6 +2072,7 @@ struct kboScoreTests {
         #expect(presentation.probableStarters?.home == "김광현")
     }
 
+    // gameDetailFallbackByOfficialProviderUsesPublicGameIDForBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailFallbackByOfficialProviderUsesPublicGameIDForBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let unrelated = try makeIdentityLookupGame(
@@ -2052,6 +2119,7 @@ struct kboScoreTests {
         #expect(await boxscoreState.requestedGameIDs == ["20260509-LOT-KIA"])
     }
 
+    // gameDetailRefreshKeepsExistingProviderFallbackBehavior 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshKeepsExistingProviderFallbackBehavior() async throws {
         let unrelated = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131307")!,
@@ -2089,6 +2157,7 @@ struct kboScoreTests {
         #expect(lookups.first == .providerGameID("20260502OBWO0"))
     }
 
+    // gameDetailRefreshFallsBackToRepositoryByScheduledProviderID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshFallsBackToRepositoryByScheduledProviderID() async throws {
         let unrelated = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131303")!,
@@ -2126,6 +2195,7 @@ struct kboScoreTests {
         #expect(lookups.first == .providerGameID("sched-202605080930-799034c4-c5d5aa85"))
     }
 
+    // gameDetailRefreshUsesLocalCandidateWithoutIdentityFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshUsesLocalCandidateWithoutIdentityFallback() async throws {
         let source = try makeIdentityFallbackSupabaseSource(
             publicGameID: "20260513-KIW-HAN",
@@ -2163,6 +2233,7 @@ struct kboScoreTests {
         #expect(lookups == [.providerGameID("sched-202605130930-c5d5aa85-89747089")])
     }
 
+    // gameDetailRefreshKeepsNoSelectedGameWhenIdentityFallbackMisses 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshKeepsNoSelectedGameWhenIdentityFallbackMisses() async throws {
         let unrelated = try makeIdentityLookupGame(
             id: UUID(uuidString: "13131313-1313-1313-1313-131313131305")!,
@@ -2203,6 +2274,7 @@ struct kboScoreTests {
         ])
     }
 
+    // gameCenterReviewReportsDisplayableRecordsWhenBattingLinesExist 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterReviewReportsDisplayableRecordsWhenBattingLinesExist() throws {
         let line = GameCenterBattingLine(
             battingOrder: "1",
@@ -2228,6 +2300,7 @@ struct kboScoreTests {
         #expect(review.hasDisplayableRecords)
     }
 
+    // supabaseLatestSnapshotMapsKnownPlayerAliases 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseLatestSnapshotMapsKnownPlayerAliases() throws {
         let gameID = UUID(uuidString: "22222222-3333-4444-5555-666666666666")!
         let row = try JSONDecoder().decode(
@@ -2248,6 +2321,7 @@ struct kboScoreTests {
         #expect(row.currentBatterName == "이타자")
     }
 
+    // supabaseGamesSelectUsesOnlyCurrentGamesSchemaColumns 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseGamesSelectUsesOnlyCurrentGamesSchemaColumns() throws {
         let columns = SupabaseKBORepository.gameSelectColumns
             .split(separator: ",")
@@ -2288,6 +2362,7 @@ struct kboScoreTests {
         #expect(Set(columns).isSubset(of: currentSchemaColumns))
     }
 
+    // supabaseGameRowMapsStadiumIntoVenueWithoutStadiumCode 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseGameRowMapsStadiumIntoVenueWithoutStadiumCode() throws {
         let awayTeamID = UUID(uuidString: "10101010-1010-1010-1010-101010101010")!
         let homeTeamID = UUID(uuidString: "20202020-2020-2020-2020-202020202020")!
@@ -2337,6 +2412,7 @@ struct kboScoreTests {
         #expect(game.homeStartingPitcherName == "박세웅")
     }
 
+    // supabaseTodayRefreshSuppressesLocalFallbackWhenBypassingCache 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseTodayRefreshSuppressesLocalFallbackWhenBypassingCache() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let tracker = ScheduleSyncTestTracker()
@@ -2364,6 +2440,7 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 0)
     }
 
+    // todayFallbackUpcomingRowsDoNotOverwriteLiveTodayRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func todayFallbackUpcomingRowsDoNotOverwriteLiveTodayRows() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
@@ -2420,6 +2497,7 @@ struct kboScoreTests {
         #expect(game.homeStartingPitcherName == "박세웅")
     }
 
+    // gameDetailSingleFetchByPublicGameIDReturnsOneRowWithoutDateFetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailSingleFetchByPublicGameIDReturnsOneRowWithoutDateFetch() async throws {
         let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
         let awayTeamID = UUID(uuidString: "61616161-6161-6161-6161-616161616161")!
@@ -2472,6 +2550,7 @@ struct kboScoreTests {
         #expect(await tracker.teamFetches == 0)
     }
 
+    // gameDetailSingleFetchByProviderGameIDReturnsOneRow 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailSingleFetchByProviderGameIDReturnsOneRow() async throws {
         let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
         let awayTeamID = UUID(uuidString: "71717171-7171-7171-7171-717171717171")!
@@ -2523,6 +2602,7 @@ struct kboScoreTests {
         #expect(await tracker.teamFetches == 0)
     }
 
+    // gameDetailSingleFetchFallsBackByDateAndTeams 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailSingleFetchFallsBackByDateAndTeams() async throws {
         let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
         let awayTeamID = UUID(uuidString: "81818181-8181-8181-8181-818181818181")!
@@ -2577,6 +2657,7 @@ struct kboScoreTests {
         #expect(await tracker.teamFetches == 1)
     }
 
+    // gameDetailRefreshUpdatesOnlySelectedEquivalentGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailRefreshUpdatesOnlySelectedEquivalentGame() async throws {
         let referenceDate = isoDate("2026-04-28T12:00:00+09:00")
         let awayTeamID = UUID(uuidString: "91919191-9191-9191-9191-919191919191")!
@@ -2669,6 +2750,7 @@ struct kboScoreTests {
         #expect(await tracker.teamFetches == 0)
     }
 
+    // repositoryCacheUpsertPreservesExistingPitchersWhenIncomingPitchersAreNil 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repositoryCacheUpsertPreservesExistingPitchersWhenIncomingPitchersAreNil() async throws {
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "kiwoom" }))
@@ -2725,6 +2807,7 @@ struct kboScoreTests {
         #expect(game.homeStartingPitcherName == "김진욱")
     }
 
+    // myTeamNotificationFilterOnlyReturnsFavoriteTeamAlerts 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func myTeamNotificationFilterOnlyReturnsFavoriteTeamAlerts() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap())
         model.notificationFilter = .myTeam
@@ -2735,6 +2818,7 @@ struct kboScoreTests {
         #expect(notifications.allSatisfy { $0.relatedTeamIDs.contains("lg") })
     }
 
+    // unreadNotificationsCountDropsWhenItemIsMarkedRead 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func unreadNotificationsCountDropsWhenItemIsMarkedRead() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap())
         let unreadItem = try #require(model.notifications.first(where: { $0.isRead == false }))
@@ -2745,6 +2829,7 @@ struct kboScoreTests {
         #expect(model.unreadNotificationsCount == before - 1)
     }
 
+    // scheduleFilterAllIncludesWholeMonthGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleFilterAllIncludesWholeMonthGames() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
         let sampleDate = ISO8601DateFormatter().date(from: "2026-03-23T13:00:00+09:00")!
@@ -2756,6 +2841,7 @@ struct kboScoreTests {
         #expect(games.contains { $0.awayTeam.id == "kiwoom" && $0.homeTeam.id == "lg" })
     }
 
+    // scheduleFilterMyTeamOnlyReturnsFavoriteTeamGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleFilterMyTeamOnlyReturnsFavoriteTeamGames() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
         model.settings.favoriteTeamID = "lg"
@@ -2767,6 +2853,7 @@ struct kboScoreTests {
         #expect(games.allSatisfy { $0.involves(teamID: "lg") })
     }
 
+    // scheduleMonthNavigationSkipsEmptyMonths 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthNavigationSkipsEmptyMonths() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -2816,6 +2903,7 @@ struct kboScoreTests {
         #expect(previousMonth == marchMonth)
     }
 
+    // scheduleEntryUsesLocalScheduleWhenRemoteCountMatches 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleEntryUsesLocalScheduleWhenRemoteCountMatches() async throws {
         let bootstrap = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let tracker = ScheduleSyncTestTracker()
@@ -2841,6 +2929,7 @@ struct kboScoreTests {
         #expect(await tracker.monthlyScheduleFetches == 0)
     }
 
+    // scheduleEntrySyncsMissingGamesOnceWhenCountsDiffer 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleEntrySyncsMissingGamesOnceWhenCountsDiffer() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -2887,6 +2976,7 @@ struct kboScoreTests {
         #expect(await tracker.monthlyScheduleFetches == 0)
     }
 
+    // scheduleEntryRefreshesTodayWithDateLimitedFetchOnly 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleEntryRefreshesTodayWithDateLimitedFetchOnly() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -2929,6 +3019,7 @@ struct kboScoreTests {
         #expect(await tracker.remoteCountChecks == 1)
     }
 
+    // scheduleScreenLoadUsesScheduleTabMonthlySourceOnly 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleScreenLoadUsesScheduleTabMonthlySourceOnly() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let game = try #require(base.games.first(where: {
@@ -2960,6 +3051,7 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 0)
     }
 
+    // scheduleScreenMonthLoadDoesNotPopulateAppModelMonthSnapshot 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleScreenMonthLoadDoesNotPopulateAppModelMonthSnapshot() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let game = try #require(base.games.first(where: {
@@ -2998,6 +3090,7 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 0)
     }
 
+    // scheduleGameDetailRouteCarriesInitialGameSnapshot 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleGameDetailRouteCarriesInitialGameSnapshot() async throws {
         let game = try makeBoxscoreDetailGame()
         let route = ScheduleGameDetailRoute(game: game)
@@ -3006,6 +3099,7 @@ struct kboScoreTests {
         #expect(route.initialGame == game)
     }
 
+    // todayLiveRefreshUpdatesScheduleMonthCacheStartingPitchers 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func todayLiveRefreshUpdatesScheduleMonthCacheStartingPitchers() async throws {
         let selectedDate = isoDate("2026-05-10T10:00:00+09:00")
@@ -3069,6 +3163,7 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 1)
     }
 
+    // scheduleScreenDateSelectionDoesNotFetchNetworkData 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleScreenDateSelectionDoesNotFetchNetworkData() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-03-23T09:00:00+09:00"))
         let marchGames = base.games.filter {
@@ -3107,6 +3202,7 @@ struct kboScoreTests {
         #expect(await tracker.dailyScheduleFetches == 0)
     }
 
+    // finalGameDerivesWinnerScoreAndTeamResult 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func finalGameDerivesWinnerScoreAndTeamResult() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-03-23T15:00:00+09:00")), usePersistedSettings: false)
         let sampleDate = isoDate("2026-03-23T13:00:00+09:00")
@@ -3122,6 +3218,7 @@ struct kboScoreTests {
         #expect(finalGame.finalResult(for: "ssg") == .loss)
     }
 
+    // scheduleCalendarDaysExposeFavoriteTeamFinalResult 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleCalendarDaysExposeFavoriteTeamFinalResult() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(now: isoDate("2026-03-23T15:00:00+09:00")), usePersistedSettings: false)
         model.settings.favoriteTeamID = "lg"
@@ -3136,26 +3233,31 @@ struct kboScoreTests {
         #expect(favoriteDay.favoriteTeamResult == .win)
     }
 
+    // lotteWinDayUsesBlueSemanticAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func lotteWinDayUsesBlueSemanticAppearance() {
         let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .win)
         #expect(appearance == .win)
     }
 
+    // lotteLossDayUsesRedSemanticAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func lotteLossDayUsesRedSemanticAppearance() {
         let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .loss)
         #expect(appearance == .loss)
     }
 
+    // drawDayUsesGraySemanticAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func drawDayUsesGraySemanticAppearance() {
         let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: .tie)
         #expect(appearance == .draw)
     }
 
+    // noFavoriteTeamResultUsesNeutralSemanticAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func noFavoriteTeamResultUsesNeutralSemanticAppearance() {
         let appearance = ScheduleDayResultAppearance.from(dominantStatus: .final, favoriteTeamResult: nil)
         #expect(appearance == .neutral)
     }
 
+    // attendanceSummaryCountsOnlyCompletedFavoriteTeamResults 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceSummaryCountsOnlyCompletedFavoriteTeamResults() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -3246,6 +3348,7 @@ struct kboScoreTests {
         #expect(model.myTeamAttendanceSummary.completedGames == 2)
     }
 
+    // attendanceDashboardAggregatesHomeAttendanceRecord 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardAggregatesHomeAttendanceRecord() throws {
         let teams = try attendanceFixtureTeams()
         let homeWin = makeAttendanceFixtureGame(index: 1, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
@@ -3262,6 +3365,7 @@ struct kboScoreTests {
         #expect(dashboard.away.games == 0)
     }
 
+    // attendanceDashboardAggregatesAwayAttendanceRecord 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardAggregatesAwayAttendanceRecord() throws {
         let teams = try attendanceFixtureTeams()
         let awayWin = makeAttendanceFixtureGame(index: 4, awayTeam: teams.lg, homeTeam: teams.doosan, awayScore: 5, homeScore: 2)
@@ -3278,6 +3382,7 @@ struct kboScoreTests {
         #expect(dashboard.home.games == 0)
     }
 
+    // attendanceDashboardAggregatesCombinedHomeAndAwayRecord 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardAggregatesCombinedHomeAndAwayRecord() throws {
         let teams = try attendanceFixtureTeams()
         let homeWin = makeAttendanceFixtureGame(index: 7, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
@@ -3294,6 +3399,7 @@ struct kboScoreTests {
         #expect(dashboard.away.games == 2)
     }
 
+    // attendanceDashboardExcludesDrawsFromWinningPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardExcludesDrawsFromWinningPercentage() throws {
         let teams = try attendanceFixtureTeams()
         let win = makeAttendanceFixtureGame(index: 10, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
@@ -3308,6 +3414,7 @@ struct kboScoreTests {
         #expect(drawOnly.overall.winPercentageText == "---")
     }
 
+    // attendanceDashboardExcludesGamesUnrelatedToFavoriteTeam 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardExcludesGamesUnrelatedToFavoriteTeam() throws {
         let teams = try attendanceFixtureTeams()
         let favoriteGame = makeAttendanceFixtureGame(index: 12, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 2, homeScore: 5)
@@ -3319,6 +3426,7 @@ struct kboScoreTests {
         #expect(dashboard.games.map(\.opponentName) == ["두산"])
     }
 
+    // attendanceDashboardGameListIncludesOpponentStadiumAndScore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceDashboardGameListIncludesOpponentStadiumAndScore() throws {
         let teams = try attendanceFixtureTeams()
         let game = makeAttendanceFixtureGame(
@@ -3339,6 +3447,7 @@ struct kboScoreTests {
         #expect(record.gameDate == game.scheduledStart)
     }
 
+    // attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
         let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
@@ -3391,6 +3500,7 @@ struct kboScoreTests {
         #expect(model.myTeamAttendanceSummary.losses == 1)
     }
 
+    // scheduleCalendarDaysExposeAttendedGameMarker 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleCalendarDaysExposeAttendedGameMarker() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -3429,6 +3539,7 @@ struct kboScoreTests {
         #expect(day.hasAttendedGame)
     }
 
+    // scheduleCalendarMarkerUsesEquivalentAttendanceIdentityForMonthlyDuplicate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleCalendarMarkerUsesEquivalentAttendanceIdentityForMonthlyDuplicate() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
         let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
@@ -3490,6 +3601,7 @@ struct kboScoreTests {
         #expect(dayAfterUnmark.hasAttendedGame == false)
     }
 
+    // scheduleDetailLookupUsesProviderIdentityAcrossDifferentRawIDs 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDetailLookupUsesProviderIdentityAcrossDifferentRawIDs() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
         let kt = try #require(base.teams.first(where: { $0.id == "kt" }))
@@ -3548,6 +3660,7 @@ struct kboScoreTests {
         #expect(model.myTeamAttendanceSummary.completedGames == 1)
     }
 
+    // scheduleRainoutTransitionSchedulesLocalNotificationOnce 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleRainoutTransitionSchedulesLocalNotificationOnce() async throws {
         let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3605,6 +3718,7 @@ struct kboScoreTests {
         #expect(collector.requests.first?.content.body == "[LG] 금일 경기는 우천으로 인해 취소되었습니다.")
     }
 
+    // scoringTransitionDoesNotScheduleLocalNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoringTransitionDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3659,6 +3773,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // inningOnlyLiveTransitionDoesNotScheduleNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func inningOnlyLiveTransitionDoesNotScheduleNotification() async throws {
         let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3710,6 +3825,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // onBaseTransitionDoesNotScheduleLocalNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func onBaseTransitionDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T19:10:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3768,6 +3884,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // homeRainoutTransitionSchedulesLocalNotificationOnce 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeRainoutTransitionSchedulesLocalNotificationOnce() async throws {
         let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3824,6 +3941,7 @@ struct kboScoreTests {
         #expect(collector.requests.first?.content.userInfo["kbo_live"] != nil)
     }
 
+    // nonTodayCancelledGameDoesNotScheduleLocalNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func nonTodayCancelledGameDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
         let scheduledStart = isoDate("2026-04-16T18:30:00+09:00")
@@ -3878,6 +3996,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // finalizedGameDoesNotScheduleCancellationNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func finalizedGameDoesNotScheduleCancellationNotification() async throws {
         let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3931,6 +4050,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // nonFavoriteCancelledGameDoesNotScheduleLocalNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func nonFavoriteCancelledGameDoesNotScheduleLocalNotification() async throws {
         let referenceNow = isoDate("2026-04-17T09:00:00+09:00")
         let scheduledStart = isoDate("2026-04-17T18:30:00+09:00")
@@ -3987,6 +4107,7 @@ struct kboScoreTests {
         #expect(collector.requests.isEmpty)
     }
 
+    // standingsExcludeExhibitionGamesAndRankByWinPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsExcludeExhibitionGamesAndRankByWinPercentage() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4051,6 +4172,7 @@ struct kboScoreTests {
         #expect(model.regularSeasonGames.count == 2)
     }
 
+    // standingsRankMovementMovedUpShowsUpIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementMovedUpShowsUpIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: 5)
 
@@ -4060,6 +4182,7 @@ struct kboScoreTests {
         #expect(movement.accessibilityText == "순위 1단계 상승")
     }
 
+    // standingsRankMovementMovedDownShowsDownIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementMovedDownShowsDownIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 5, preGameRank: 3)
 
@@ -4069,6 +4192,7 @@ struct kboScoreTests {
         #expect(movement.accessibilityText == "순위 2단계 하락")
     }
 
+    // standingsRankMovementUnchangedShowsNoIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementUnchangedShowsNoIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: 4)
 
@@ -4077,6 +4201,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "-")
     }
 
+    // standingsRankMovementMissingPreGameRankShowsNoIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementMissingPreGameRankShowsNoIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: 4, preGameRank: nil)
 
@@ -4085,6 +4210,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "-")
     }
 
+    // standingsRankMovementMissingCurrentRankShowsNoIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementMissingCurrentRankShowsNoIndicator() {
         let movement = StandingsRankMovementResolver.movement(currentRank: nil, preGameRank: 4)
 
@@ -4092,6 +4218,7 @@ struct kboScoreTests {
         #expect(movement.indicator == nil)
     }
 
+    // standingsSnapshotCarriesPreGameRankForDisplayedMovement 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsSnapshotCarriesPreGameRankForDisplayedMovement() throws {
         let team = try #require(MockKBOData.makeBootstrap().teams.first(where: { $0.id == "lg" }))
         let snapshot = TeamStandingsSnapshot(
@@ -4109,6 +4236,7 @@ struct kboScoreTests {
         #expect(StandingsRankMovementResolver.movement(currentRank: snapshot.rank, preGameRank: snapshot.preGameRank).displayText == "▲2")
     }
 
+    // standingsRowRenderIdentityChangesWhenMovementChangesButKeepsTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRowRenderIdentityChangesWhenMovementChangesButKeepsTeamID() throws {
         let team = try #require(MockKBOData.makeBootstrap().teams.first(where: { $0.id == "doosan" }))
         let initial = TeamStandingsSnapshot(
@@ -4132,6 +4260,7 @@ struct kboScoreTests {
         #expect(updated.rankMovement.displayText == "▲1")
     }
 
+    // standingsRankMovementUsesLatestCompletedDateInsteadOfCurrentDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementUsesLatestCompletedDateInsteadOfCurrentDate() throws {
         let fixture = try makeStandingsMovementFixture()
         let calendar = standingsMovementCalendar()
@@ -4144,6 +4273,7 @@ struct kboScoreTests {
         #expect(scheduleTestDayKey(for: latestDay) == "2026-05-24")
     }
 
+    // standingsPreGameRanksUseGamesBeforeLatestCompletedDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsPreGameRanksUseGamesBeforeLatestCompletedDate() throws {
         let fixture = try makeStandingsMovementFixture()
         let ranks = StandingsRankMovementResolver.preGameRanks(
@@ -4157,6 +4287,7 @@ struct kboScoreTests {
         #expect(ranks[fixture.rising.id] == 3)
     }
 
+    // standingsPreGameRanksExcludeGamesOnLatestCompletedDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsPreGameRanksExcludeGamesOnLatestCompletedDate() throws {
         let fixture = try makeStandingsMovementFixture()
         let ranks = StandingsRankMovementResolver.preGameRanks(
@@ -4169,6 +4300,7 @@ struct kboScoreTests {
         #expect(ranks[fixture.falling.id] == 2)
     }
 
+    // standingsRankMovementShowsUpAfterLatestCompletedDateBatch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementShowsUpAfterLatestCompletedDateBatch() throws {
         let fixture = try makeStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -4192,6 +4324,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "▲1")
     }
 
+    // standingsRankMovementShowsDownAfterLatestCompletedDateBatch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementShowsDownAfterLatestCompletedDateBatch() throws {
         let fixture = try makeStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -4215,6 +4348,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "▼1")
     }
 
+    // standingsRankMovementShowsUnchangedWhenRankIsSame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementShowsUnchangedWhenRankIsSame() throws {
         let fixture = try makeStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -4236,6 +4370,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "-")
     }
 
+    // standingsRankMovementNoCompletedGamesReturnsNoPreGameRanks 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementNoCompletedGamesReturnsNoPreGameRanks() throws {
         let fixture = try makeStandingsMovementFixture()
         let upcomingOnly = fixture.games.map {
@@ -4261,6 +4396,7 @@ struct kboScoreTests {
         #expect(ranks.isEmpty)
     }
 
+    // standingsRankMovementIgnoresCancelledAndNonFinalGamesForLatestCompletedDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementIgnoresCancelledAndNonFinalGamesForLatestCompletedDate() throws {
         var fixture = try makeStandingsMovementFixture()
         let cancelled = makeGameDetail(
@@ -4284,6 +4420,7 @@ struct kboScoreTests {
         #expect(scheduleTestDayKey(for: latestDay) == "2026-05-24")
     }
 
+    // standingsRankMovementPersistsWhenCurrentDateIsAfterLatestCompletedDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRankMovementPersistsWhenCurrentDateIsAfterLatestCompletedDate() throws {
         let fixture = try makeStandingsMovementFixture()
         let model = AppModel(
@@ -4308,6 +4445,7 @@ struct kboScoreTests {
         #expect(movement.displayText == "▲1")
     }
 
+    // latestFinalGameDateSplitProducesDifferentPreviousAndCurrentRanksAfterLatestResult 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func latestFinalGameDateSplitProducesDifferentPreviousAndCurrentRanksAfterLatestResult() throws {
         let fixture = try makeStandingsMovementFixture()
         let previousRanks = StandingsRankMovementResolver.preGameRanks(
@@ -4327,6 +4465,7 @@ struct kboScoreTests {
         #expect(currentRanks[fixture.falling.id] == 3)
     }
 
+    // appModelRowModelCarriesUpAndDownFromResolver 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelRowModelCarriesUpAndDownFromResolver() throws {
         let fixture = try makeStandingsMovementFixture()
         let model = AppModel(
@@ -4347,12 +4486,14 @@ struct kboScoreTests {
         #expect(fallingSnapshot.rankMovement == .down(1))
     }
 
+    // standingsViewMovementDisplayTextUsesArrowCountAndDash 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsViewMovementDisplayTextUsesArrowCountAndDash() {
         #expect(RankingMovement.up(1).displayText == "▲1")
         #expect(RankingMovement.down(1).displayText == "▼1")
         #expect(RankingMovement.unchanged.displayText == "-")
     }
 
+    // rowOrderingIsUnchangedByMovementDisplay 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func rowOrderingIsUnchangedByMovementDisplay() throws {
         let fixture = try makeStandingsMovementFixture()
         let model = AppModel(
@@ -4378,6 +4519,7 @@ struct kboScoreTests {
         ])
     }
 
+    // standingsRecentResultsAreLimitedToFiveMostRecentFinalGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRecentResultsAreLimitedToFiveMostRecentFinalGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-10T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4414,6 +4556,7 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText == "승 패 승 패 승")
     }
 
+    // standingsStreakUsesAllCompletedLossesBeyondRecentFormLimit 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsStreakUsesAllCompletedLossesBeyondRecentFormLimit() throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
         let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
@@ -4460,6 +4603,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.recentResultsText == "패 패 패 패 패")
     }
 
+    // standingsSnapshotDisplaysTwelveGameLosingStreakText 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsSnapshotDisplaysTwelveGameLosingStreakText() throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
         let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
@@ -4477,6 +4621,7 @@ struct kboScoreTests {
         #expect(snapshot.currentStreakText == "12연패")
     }
 
+    // standingsStreakUsesAllCompletedWinsBeyondRecentFormLimit 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsStreakUsesAllCompletedWinsBeyondRecentFormLimit() throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-31T22:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4523,6 +4668,7 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText == "승 승 승 승 승")
     }
 
+    // standingsStreakIgnoresIncompleteAndCancelledGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsStreakIgnoresIncompleteAndCancelledGames() throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-07T22:00:00+09:00"))
         let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
@@ -4603,6 +4749,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.gamesPlayed == 3)
     }
 
+    // standingsStreakSkipsTiesForContinuity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsStreakSkipsTiesForContinuity() throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-05T22:00:00+09:00"))
         let ssg = try #require(base.teams.first(where: { $0.id == "ssg" }))
@@ -4681,6 +4828,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.recentResultsText == "패 무 패 패 승")
     }
 
+    // homeFallbackWeeklyStandingsUseFiveActualPlayedGamesAfterRainout 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackWeeklyStandingsUseFiveActualPlayedGamesAfterRainout() async throws {
         let base = MockKBOData.makeBootstrap(now: Date())
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4745,6 +4893,7 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText.contains("패") == false)
     }
 
+    // homeFallbackWeeklyStandingsUseSixActualPlayedGamesWhenAvailable 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackWeeklyStandingsUseSixActualPlayedGamesWhenAvailable() async throws {
         let base = MockKBOData.makeBootstrap(now: Date())
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4797,6 +4946,7 @@ struct kboScoreTests {
         #expect(lgSnapshot.recentResultsText.contains("패") == false)
     }
 
+    // homeFallbackUsesRecentCompletedGamesWhenTodayHasNoGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackUsesRecentCompletedGamesWhenTodayHasNoGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4830,6 +4980,7 @@ struct kboScoreTests {
         #expect(model.homeFallbackStandingsSnapshots.first?.wins == 1)
     }
 
+    // homeFallbackRefreshLoadsStandingsSourceWhenTodayHasNoGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackRefreshLoadsStandingsSourceWhenTodayHasNoGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4874,6 +5025,7 @@ struct kboScoreTests {
         #expect(lgSnapshot.gamesPlayed == 1)
     }
 
+    // homeFallbackCompletedResolverIncludesFinalGamesBeforeToday 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackCompletedResolverIncludesFinalGamesBeforeToday() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4899,6 +5051,7 @@ struct kboScoreTests {
         #expect(completedGames.map(\.id) == [finalGame.id])
     }
 
+    // homeFallbackCompletedResolverExcludesCancelledGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackCompletedResolverExcludesCancelledGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4924,6 +5077,7 @@ struct kboScoreTests {
         #expect(completedGames.isEmpty)
     }
 
+    // homeFallbackCompletedResolverExcludesTodayAndFutureGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackCompletedResolverExcludesTodayAndFutureGames() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4960,6 +5114,7 @@ struct kboScoreTests {
         #expect(completedGames.isEmpty)
     }
 
+    // homeFallbackWeeklyStandingsNotEmptyWhenValidFinalGamesExist 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackWeeklyStandingsNotEmptyWhenValidFinalGamesExist() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -4992,6 +5147,7 @@ struct kboScoreTests {
         #expect(snapshots.first(where: { $0.team.id == "lg" })?.wins == 1)
     }
 
+    // homeFallbackWeeklyStandingsUsesAllTeamsNotFavoriteOnly 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFallbackWeeklyStandingsUsesAllTeamsNotFavoriteOnly() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-25T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -5026,6 +5182,7 @@ struct kboScoreTests {
         #expect(snapshots.first(where: { $0.team.id == "lotte" })?.losses == 1)
     }
 
+    // todayGamesUseKSTDateFiltering 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func todayGamesUseKSTDateFiltering() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-27T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -5068,6 +5225,7 @@ struct kboScoreTests {
         #expect(model.todayGames.first?.id == earlyKSTGame.id)
     }
 
+    // standingsWinningStreakFireOnlyShowsForActiveThreeGameWinStreak 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsWinningStreakFireOnlyShowsForActiveThreeGameWinStreak() async throws {
         let base = MockKBOData.makeBootstrap(now: Date())
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -5092,6 +5250,7 @@ struct kboScoreTests {
         #expect(tieBreaksStreak.showsWinningStreakFire == false)
     }
 
+    // standingsDeriveRemainingRegularSeasonGamesFromStructuredClassification 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsDeriveRemainingRegularSeasonGamesFromStructuredClassification() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -5139,6 +5298,7 @@ struct kboScoreTests {
         #expect(doosanSnapshot.remainingRegularSeasonGames == 143)
     }
 
+    // standingsUseVirtualUnscheduledGamesWhenScheduleIsIncomplete 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsUseVirtualUnscheduledGamesWhenScheduleIsIncomplete() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -5177,6 +5337,7 @@ struct kboScoreTests {
         #expect(standings.first?.postseasonProbabilityEstimateText == "공식 미편성 143경기 포함 추정치")
     }
 
+    // bundledBootstrapCompatibilityInfersRegularSeasonFromProviderGameIdentifier 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bundledBootstrapCompatibilityInfersRegularSeasonFromProviderGameIdentifier() async throws {
         let lg = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let kt = Team(id: "kt", name: "KT 위즈", shortName: "KT", englishName: "KT Wiz", markText: "KT")
@@ -5206,6 +5367,7 @@ struct kboScoreTests {
         #expect(game.seasonClassification == .regularSeason)
     }
 
+    // uploadedLocalBootstrapProducesNonZeroStandingsRecords 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func uploadedLocalBootstrapProducesNonZeroStandingsRecords() async throws {
         let testFileURL = URL(fileURLWithPath: #filePath)
         let projectRoot = testFileURL
@@ -5234,6 +5396,7 @@ struct kboScoreTests {
         #expect(ktSnapshot.visiblePostseasonProbabilityUnavailableReason == nil)
     }
 
+    // mapperHandlesExternalStatusesAndFallbacks 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @Test func mapperHandlesExternalStatusesAndFallbacks() async throws {
         #expect(KBODataMapper.mapGameStatus(code: "LIVE", text: nil) == .live)
         #expect(KBODataMapper.mapGameStatus(code: "in_progress", text: nil) == .live)
@@ -5248,6 +5411,7 @@ struct kboScoreTests {
         #expect(KBODataMapper.mapGameStatus(code: nil, text: "scheduled", inningText: "Top 1") == .upcoming)
     }
 
+    // mapperBuildsStableDomainModelsFromDTOs 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @Test func mapperBuildsStableDomainModelsFromDTOs() async throws {
         let bootstrap = MockKBOData.makeBootstrapDTO()
         let mapped = KBODataMapper.mapBootstrap(bootstrap)
@@ -5259,6 +5423,7 @@ struct kboScoreTests {
         #expect(mapped.games.contains { $0.status == .upcoming && $0.awayScore == nil && $0.homeScore == nil })
     }
 
+    // gameDTOPrefersProviderGameIDForCanonicalIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDTOPrefersProviderGameIDForCanonicalIdentity() async throws {
         let data = """
         {
@@ -5280,6 +5445,7 @@ struct kboScoreTests {
         #expect(dto.id != GameIdentifier.uuid(from: "20260401-HAN-KT"))
     }
 
+    // mapperUsesStructuredSeasonClassificationWhenAvailable 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @Test func mapperUsesStructuredSeasonClassificationWhenAvailable() async throws {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let opponent = Team(id: "doosan", name: "두산 베어스", shortName: "두산", englishName: "Doosan Bears", markText: "DOO")
@@ -5308,6 +5474,7 @@ struct kboScoreTests {
         #expect(game.seasonClassification == .regularSeason)
     }
 
+    // scoreNotificationPayloadDecodesFromJSON 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationPayloadDecodesFromJSON() async throws {
         let data = """
         {
@@ -5328,6 +5495,7 @@ struct kboScoreTests {
         #expect(payload.routeHint == .gameDetail)
     }
 
+    // scoreNotificationPayloadExtractorBuildsPayloadFromAPNSUserInfo 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationPayloadExtractorBuildsPayloadFromAPNSUserInfo() async throws {
         let payload = ScoreNotificationPayloadExtractor.payload(
             from: [
@@ -5352,6 +5520,7 @@ struct kboScoreTests {
         #expect(payload?.teamIDs == ["lotte", "ssg"])
     }
 
+    // scoreNotificationPayloadExtractorBuildsPayloadFromBackendAPNsData 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationPayloadExtractorBuildsPayloadFromBackendAPNsData() async throws {
         let payload = ScoreNotificationPayloadExtractor.payload(
             from: [
@@ -5379,6 +5548,7 @@ struct kboScoreTests {
         #expect(payload?.teamIDs == ["lotte", "hanwha"])
     }
 
+    // scoreNotificationPayloadExtractorAcceptsScoringPlayFields 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationPayloadExtractorAcceptsScoringPlayFields() async throws {
         let payload = ScoreNotificationPayloadExtractor.payload(
             from: [
@@ -5418,6 +5588,7 @@ struct kboScoreTests {
         #expect(payload?.preferredGameNavigationIdentity == "20260409LTHT0")
     }
 
+    // notificationHistoryDecodesOldRecordsSafely 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationHistoryDecodesOldRecordsSafely() throws {
         let id = UUID(uuidString: "abababab-abab-abab-abab-abababababab")!
         let data = """
@@ -5442,6 +5613,7 @@ struct kboScoreTests {
         #expect(item.preferredGameNavigationIdentity == nil)
     }
 
+    // receivedNotificationAppearsInNotificationListModel 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func receivedNotificationAppearsInNotificationListModel() async throws {
         let receivedAt = isoDate("2026-04-09T18:31:00+09:00")
@@ -5480,6 +5652,7 @@ struct kboScoreTests {
         #expect(item.relatedTeamIDs == ["lotte", "hanwha"])
     }
 
+    // notificationTapUsesPublicGameIDInsteadOfNotificationUUID 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func notificationTapUsesPublicGameIDInsteadOfNotificationUUID() async throws {
         let notificationID = UUID(uuidString: "937FEB4E-B0EF-45C2-9913-8C9543B13840")!
@@ -5522,6 +5695,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: identity)?.publicGameID == "20260602-KIA-LOT")
     }
 
+    // notificationTapUsesProviderIdentityWhenOnlyProviderGameIDExists 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func notificationTapUsesProviderIdentityWhenOnlyProviderGameIDExists() async throws {
         let teams = MockKBOData.makeBootstrap().teams
@@ -5561,6 +5735,7 @@ struct kboScoreTests {
         #expect(model.game(withIdentity: identity)?.providerGameID == providerGameID)
     }
 
+    // notificationTapDoesNotNavigateWhenOnlyLocalNotificationUUIDExists 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     @Test func notificationTapDoesNotNavigateWhenOnlyLocalNotificationUUIDExists() async throws {
         let notificationID = UUID(uuidString: "cccccccc-3333-3333-3333-cccccccccccc")!
@@ -5582,6 +5757,7 @@ struct kboScoreTests {
         #expect(model.notificationGameDetailNavigationIdentity(for: item) == nil)
     }
 
+    // scoreNotificationRouteKeepsOfficialGameIdentifierAsNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationRouteKeepsOfficialGameIdentifierAsNavigationIdentity() async throws {
         let payload = ScoreNotificationPayload(
             gameID: "20260323WOLG0",
@@ -5597,6 +5773,7 @@ struct kboScoreTests {
         #expect(route == .gameDetail("20260323WOLG0"))
     }
 
+    // scoreNotificationRoutePrefersPublicGameIdentifier 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func scoreNotificationRoutePrefersPublicGameIdentifier() async throws {
         let payload = ScoreNotificationPayload(
             gameID: "937FEB4E-B0EF-45C2-9913-8C9543B13840",
@@ -5613,6 +5790,7 @@ struct kboScoreTests {
         #expect(route == .gameDetail("20260602-KIA-LOT"))
     }
 
+    // notificationRouteCanTargetNotificationsScreenWithoutTabSelection 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRouteCanTargetNotificationsScreenWithoutTabSelection() async throws {
         let payload = ScoreNotificationPayload(
             gameID: nil,
@@ -5627,6 +5805,7 @@ struct kboScoreTests {
         #expect(route == .notifications)
     }
 
+    // notificationRegistrationPayloadMapsFavoriteTeamAlertsAndQuietHours 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationPayloadMapsFavoriteTeamAlertsAndQuietHours() async throws {
         let settings = AppSettings(
             favoriteTeamID: "lg",
@@ -5673,6 +5852,7 @@ struct kboScoreTests {
         #expect(payload.muteWhenLosingEnabled == true)
     }
 
+    // notificationRegistrationPayloadSupportsDeniedAuthorizationState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationPayloadSupportsDeniedAuthorizationState() async throws {
         let payload = try #require(
             NotificationRegistrationPayload(
@@ -5689,6 +5869,7 @@ struct kboScoreTests {
         #expect(payload.alertTypes.contains(.scoreChange))
     }
 
+    // notificationPreferencesDefaultDetailedValuesMatchBackendDefaults 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationPreferencesDefaultDetailedValuesMatchBackendDefaults() async throws {
         let preferences = NotificationPreferences()
 
@@ -5702,6 +5883,7 @@ struct kboScoreTests {
         #expect(preferences.muteWhenLosingEnabled == false)
     }
 
+    // appSettingsPersistenceRoundTripPreservesDetailedNotificationPreferences 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appSettingsPersistenceRoundTripPreservesDetailedNotificationPreferences() async throws {
         let settings = AppSettings(
             favoriteTeamID: "lotte",
@@ -5734,6 +5916,7 @@ struct kboScoreTests {
         #expect(decoded.notificationPreferences.muteWhenLosingEnabled == true)
     }
 
+    // notificationRegistrationKeyChangesWhenDetailedNotificationSettingsChange 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationKeyChangesWhenDetailedNotificationSettingsChange() async throws {
         let basePayload = NotificationRegistrationPayload(
             platform: "ios",
@@ -5764,6 +5947,7 @@ struct kboScoreTests {
         #expect(baseKey != updatedKey)
     }
 
+    // notificationRegistrationDeduplicationSkipsDuplicateInFlightKey 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationDeduplicationSkipsDuplicateInFlightKey() async throws {
         let key = NotificationRegistrationKey(
             deviceToken: "abc123",
@@ -5780,6 +5964,7 @@ struct kboScoreTests {
         #expect(state.inFlightRegistrationKeys == Set([key]))
     }
 
+    // notificationRegistrationDeduplicationSkipsAlreadyRegisteredKeyAfterSuccess 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationDeduplicationSkipsAlreadyRegisteredKeyAfterSuccess() async throws {
         let key = NotificationRegistrationKey(
             deviceToken: "abc123",
@@ -5798,6 +5983,7 @@ struct kboScoreTests {
         #expect(state.inFlightRegistrationKeys.isEmpty)
     }
 
+    // notificationRegistrationDeduplicationStartsWhenRegistrationKeyChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationDeduplicationStartsWhenRegistrationKeyChanges() async throws {
         let endpoint = "https://example.com/devices/register"
         let originalKey = NotificationRegistrationKey(
@@ -5840,6 +6026,7 @@ struct kboScoreTests {
         #expect(state.start(changedTokenKey) == .start(keyChanged: true))
     }
 
+    // notificationRegistrationDeduplicationDoesNotCacheFailedOrSkippedRequestsAsSuccess 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationRegistrationDeduplicationDoesNotCacheFailedOrSkippedRequestsAsSuccess() async throws {
         let key = NotificationRegistrationKey(
             deviceToken: "abc123",
@@ -5860,6 +6047,7 @@ struct kboScoreTests {
         #expect(state.start(key) == .start(keyChanged: false))
     }
 
+    // backendDeviceRegistrationSkipsWhenNotificationsDisabled 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationSkipsWhenNotificationsDisabled() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5878,6 +6066,7 @@ struct kboScoreTests {
         #expect(model.notificationRegistrationSyncStatus == .idle)
     }
 
+    // backendDeviceRegistrationSkipsWhenAuthorizationIsNotGranted 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationSkipsWhenAuthorizationIsNotGranted() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5893,6 +6082,7 @@ struct kboScoreTests {
         #expect(model.notificationRegistrationSyncStatus == .idle)
     }
 
+    // backendDeviceRegistrationSkipsWhenFavoriteTeamIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationSkipsWhenFavoriteTeamIsMissing() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5908,6 +6098,7 @@ struct kboScoreTests {
         #expect(model.notificationRegistrationSyncStatus == .idle)
     }
 
+    // backendDeviceRegistrationRunsWhenEligible 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationRunsWhenEligible() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5927,6 +6118,7 @@ struct kboScoreTests {
         #expect(model.notificationRegistrationSyncStatus == .synced)
     }
 
+    // backendDeviceRegistrationPayloadAndKeyIncludeFavoriteTeamOnlyPreference 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationPayloadAndKeyIncludeFavoriteTeamOnlyPreference() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5952,6 +6144,7 @@ struct kboScoreTests {
         #expect(key.favoriteTeamOnlyEnabled == true)
     }
 
+    // backendDeviceRegistrationPayloadAndKeyIncludeMuteWhenLosingPreference 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationPayloadAndKeyIncludeMuteWhenLosingPreference() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -5977,6 +6170,7 @@ struct kboScoreTests {
         #expect(key.muteWhenLosingEnabled == true)
     }
 
+    // backendDeviceRegistrationKeepsTeamFilterPreferencesWhenOtherSettingChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationKeepsTeamFilterPreferencesWhenOtherSettingChanges() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -6017,6 +6211,7 @@ struct kboScoreTests {
         #expect(key.muteWhenLosingEnabled == true)
     }
 
+    // backendDeviceRegistrationRunsWhenAuthorizationIsProvisional 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendDeviceRegistrationRunsWhenAuthorizationIsProvisional() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
@@ -6035,6 +6230,7 @@ struct kboScoreTests {
         #expect(await client.favoriteTeamIDs() == ["hanwha"])
     }
 
+    // remoteNotificationRegistrationClientPostsJSONPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func remoteNotificationRegistrationClientPostsJSONPayload() async throws {
         let session = makeStubSession()
         let client = RemoteNotificationRegistrationClient(
@@ -6081,26 +6277,48 @@ struct kboScoreTests {
         #expect(decoded.muteWhenLosingEnabled == false)
     }
 
-    @Test func teamIdentityCatalogUsesRealLogoAssetNames() async throws {
+    // teamIdentityCatalogKeepsTextAndThemeIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func teamIdentityCatalogKeepsTextAndThemeIdentity() async throws {
         let lgIdentity = TeamIdentity.catalog["lg"]
         let hanwhaIdentity = TeamIdentity.catalog["hanwha"]
 
-        #expect(lgIdentity?.logoAssetName == "team-lg")
-        #expect(hanwhaIdentity?.logoAssetName == "team-hanwha")
-        #expect(lgIdentity?.hasLogoAsset == true)
-        #expect(hanwhaIdentity?.hasLogoAsset == true)
         #expect(lgIdentity?.monogram == "LG")
+        #expect(lgIdentity?.shortLabel == "LG")
+        #expect(hanwhaIdentity?.displayName == "한화 이글스")
         #expect(hanwhaIdentity?.themeID == .hanwha)
     }
 
-    @Test func unknownTeamIdentityKeepsFallbackLogoPath() async throws {
+    // teamIdentityCatalogKeepsHomeHeroWatermarkNicknames 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func teamIdentityCatalogKeepsHomeHeroWatermarkNicknames() async throws {
+        let expectedNicknames = [
+            "doosan": "Bears",
+            "hanwha": "Eagles",
+            "kia": "Tigers",
+            "kiwoom": "Heroes",
+            "kt": "Wiz",
+            "lg": "Twins",
+            "lotte": "Giants",
+            "nc": "Dinos",
+            "samsung": "Lions",
+            "ssg": "Landers"
+        ]
+
+        for (teamID, expectedNickname) in expectedNicknames {
+            #expect(TeamIdentity.catalog[teamID]?.homeHeroWatermarkLabel == expectedNickname)
+        }
+    }
+
+    // unknownTeamIdentityUsesNeutralTheme 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func unknownTeamIdentityUsesNeutralTheme() async throws {
         let team = Team(id: "unknown", name: "Unknown Team", shortName: "UNK", englishName: "Unknown", markText: "UNK")
 
-        #expect(team.identity.logoAssetName == "team-unknown")
-        #expect(team.identity.hasLogoAsset == false)
+        #expect(team.identity.displayName == "Unknown Team")
+        #expect(team.identity.monogram == "UNK")
+        #expect(team.identity.homeHeroWatermarkLabel == "UNK")
         #expect(team.identity.themeID == .neutral)
     }
 
+    // currentThemeFollowsFavoriteTeamPreference 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func currentThemeFollowsFavoriteTeamPreference() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
 
@@ -6112,6 +6330,7 @@ struct kboScoreTests {
         #expect(model.currentTheme.id == .neutral)
     }
 
+    // favoriteTeamOnboardingCatalogContainsAllTenTeamsOffline 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamOnboardingCatalogContainsAllTenTeamsOffline() throws {
         let teams = FavoriteTeamCatalog.teams
         let expectedIDs = Set(["kia", "samsung", "lg", "doosan", "kt", "ssg", "lotte", "hanwha", "nc", "kiwoom"])
@@ -6121,12 +6340,14 @@ struct kboScoreTests {
         #expect(teams.map(\.id) == FavoriteTeamCatalog.orderedTeamIDs)
     }
 
+    // favoriteTeamOnboardingCatalogUsesUniqueIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamOnboardingCatalogUsesUniqueIDs() throws {
         let teams = FavoriteTeamCatalog.teams
 
         #expect(Set(teams.map(\.id)).count == teams.count)
     }
 
+    // favoriteTeamOnboardingDoesNotDependOnRepositoryTeamsWhenSupabaseUnavailable 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamOnboardingDoesNotDependOnRepositoryTeamsWhenSupabaseUnavailable() async throws {
         let repository = StubRepository(
             fetchBootstrapData: {
@@ -6148,6 +6369,7 @@ struct kboScoreTests {
         #expect(FavoriteTeamCatalog.teams.contains { $0.id == "hanwha" })
     }
 
+    // firstInstallPickerOpeningDoesNotCallFavoriteTeamRemoteRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func firstInstallPickerOpeningDoesNotCallFavoriteTeamRemoteRefresh() async throws {
         let recorder = FavoriteScheduleCallRecorder()
         let repository = FavoriteScheduleCountingRepository(recorder: recorder)
@@ -6160,6 +6382,7 @@ struct kboScoreTests {
         #expect(await recorder.callCount() == 0)
     }
 
+    // appStartupWithNoFavoriteTeamDoesNotCallHomeFavoriteGameRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appStartupWithNoFavoriteTeamDoesNotCallHomeFavoriteGameRefresh() async throws {
         let recorder = FavoriteScheduleCallRecorder()
         let repository = FavoriteScheduleCountingRepository(recorder: recorder)
@@ -6172,6 +6395,7 @@ struct kboScoreTests {
         #expect(await recorder.callCount() == 0)
     }
 
+    // favoriteTeamOnboardingSelectingLottePersistsExistingID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamOnboardingSelectingLottePersistsExistingID() throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
 
@@ -6180,6 +6404,7 @@ struct kboScoreTests {
         #expect(model.settings.favoriteTeamID == "lotte")
     }
 
+    // favoriteTeamOnboardingSelectingHanwhaPersistsExistingID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamOnboardingSelectingHanwhaPersistsExistingID() throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
 
@@ -6188,6 +6413,7 @@ struct kboScoreTests {
         #expect(model.settings.favoriteTeamID == "hanwha")
     }
 
+    // favoriteTeamDependentFlowsReadSelectedFavoriteTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamDependentFlowsReadSelectedFavoriteTeamID() throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
 
@@ -6198,6 +6424,7 @@ struct kboScoreTests {
         #expect(model.favoriteTeam?.id == "hanwha")
     }
 
+    // favoriteTeamSelectionStartsPostOnboardingFavoriteRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamSelectionStartsPostOnboardingFavoriteRefresh() async throws {
         let recorder = FavoriteScheduleCallRecorder()
         let repository = FavoriteScheduleCountingRepository(recorder: recorder)
@@ -6217,6 +6444,7 @@ struct kboScoreTests {
         #expect(await recorder.favoriteTeamIDs() == ["lotte"])
     }
 
+    // favoriteTeamLiveGameFindsCurrentLiveMatch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamLiveGameFindsCurrentLiveMatch() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
         model.settings.favoriteTeamID = "lg"
@@ -6228,6 +6456,7 @@ struct kboScoreTests {
         #expect(model.shouldShowLiveActivityAction(for: liveGame))
     }
 
+    // favoriteTeamLiveActivitySnapshotMapsFavoriteSideAndStatus 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func favoriteTeamLiveActivitySnapshotMapsFavoriteSideAndStatus() async throws {
         let bootstrap = MockKBOData.makeBootstrap()
         let game = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" && $0.status == .live }))
@@ -6242,6 +6471,7 @@ struct kboScoreTests {
         #expect(snapshot.inningText.contains("회"))
     }
 
+    // liveActivitySnapshotBuildsActivityAttributesAndContentState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivitySnapshotBuildsActivityAttributesAndContentState() async throws {
         #if canImport(ActivityKit)
         let bootstrap = MockKBOData.makeBootstrap()
@@ -6263,6 +6493,7 @@ struct kboScoreTests {
         #endif
     }
 
+    // liveActivityContentStateIncludesCurrentBatterAndPitcher 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityContentStateIncludesCurrentBatterAndPitcher() async throws {
         #if canImport(ActivityKit)
         let bootstrap = MockKBOData.makeBootstrap()
@@ -6291,6 +6522,7 @@ struct kboScoreTests {
         #endif
     }
 
+    // liveActivitySnapshotKeepsZeroZeroLiveScoreVisible 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivitySnapshotKeepsZeroZeroLiveScoreVisible() async throws {
         let bootstrap = MockKBOData.makeBootstrap()
         let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
@@ -6314,6 +6546,15 @@ struct kboScoreTests {
         #expect(snapshot.inningText == "1회 초")
     }
 
+    @Test func liveActivityOffenseResolverShowsIndicatorOnlyForLiveOffenseSide() {
+        #expect(KBOLiveActivityOffenseResolver.offenseSide(isPreGame: false, summaryText: "LIVE", inningText: "5회 초") == .away)
+        #expect(KBOLiveActivityOffenseResolver.offenseSide(isPreGame: false, summaryText: "LIVE", inningText: "Bottom 8") == .home)
+        #expect(KBOLiveActivityOffenseResolver.offenseSide(isPreGame: true, summaryText: "18:30", inningText: "Top 1") == nil)
+        #expect(KBOLiveActivityOffenseResolver.offenseSide(isPreGame: false, summaryText: "종료", inningText: "9회 말") == nil)
+        #expect(KBOLiveActivityOffenseResolver.offenseSide(isPreGame: false, summaryText: "취소", inningText: "1회 초") == nil)
+    }
+
+    // liveActivitySnapshotUsesLatestSnapshotCountAndPlayers 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivitySnapshotUsesLatestSnapshotCountAndPlayers() async throws {
         let bootstrap = MockKBOData.makeBootstrap()
         let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
@@ -6348,6 +6589,7 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == "최신타자")
     }
 
+    // liveActivityPregameStateShowsStartingPitchersOnly 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityPregameStateShowsStartingPitchersOnly() async throws {
         #if canImport(ActivityKit)
         let bootstrap = MockKBOData.makeBootstrap()
@@ -6385,6 +6627,7 @@ struct kboScoreTests {
         #endif
     }
 
+    // liveActivityPregameSnapshotShowsProbableStartersWithoutLiveState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityPregameSnapshotShowsProbableStartersWithoutLiveState() async throws {
         let bootstrap = MockKBOData.makeBootstrap()
         let baseGame = try #require(bootstrap.games.first(where: { $0.homeTeam.id == "lg" }))
@@ -6412,6 +6655,7 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == nil)
     }
 
+    // liveActivityAutoStartRejectsScheduledGameThirtyOneMinutesBeforeStart 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsScheduledGameThirtyOneMinutesBeforeStart() async throws {
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
         let now = scheduledAt.addingTimeInterval(-31 * 60)
@@ -6425,6 +6669,7 @@ struct kboScoreTests {
         #expect(isEligible == false)
     }
 
+    // liveActivityAutoStartAllowsScheduledGameExactlyThirtyMinutesBeforeStart 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartAllowsScheduledGameExactlyThirtyMinutesBeforeStart() async throws {
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
         let now = scheduledAt.addingTimeInterval(-30 * 60)
@@ -6438,6 +6683,7 @@ struct kboScoreTests {
         #expect(isEligible)
     }
 
+    // liveActivityAutoStartAllowsScheduledGameTenMinutesBeforeStart 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartAllowsScheduledGameTenMinutesBeforeStart() async throws {
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
         let now = scheduledAt.addingTimeInterval(-10 * 60)
@@ -6451,6 +6697,7 @@ struct kboScoreTests {
         #expect(isEligible)
     }
 
+    // liveActivityAutoStartAllowsScheduledGameAfterStartWhenStillUpcoming 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartAllowsScheduledGameAfterStartWhenStillUpcoming() async throws {
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
         let now = scheduledAt.addingTimeInterval(10 * 60)
@@ -6464,6 +6711,7 @@ struct kboScoreTests {
         #expect(isEligible)
     }
 
+    // liveActivityAutoStartAllowsLiveGameWithoutScheduledAt 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartAllowsLiveGameWithoutScheduledAt() async throws {
         let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
             status: .live,
@@ -6474,6 +6722,7 @@ struct kboScoreTests {
         #expect(isEligible)
     }
 
+    // liveActivityAutoStartRejectsScheduledGameWithoutScheduledAt 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsScheduledGameWithoutScheduledAt() async throws {
         let decision = LiveActivityAutoStartEligibility.decision(
             status: .upcoming,
@@ -6484,6 +6733,7 @@ struct kboScoreTests {
         #expect(decision == .missingScheduledAt)
     }
 
+    // liveActivityAutoStartRejectsFinalGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsFinalGame() async throws {
         let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
             status: .final,
@@ -6494,6 +6744,7 @@ struct kboScoreTests {
         #expect(isEligible == false)
     }
 
+    // liveActivityAutoStartRejectsCancelledGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsCancelledGame() async throws {
         let isEligible = LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
             status: .cancelled,
@@ -6504,6 +6755,7 @@ struct kboScoreTests {
         #expect(isEligible == false)
     }
 
+    // liveActivityAutoStartRejectsPostponedGameMappedAsCancelled 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsPostponedGameMappedAsCancelled() async throws {
         let status = KBODataMapper.mapGameStatus(code: "postponed", text: nil)
 
@@ -6517,6 +6769,7 @@ struct kboScoreTests {
         #expect(isEligible == false)
     }
 
+    // liveActivityAutoStartRejectsCompletedGameMappedAsFinal 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityAutoStartRejectsCompletedGameMappedAsFinal() async throws {
         let status = KBODataMapper.mapGameStatus(code: "completed", text: nil)
 
@@ -6530,6 +6783,7 @@ struct kboScoreTests {
         #expect(isEligible == false)
     }
 
+    // gameDetailAutoStartDoesNotCallLiveActivityControllerWhenEligibilityIsFalse 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailAutoStartDoesNotCallLiveActivityControllerWhenEligibilityIsFalse() async throws {
         let controller = TestLiveActivityController(isSupported: true)
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
@@ -6562,6 +6816,7 @@ struct kboScoreTests {
         #expect(model.isLiveActivityOn(for: game.id) == false)
     }
 
+    // gameDetailAutoStartCallsLiveActivityControllerWhenSettingsAndEligibilityAllow 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailAutoStartCallsLiveActivityControllerWhenSettingsAndEligibilityAllow() async throws {
         let controller = TestLiveActivityController(isSupported: true)
         let scheduledAt = isoDate("2026-04-28T18:30:00+09:00")
@@ -6597,6 +6852,7 @@ struct kboScoreTests {
         #expect(model.isLiveActivityOn(for: game.id))
     }
 
+    // liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperSkipsIdenticalPayloadsOnly() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6607,6 +6863,7 @@ struct kboScoreTests {
         #expect(deduper.decision(gameID: gameID, contentStateKey: firstKey).shouldSkip)
     }
 
+    // liveActivityUpdateDeduperUpdatesWhenScoreChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperUpdatesWhenScoreChanges() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6620,6 +6877,7 @@ struct kboScoreTests {
         #expect(decision.changedFields == ["favoriteScoreText"])
     }
 
+    // liveActivityUpdateDeduperUpdatesWhenCountChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperUpdatesWhenCountChanges() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6633,6 +6891,7 @@ struct kboScoreTests {
         #expect(decision.changedFields == ["balls", "strikes", "outs"])
     }
 
+    // liveActivityUpdateDeduperUpdatesWhenBasesChange 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperUpdatesWhenBasesChange() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6646,6 +6905,7 @@ struct kboScoreTests {
         #expect(decision.changedFields == ["runnerOnFirst", "runnerOnThird"])
     }
 
+    // liveActivityUpdateDeduperUpdatesWhenBatterOrPitcherChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperUpdatesWhenBatterOrPitcherChanges() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6659,6 +6919,7 @@ struct kboScoreTests {
         #expect(decision.changedFields == ["currentBatterName", "currentPitcherName"])
     }
 
+    // liveActivityUpdateDeduperUpdatesWhenRunnerStateChangesWithSameScoreAndInning 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateDeduperUpdatesWhenRunnerStateChangesWithSameScoreAndInning() async throws {
         let gameID = UUID(uuidString: "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")!
         var deduper = FavoriteTeamLiveActivityUpdateDeduper()
@@ -6672,6 +6933,7 @@ struct kboScoreTests {
         #expect(decision.changedFields == ["runnerOnFirst"])
     }
 
+    // liveActivityToggleUsesSupportedControllerForFavoriteLiveGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityToggleUsesSupportedControllerForFavoriteLiveGame() async throws {
         let controller = TestLiveActivityController(isSupported: true)
         let model = AppModel(
@@ -6695,6 +6957,7 @@ struct kboScoreTests {
         #expect(controller.activeGameID == nil)
     }
 
+    // liveActivityUpdateUsesMergedDetailAfterRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveActivityUpdateUsesMergedDetailAfterRefresh() async throws {
         let controller = TestLiveActivityController(isSupported: true)
         let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
@@ -6763,6 +7026,7 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == "최신타자")
     }
 
+    // backgroundLiveActivityRefreshReusesLocalUpdateController 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backgroundLiveActivityRefreshReusesLocalUpdateController() async throws {
         let controller = TestLiveActivityController(isSupported: true)
         let referenceDate = isoDate("2026-04-28T18:30:00+09:00")
@@ -6838,6 +7102,7 @@ struct kboScoreTests {
         #expect(snapshot.currentBatterName == "백그라운드타자")
     }
 
+    // preseasonBootstrapFixtureDecodes 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func preseasonBootstrapFixtureDecodes() async throws {
         let data = try fixtureData(named: "2026-preseason-bootstrap")
         let decoder = JSONDecoder()
@@ -6850,6 +7115,7 @@ struct kboScoreTests {
         #expect(decoded.games.contains { $0.statusCode == "FINAL" && $0.awayTeamID == "lotte" && $0.homeTeamID == "ssg" && $0.awayScore == 5 && $0.homeScore == 2 })
     }
 
+    // liveRepositoryFallsBackToBootstrapWhenCollectionEndpointsUseBootstrapShape 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryFallsBackToBootstrapWhenCollectionEndpointsUseBootstrapShape() async throws {
         let bootstrapData = try fixtureData(named: "2026-preseason-bootstrap")
 
@@ -6870,6 +7136,7 @@ struct kboScoreTests {
         #expect(notifications.count == 5)
     }
 
+    // preseasonFixtureMapsIntoDomainModels 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func preseasonFixtureMapsIntoDomainModels() async throws {
         let data = try fixtureData(named: "2026-preseason-bootstrap")
         let decoder = JSONDecoder()
@@ -6885,6 +7152,7 @@ struct kboScoreTests {
         #expect(mapped.games.contains { $0.awayTeam.id == "kia" && $0.homeTeam.id == "samsung" && $0.status == .rainDelay })
     }
 
+    // externalResponseAdapterNormalizesPreseasonFixturePayload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func externalResponseAdapterNormalizesPreseasonFixturePayload() async throws {
         let data = try fixtureData(named: "2026-preseason-external-response")
         let normalized = try KBOExternalResponseAdapter.normalize(data: data)
@@ -6896,6 +7164,7 @@ struct kboScoreTests {
         #expect(normalized.games.contains { $0.awayTeamID == "kia" && $0.homeTeamID == "samsung" && $0.statusText == "우천 중단" })
     }
 
+    // officialGameListFixtureNormalizesIntoExistingDTOShape 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameListFixtureNormalizesIntoExistingDTOShape() async throws {
         let data = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let normalized = try KBOExternalResponseAdapter.normalize(data: data)
@@ -6917,6 +7186,7 @@ struct kboScoreTests {
         })
     }
 
+    // officialOpeningDayGameListFixtureNormalizesUpcomingGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialOpeningDayGameListFixtureNormalizesUpcomingGames() async throws {
         let data = try fixtureData(named: "2026-kbo-official-game-list-20260328")
         let normalized = try KBOExternalResponseAdapter.normalize(data: data)
@@ -6937,6 +7207,7 @@ struct kboScoreTests {
         })
     }
 
+    // officialScheduleFixtureNormalizesTableRowsIntoGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialScheduleFixtureNormalizesTableRowsIntoGames() async throws {
         let data = try fixtureData(named: "2026-kbo-official-schedule-list-202603")
         let normalized = try KBOExternalResponseAdapter.normalize(data: data)
@@ -6957,6 +7228,7 @@ struct kboScoreTests {
         })
     }
 
+    // externalResponseAdapterNormalizesStringValuesAndAlternateDates 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func externalResponseAdapterNormalizesStringValuesAndAlternateDates() async throws {
         let data = """
         [
@@ -6982,6 +7254,7 @@ struct kboScoreTests {
         #expect(normalized.games.first?.homeScore == 10)
     }
 
+    // liveRepositoryMapsOfficialGameListFixtureWithoutSeparateTeamsEndpoint 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryMapsOfficialGameListFixtureWithoutSeparateTeamsEndpoint() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
 
@@ -7004,6 +7277,7 @@ struct kboScoreTests {
         })
     }
 
+    // officialLivePayloadMapsStableIDsInningAndBases 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialLivePayloadMapsStableIDsInningAndBases() async throws {
         let data = """
         {
@@ -7046,6 +7320,7 @@ struct kboScoreTests {
         #expect(first?.outs == 1)
     }
 
+    // testBaseRunnerBattingOrderNormalization 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerBattingOrderNormalization() {
         #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("3") == 3)
         #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber("3번") == 3)
@@ -7054,6 +7329,7 @@ struct kboScoreTests {
         #expect(OfficialBaseRunnerLineupResolver.normalizedBattingOrderNumber(nil) == nil)
     }
 
+    // testBaseRunnerOffenseSideFromTopInningUsesAwayLineup 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerOffenseSideFromTopInningUsesAwayLineup() throws {
         let battingSections = makeBaseRunnerLineupSections(
             away: [(2, "김민석")],
@@ -7074,6 +7350,7 @@ struct kboScoreTests {
         }
     }
 
+    // testBaseRunnerOffenseSideFromBottomInningUsesHomeLineup 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerOffenseSideFromBottomInningUsesHomeLineup() throws {
         let battingSections = makeBaseRunnerLineupSections(
             away: [(4, "원정4번")],
@@ -7094,6 +7371,7 @@ struct kboScoreTests {
         }
     }
 
+    // testBaseRunnerMapsFirstSecondThirdRunnerNamesFromBattingOrders 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerMapsFirstSecondThirdRunnerNamesFromBattingOrders() throws {
         let battingSections = makeBaseRunnerLineupSections(
             away: [(2, "김민석"), (5, "전준우")],
@@ -7113,6 +7391,7 @@ struct kboScoreTests {
         #expect(runners.third == "전준우")
     }
 
+    // testBaseRunnerKeepsCachedNameWhenBaseStillOccupiedAndNewNameMissing 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerKeepsCachedNameWhenBaseStillOccupiedAndNewNameMissing() throws {
         var resolver = BaseRunnerDisplayResolver()
         let occupied = try makeBaseRunnerDisplayGame(
@@ -7132,6 +7411,7 @@ struct kboScoreTests {
         #expect(display.source == "carryForward")
     }
 
+    // testBaseRunnerClearsCachedNameWhenBaseIsEmpty 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerClearsCachedNameWhenBaseIsEmpty() throws {
         var resolver = BaseRunnerDisplayResolver()
         let occupied = try makeBaseRunnerDisplayGame(
@@ -7151,6 +7431,7 @@ struct kboScoreTests {
         #expect(display.source == "empty")
     }
 
+    // testBaseRunnerReplacesCachedNameWhenBattingOrderChanges 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func testBaseRunnerReplacesCachedNameWhenBattingOrderChanges() throws {
         let battingSections = makeBaseRunnerLineupSections(
             away: [(2, "김민석"), (5, "전준우")],
@@ -7188,6 +7469,7 @@ struct kboScoreTests {
         #expect(display.source == "snapshot")
     }
 
+    // baseRunnerResolvedNamesFeedDisplayResolutionBeforeViewRendering 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerResolvedNamesFeedDisplayResolutionBeforeViewRendering() throws {
         let battingSections = makeBaseRunnerLineupSections(
             away: [(2, "김민석")],
@@ -7214,6 +7496,7 @@ struct kboScoreTests {
         #expect(display.source == "snapshot")
     }
 
+    // liveRepositoryMapsOfficialMonthlyScheduleFixture 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryMapsOfficialMonthlyScheduleFixture() async throws {
         let officialSchedule = try fixtureData(named: "2026-kbo-official-schedule-list-202603")
         let session = makeStubSession()
@@ -7234,6 +7517,7 @@ struct kboScoreTests {
         })
     }
 
+    // liveRepositoryMapsBackendFinishedMonthlyScheduleGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryMapsBackendFinishedMonthlyScheduleGame() async throws {
         let month = KBOMonthScheduleKey(year: 2026, month: 4)
         let payload = """
@@ -7275,6 +7559,7 @@ struct kboScoreTests {
         #expect(game.homeScore == 11)
     }
 
+    // liveRepositoryFallsBackToMonthlyScheduleWhenBootstrapEndpointIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryFallsBackToMonthlyScheduleWhenBootstrapEndpointIsMissing() async throws {
         let month = KBOMonthScheduleKey(year: 2026, month: 3)
         let backendMonthlyPayload = try makeBackendMonthPayloadJSON()
@@ -7305,6 +7590,7 @@ struct kboScoreTests {
         #expect(bootstrap.notifications.isEmpty)
     }
 
+    // liveRepositoryUsesVerifiedOfficialKBORequestShapeForMonthlySchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryUsesVerifiedOfficialKBORequestShapeForMonthlySchedule() async throws {
         let officialSchedule = try fixtureData(named: "2026-kbo-official-schedule-list-202603")
         let session = makeStubSession()
@@ -7333,6 +7619,7 @@ struct kboScoreTests {
         #expect(body?.contains("teamId=") == true)
     }
 
+    // liveRepositoryUsesVerifiedOfficialKBORequestShapeForLiveGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryUsesVerifiedOfficialKBORequestShapeForLiveGames() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
@@ -7364,6 +7651,7 @@ struct kboScoreTests {
         #expect(body?.contains("date=20260323") == true)
     }
 
+    // officialGameCenterClientUsesScheduledDateWhenProviderIDIsSchedulePlaceholder 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientUsesScheduledDateWhenProviderIDIsSchedulePlaceholder() async throws {
         let officialGameList = """
         {
@@ -7405,6 +7693,7 @@ struct kboScoreTests {
         #expect(body?.contains("date=sched-20") == false)
     }
 
+    // officialGameCenterClientReconcilesScheduleStartTimeFromOfficialGameList 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientReconcilesScheduleStartTimeFromOfficialGameList() async throws {
         let officialGameList = """
         {
@@ -7460,6 +7749,7 @@ struct kboScoreTests {
         #expect(reconciled[0].scheduledStart == isoDate("2026-03-28T17:00:00+09:00"))
     }
 
+    // officialGameCenterClientMapsLiveBaseRunnerNamesFromBattingOrderTable 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientMapsLiveBaseRunnerNamesFromBattingOrderTable() async throws {
         let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
         let awayOrderTable = #"""
@@ -7564,6 +7854,7 @@ struct kboScoreTests {
         #expect(detail?.summary.baseRunners?.third == "김민수")
     }
 
+    // officialGameCenterClientMapsLiveScoreboardLineScore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientMapsLiveScoreboardLineScore() async throws {
         let inningTable = #"""
         {
@@ -7665,6 +7956,7 @@ struct kboScoreTests {
         #expect(detail?.lineScore?.homeTotals.walks == "2")
     }
 
+    // officialGameCenterClientHandlesScoreboardOfficialErrorWithoutKeyNotFound 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientHandlesScoreboardOfficialErrorWithoutKeyNotFound() async throws {
         let officialGameList = """
         {
@@ -7736,6 +8028,7 @@ struct kboScoreTests {
         #expect(detail?.lineScore == nil)
     }
 
+    // officialGameCenterClientHandlesScoreboardResponseWithoutTables 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientHandlesScoreboardResponseWithoutTables() async throws {
         let payload = #"{"S_NM":"잠실","START_TM":"14:00","code":"100","msg":"성공"}"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(OfficialScoreboardResponse.self, from: payload)
@@ -7746,6 +8039,7 @@ struct kboScoreTests {
         #expect(client.makeLineScore(from: decoded) == nil)
     }
 
+    // officialGameCenterClientFallsBackToScoreBoardPageLineScoreForLiveGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientFallsBackToScoreBoardPageLineScoreForLiveGame() async throws {
         let officialGameList = """
         {
@@ -7826,6 +8120,7 @@ struct kboScoreTests {
         #expect(detail?.review?.hasDisplayableRecords != true)
     }
 
+    // officialGameCenterClientMapsLiveKeyPlayerRecordFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientMapsLiveKeyPlayerRecordFallback() async throws {
         let officialGameList = """
         {
@@ -7937,6 +8232,7 @@ struct kboScoreTests {
         #expect(detail?.review?.homePitching.lines.first?.strikeouts == "1")
     }
 
+    // officialGameCenterClientBuildsLiveBatterRecordsFromLineupAndOverlaysKeyPlayerStats 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientBuildsLiveBatterRecordsFromLineupAndOverlaysKeyPlayerStats() async throws {
         let awayLineupTable = #"""
         {
@@ -8142,6 +8438,7 @@ struct kboScoreTests {
         #expect(GameDetailBattingTableColumns.headers(isLiveLike: true) == ["타수", "득점", "안타", "타점", "홈런", "삼진", "볼넷"])
     }
 
+    // officialGameCenterClientBuildsLivePitcherRowsFromStartersAndCurrentPitcherSide 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientBuildsLivePitcherRowsFromStartersAndCurrentPitcherSide() async throws {
         let officialGameList = """
         {
@@ -8258,6 +8555,7 @@ struct kboScoreTests {
         #expect(homePitchers.contains { $0.name == "김영우" } == false)
     }
 
+    // officialGameCenterClientFallsBackToScoreboardHTMLBoxscoreBeforeKeyPlayerPartial 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientFallsBackToScoreboardHTMLBoxscoreBeforeKeyPlayerPartial() async throws {
         let officialGameList = """
         {
@@ -8387,6 +8685,7 @@ struct kboScoreTests {
         #expect(review.homePitching.lines[0].runsAllowed == "3")
     }
 
+    // officialGameCenterClientKeepsLineScoreWhenLiveKeyPlayerRecordsUnavailable 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientKeepsLineScoreWhenLiveKeyPlayerRecordsUnavailable() async throws {
         let officialGameList = """
         {
@@ -8469,6 +8768,7 @@ struct kboScoreTests {
         #expect(detail?.review?.hasDisplayableRecords != true)
     }
 
+    // officialGameCenterClientRejectsScoreBoardPageWithoutTargetGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientRejectsScoreBoardPageWithoutTargetGame() async throws {
         let officialGameList = """
         {
@@ -8549,6 +8849,7 @@ struct kboScoreTests {
         #expect(detail?.lineScore == nil)
     }
 
+    // officialGameCenterClientRejectsScoreBoardPageObjectMovedHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientRejectsScoreBoardPageObjectMovedHTML() async throws {
         let officialGameList = """
         {
@@ -8615,6 +8916,7 @@ struct kboScoreTests {
         #expect(detail?.lineScore == nil)
     }
 
+    // officialGameCenterClientFallsBackToLineupAnalysisForLiveBaseRunnerNames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientFallsBackToLineupAnalysisForLiveBaseRunnerNames() async throws {
         let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
         let awayOrderTable = #"""
@@ -8722,6 +9024,7 @@ struct kboScoreTests {
         #expect(detail?.summary.baseRunners?.third == "홍창기")
     }
 
+    // officialGameCenterClientMapsLiveBoxScoreRecordSections 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientMapsLiveBoxScoreRecordSections() async throws {
         let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
         let awayOrderTable = #"""
@@ -8963,6 +9266,7 @@ struct kboScoreTests {
         #expect(detail?.review?.homePitching.lines.first?.hitBatters == "1")
     }
 
+    // officialGameCenterInvalidResponseCarriesLiveRequestDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterInvalidResponseCarriesLiveRequestDiagnostics() async throws {
         let session = makeStubSession()
         let client = OfficialKBOGameCenterClient(
@@ -8997,6 +9301,7 @@ struct kboScoreTests {
         }
     }
 
+    // officialGameCenterClientRejectsPlayResultsFromBattingAggregateStats 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialGameCenterClientRejectsPlayResultsFromBattingAggregateStats() async throws {
         let emptyGridTable = #"{"headers":[],"rows":[],"tfoot":[]}"#
         let awayOrderTable = #"""
@@ -9179,6 +9484,7 @@ struct kboScoreTests {
         #expect(detail?.review?.homeBatting.lines.first?.plateAppearanceStrikeouts == nil)
     }
 
+    // gameCenterKeyStatsDerivesHomeRunsAndStrikeoutsFromHitterRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsDerivesHomeRunsAndStrikeoutsFromHitterRows() throws {
         let review = makeKeyStatsReview(
             awayLines: [
@@ -9198,6 +9504,7 @@ struct kboScoreTests {
         #expect(stats.home.strikeouts == 2)
     }
 
+    // gameCenterKeyStatsParsesStolenBasesAndDoublePlaysFromTableEtc 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsParsesStolenBasesAndDoublePlaysFromTableEtc() throws {
         let review = makeKeyStatsReview(
             summaryItems: [
@@ -9222,6 +9529,7 @@ struct kboScoreTests {
         #expect(stats.home.doublePlays == 2)
     }
 
+    // gameCenterKeyStatsSupportsMixedKoreanAndEnglishExtraLabels 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsSupportsMixedKoreanAndEnglishExtraLabels() throws {
         let review = makeKeyStatsReview(
             summaryItems: [
@@ -9247,6 +9555,7 @@ struct kboScoreTests {
         #expect(stats.home.homeRuns == 1)
     }
 
+    // gameCenterKeyStatsDefaultsMissingFieldsSafelyToZero 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsDefaultsMissingFieldsSafelyToZero() throws {
         let review = makeKeyStatsReview()
 
@@ -9256,6 +9565,7 @@ struct kboScoreTests {
         #expect(stats.home == GameCenterTeamKeyStats(hits: 0, homeRuns: 0, stolenBases: 0, strikeouts: 0, doublePlays: 0, errors: 0))
     }
 
+    // gameCenterKeyStatsKeepsAwayHomeValuesInOrder 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsKeepsAwayHomeValuesInOrder() throws {
         let review = makeKeyStatsReview(
             summaryItems: [
@@ -9291,6 +9601,7 @@ struct kboScoreTests {
         Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
     }
 
+    // makeKeyStatsReview 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeKeyStatsReview(
         summaryItems: [GameCenterSummaryItem] = [],
         awayLines: [GameCenterBattingLine] = [],
@@ -9305,6 +9616,7 @@ struct kboScoreTests {
         )
     }
 
+    // makeKeyStatsBattingLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeKeyStatsBattingLine(
         name: String,
         hits: String? = nil,
@@ -9326,6 +9638,7 @@ struct kboScoreTests {
         )
     }
 
+    // makePositionBattingLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makePositionBattingLine(order: String = "1", name: String, position: String) -> GameCenterBattingLine {
         GameCenterBattingLine(
             battingOrder: order,
@@ -9342,6 +9655,7 @@ struct kboScoreTests {
         )
     }
 
+    // liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
         let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
@@ -9368,6 +9682,7 @@ struct kboScoreTests {
         })
     }
 
+    // liveRepositoryUsesDefaultNonMarchSeriesRuleForOfficialMonthlySchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryUsesDefaultNonMarchSeriesRuleForOfficialMonthlySchedule() async throws {
         let officialSchedule = try fixtureData(named: "2026-kbo-official-schedule-list-202603")
         let session = makeStubSession()
@@ -9396,6 +9711,7 @@ struct kboScoreTests {
         #expect(body?.contains("teamId=") == true)
     }
 
+    // liveRepositoryMapsBackendStandingsPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryMapsBackendStandingsPayload() async throws {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/v1/")!, session: session)
@@ -9451,6 +9767,7 @@ struct kboScoreTests {
         #expect(standings[0].postseasonQualificationProbability == 0.84)
     }
 
+    // liveRepositoryMapsBackendStandingsUnavailableProbabilityState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryMapsBackendStandingsUnavailableProbabilityState() async throws {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "https://example.com/v1/")!, session: session)
@@ -9500,6 +9817,7 @@ struct kboScoreTests {
         #expect(standings[0].postseasonQualificationText == "산출 불가")
     }
 
+    // repositoryFactoryUsesBundledModeWhenBackendURLIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repositoryFactoryUsesBundledModeWhenBackendURLIsMissing() async throws {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
             configuration: AppRepositoryConfiguration(
@@ -9513,6 +9831,7 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == nil)
     }
 
+    // supabaseFailureFallsBackToLocalRepository 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseFailureFallsBackToLocalRepository() async throws {
         let bundledDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: bundledDirectory) }
@@ -9552,6 +9871,7 @@ struct kboScoreTests {
         #expect(snapshot.baseURL == "https://example.supabase.co")
     }
 
+    // supabaseBootstrapUsesLocalBootstrapWhenGamesExist 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseBootstrapUsesLocalBootstrapWhenGamesExist() async throws {
         let runtimeState = RepositoryRuntimeState(
             activeSource: .supabase,
@@ -9613,6 +9933,7 @@ struct kboScoreTests {
         #expect(snapshot.deliverySource == .supabase)
     }
 
+    // bundledJSONRepositoryUsesDocumentsJSONWhenPresent 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bundledJSONRepositoryUsesDocumentsJSONWhenPresent() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9643,6 +9964,7 @@ struct kboScoreTests {
         #expect(snapshot.localBootstrapLoadedAt != nil)
     }
 
+    // bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsMissing() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9671,6 +9993,7 @@ struct kboScoreTests {
         #expect(snapshot.localBootstrapLoadedAt != nil)
     }
 
+    // bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsInvalid 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bundledJSONRepositoryFallsBackToBundledJSONWhenDocumentsJSONIsInvalid() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9701,6 +10024,7 @@ struct kboScoreTests {
         #expect(snapshot.localBootstrapLoadedAt != nil)
     }
 
+    // externalDocumentsBootstrapStillDrivesStandingsAndProbabilityDerivation 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func externalDocumentsBootstrapStillDrivesStandingsAndProbabilityDerivation() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9735,6 +10059,7 @@ struct kboScoreTests {
         #expect(model.debugLocalBootstrapSource == "문서 JSON")
     }
 
+    // appModelRefreshReReadsEditedDocumentsBootstrapJSON 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelRefreshReReadsEditedDocumentsBootstrapJSON() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9775,6 +10100,7 @@ struct kboScoreTests {
         #expect(model.debugLocalBootstrapLoadedAt != nil)
     }
 
+    // appModelRefreshHomeReappliesEditedDocumentsBootstrapTeams 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelRefreshHomeReappliesEditedDocumentsBootstrapTeams() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9812,6 +10138,7 @@ struct kboScoreTests {
         #expect(model.debugLocalBootstrapLoadedAt != nil)
     }
 
+    // bundledJSONRepositoryRecoversAfterInvalidDocumentsJSONIsFixed 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bundledJSONRepositoryRecoversAfterInvalidDocumentsJSONIsFixed() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -9846,6 +10173,7 @@ struct kboScoreTests {
         #expect(snapshot.localBootstrapResolvedPath == documentsURL.path)
     }
 
+    // repositoryFactoryIgnoresLegacyBackendURLWhenBuildingRuntimeRepository 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repositoryFactoryIgnoresLegacyBackendURLWhenBuildingRuntimeRepository() async throws {
         let backendURL = try #require(URL(string: "http://127.0.0.1:8080"))
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
@@ -9862,6 +10190,7 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == nil)
     }
 
+    // liveRepositoryBuildsLocalhostBackendRequestURLs 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryBuildsLocalhostBackendRequestURLs() async throws {
         let session = makeStubSession()
         let repository = LiveKBORepository(baseURL: URL(string: "http://localhost:8080")!, session: session)
@@ -9884,6 +10213,7 @@ struct kboScoreTests {
         #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
     }
 
+    // gameBoxscoreResponseDecodesFullBatterAndPitcherRecords 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameBoxscoreResponseDecodesFullBatterAndPitcherRecords() throws {
         let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
 
@@ -9913,6 +10243,7 @@ struct kboScoreTests {
         #expect(response.awayPitchers[0].era == "3.19")
     }
 
+    // gameBoxscoreResponseBuildsMajorRecordSummaryItemsFromLiveTextStats 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameBoxscoreResponseBuildsMajorRecordSummaryItemsFromLiveTextStats() throws {
         let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
         let review = try #require(response.gameCenterReview)
@@ -9926,6 +10257,7 @@ struct kboScoreTests {
         #expect(stats.home.errors == 1)
     }
 
+    // gameBoxscoreResponseKeepsNullableBatterFieldsNil 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameBoxscoreResponseKeepsNullableBatterFieldsNil() throws {
         let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
         let batter = try #require(response.awayBatters.first)
@@ -9936,6 +10268,7 @@ struct kboScoreTests {
         #expect(batter.stolenBases == nil)
     }
 
+    // gameDetailBatterStolenBaseDisplayDefaultsOnlyThatColumnToZero 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailBatterStolenBaseDisplayDefaultsOnlyThatColumnToZero() throws {
         let missingStat: String? = nil
 
@@ -9943,6 +10276,7 @@ struct kboScoreTests {
         #expect((missingStat ?? "-") == "-")
     }
 
+    // gameRecordPositionFormatterDisplaysReadableBatterPositions 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionFormatterDisplaysReadableBatterPositions() throws {
         #expect(GameRecordPositionFormatter.display(nil) == "-")
         #expect(GameRecordPositionFormatter.display("") == "-")
@@ -9960,6 +10294,7 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display("알수없음") == "알수없음")
     }
 
+    // gameRecordPositionFormatterCoversObservedDetailedBatterRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionFormatterCoversObservedDetailedBatterRows() throws {
         #expect(GameRecordPositionFormatter.display("주우") == "PR·RF")
         #expect(GameRecordPositionFormatter.display("주二") == "PR·2B")
@@ -9967,6 +10302,7 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display("二유") == "2B·SS")
     }
 
+    // gameRecordPositionEnrichmentUsesUnambiguousRicherSameTeamSource 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionEnrichmentUsesUnambiguousRicherSameTeamSource() throws {
         #if DEBUG
         GameRecordPositionFormatter.resetDebugLogCacheForTesting()
@@ -9995,6 +10331,7 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "PR·2B")
     }
 
+    // gameRecordPositionEnrichmentFallsBackToBattingOrderForSubstitutes 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionEnrichmentFallsBackToBattingOrderForSubstitutes() throws {
         let current = GameCenterBattingSection(
             lines: [
@@ -10017,6 +10354,7 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display(enriched.lines[1].position) == "SS")
     }
 
+    // gameRecordPositionEnrichmentInfersBlankSubstituteOrderFromAdjacentRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionEnrichmentInfersBlankSubstituteOrderFromAdjacentRows() throws {
         let current = GameCenterBattingSection(
             lines: [
@@ -10041,6 +10379,7 @@ struct kboScoreTests {
         #expect(GameRecordPositionFormatter.display(enriched.lines[2].position) == "3B")
     }
 
+    // gameRecordPositionDebugLogsAreDedupedForSamePlayerAndGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameRecordPositionDebugLogsAreDedupedForSamePlayerAndGame() throws {
         #if DEBUG
         GameRecordPositionFormatter.resetDebugLogCacheForTesting()
@@ -10064,6 +10403,7 @@ struct kboScoreTests {
         #endif
     }
 
+    // supabaseBatterRecordDTODecodesSnakeCaseColumns 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseBatterRecordDTODecodesSnakeCaseColumns() throws {
         let gameID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
         let teamID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
@@ -10102,6 +10442,7 @@ struct kboScoreTests {
         #expect(row.walks == 1)
     }
 
+    // supabasePitcherRecordDTODecodesSnakeCaseColumns 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabasePitcherRecordDTODecodesSnakeCaseColumns() throws {
         let gameID = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
         let teamID = UUID(uuidString: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")!
@@ -10146,6 +10487,7 @@ struct kboScoreTests {
         #expect(row.walksOrHitByPitch == 1)
     }
 
+    // supabaseDetailedRecordsMapIntoGameCenterRowsAndSortBySourceOrder 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseDetailedRecordsMapIntoGameCenterRowsAndSortBySourceOrder() throws {
         let fixture = try makeSupabaseDetailedRecordFixture()
 
@@ -10179,6 +10521,7 @@ struct kboScoreTests {
         #expect(review.awayPitching.lines[0].earnedRuns == "1")
     }
 
+    // supabasePitcherRecordsSortByPitchingOrderBeforeSourceOrder 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabasePitcherRecordsSortByPitchingOrderBeforeSourceOrder() throws {
         let fixture = try makeSupabaseDetailedRecordFixture()
 
@@ -10196,6 +10539,7 @@ struct kboScoreTests {
         #expect(review.awayPitching.lines.map(\.name) == ["첫번째", "두번째"])
     }
 
+    // gameDetailDatabaseRecordsUseResolvedSupabaseGameIDWhenLocalIDDiffers 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailDatabaseRecordsUseResolvedSupabaseGameIDWhenLocalIDDiffers() async throws {
         let inputLocalGameID = UUID(uuidString: "76E4CD75-1111-2222-3333-444444444444")!
         let resolvedSupabaseGameID = UUID(uuidString: "A9E90D0E-8BA7-404C-960A-DB7D01CA8AF3")!
@@ -10292,6 +10636,7 @@ struct kboScoreTests {
         #expect(await tracker.pitcherRecordGameIDs.contains(inputLocalGameID) == false)
     }
 
+    // gameDetailSnapshotResultPreservesRawSupabaseGameIDSeparatelyFromMappedLocalID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailSnapshotResultPreservesRawSupabaseGameIDSeparatelyFromMappedLocalID() async throws {
         let inputLocalGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
         let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
@@ -10346,6 +10691,7 @@ struct kboScoreTests {
         #expect(result.game.id != rawSupabaseGameID)
     }
 
+    // explicitSupabaseGameIDDatabaseReviewQueriesDetailedRecordsWithRawID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func explicitSupabaseGameIDDatabaseReviewQueriesDetailedRecordsWithRawID() async throws {
         let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
         let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
@@ -10446,6 +10792,7 @@ struct kboScoreTests {
         #expect(await tracker.batterRecordGameIDs.contains(localGameID) == false)
     }
 
+    // providerResolvedDatabaseReviewQueriesDetailedRecordsWithRawSupabaseID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func providerResolvedDatabaseReviewQueriesDetailedRecordsWithRawSupabaseID() async throws {
         let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
         let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
@@ -10577,6 +10924,7 @@ struct kboScoreTests {
         ])
     }
 
+    // gameDetailScreenModelPrefersDatabaseRecordsOverKeyplayerFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelPrefersDatabaseRecordsOverKeyplayerFallback() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let game = try makeLiveBoxscoreDetailGame()
@@ -10598,6 +10946,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // finalGameDetailChecksDatabaseRecordsBeforeOfficialFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func finalGameDetailChecksDatabaseRecordsBeforeOfficialFallback() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let game = try makeBoxscoreDetailGame()
@@ -10627,6 +10976,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // gameDetailScreenModelKeepsKeyplayerFallbackWhenDatabaseRecordsAreEmpty 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelKeepsKeyplayerFallbackWhenDatabaseRecordsAreEmpty() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let officialFallback = RecordingOfficialFallback(result: .success(sampleKeyplayerLimitedReview()))
@@ -10645,6 +10995,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 1)
     }
 
+    // gameDetailScreenModelPostFetchGameSingleDatabaseReviewOverridesEarlyEmptyLimitedRecords 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelPostFetchGameSingleDatabaseReviewOverridesEarlyEmptyLimitedRecords() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
@@ -10719,6 +11070,7 @@ struct kboScoreTests {
         #expect(refreshedPresentation.review?.recordSource == .dbLiveTextRecords)
     }
 
+    // gameDetailScreenModelPreservesPreloadedDatabaseReviewThroughLiveLoad 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelPreservesPreloadedDatabaseReviewThroughLiveLoad() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
@@ -10766,6 +11118,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // gameDetailScreenModelPostFetchGameSingleKeepsFallbackWhenDatabaseRowsAreEmpty 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelPostFetchGameSingleKeepsFallbackWhenDatabaseRowsAreEmpty() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let game = try makeLiveBoxscoreDetailGame()
@@ -10821,6 +11174,7 @@ struct kboScoreTests {
         #expect(model.databaseRecordReview == nil)
     }
 
+    // gameBoxscoreResponseSortsRecordsBySourceOrder 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameBoxscoreResponseSortsRecordsBySourceOrder() throws {
         let response = try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON()).sortedBySourceOrder
 
@@ -10828,6 +11182,7 @@ struct kboScoreTests {
         #expect(response.awayBatters.map(\.playerName) == ["정수빈", "허경민"])
     }
 
+    // backendGameBoxscoreClientFetchesExpectedEndpoint 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendGameBoxscoreClientFetchesExpectedEndpoint() async throws {
         let session = makeBoxscoreStubSession()
         let client = BackendGameBoxscoreClient(baseURL: URL(string: "http://localhost:8088")!, session: session)
@@ -10851,6 +11206,7 @@ struct kboScoreTests {
         #expect(response.awayBatters.count == 2)
     }
 
+    // gameDetailScreenModelMergesBoxscoreWithoutClearingDetailState 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelMergesBoxscoreWithoutClearingDetailState() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
@@ -10875,6 +11231,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // gameDetailScreenModelAcceptsEmptyBoxscoreArrays 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelAcceptsEmptyBoxscoreArrays() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
@@ -10899,6 +11256,7 @@ struct kboScoreTests {
         #expect(model.errorMessage == nil)
     }
 
+    // backendBoxscoreSuccessPreventsOfficialStatsFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendBoxscoreSuccessPreventsOfficialStatsFallback() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
@@ -10920,6 +11278,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // officialFallbackInFlightDedupePreventsDuplicateRequests 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialFallbackInFlightDedupePreventsDuplicateRequests() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
@@ -10954,6 +11313,7 @@ struct kboScoreTests {
         #expect(secondModel.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
     }
 
+    // officialFallbackFailureCooldownPreventsImmediateRetry 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func officialFallbackFailureCooldownPreventsImmediateRetry() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let empty = GameBoxscoreResponse.empty(gameId: "20260510-DOO-SSG")
@@ -10982,6 +11342,7 @@ struct kboScoreTests {
         #expect(secondModel.officialFallbackReview == nil)
     }
 
+    // baseRunnerSnapshotNamesDisplayWithoutOfficialStatsFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func baseRunnerSnapshotNamesDisplayWithoutOfficialStatsFallback() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
@@ -11002,6 +11363,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // liveGameLoadsOfficialRecordFallbackWithoutBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveGameLoadsOfficialRecordFallbackWithoutBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11022,6 +11384,7 @@ struct kboScoreTests {
         #expect(model.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
     }
 
+    // liveGameDetailUsesOfficialRecordsFromDetailPayloadWithoutBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveGameDetailUsesOfficialRecordsFromDetailPayloadWithoutBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11042,6 +11405,7 @@ struct kboScoreTests {
         #expect(model.officialFallbackReview == nil)
     }
 
+    // gameDetailPresentationShowsLiveDetailRecordsWhenPresent 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailPresentationShowsLiveDetailRecordsWhenPresent() async throws {
         let game = try makeLiveBoxscoreDetailGame()
         let review = sampleOfficialFallbackReview()
@@ -11055,6 +11419,7 @@ struct kboScoreTests {
         #expect(presentation.review?.awayBatting.lines.first?.name == "공식타자")
     }
 
+    // invalidLiveOfficialDetailKeepsRecordStateEmptyWithoutBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func invalidLiveOfficialDetailKeepsRecordStateEmptyWithoutBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11087,6 +11452,7 @@ struct kboScoreTests {
         #expect(model.errorMessage != nil)
     }
 
+    // liveLineScoreDoesNotRequireBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveLineScoreDoesNotRequireBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let boxscoreState = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11107,6 +11473,7 @@ struct kboScoreTests {
         #expect(model.boxscore == nil)
     }
 
+    // repeatedLiveDetailLoadsDedupeConcurrentOfficialFetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repeatedLiveDetailLoadsDedupeConcurrentOfficialFetch() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let fetcher = RecordingDetailPayloadFetcher(
@@ -11128,6 +11495,7 @@ struct kboScoreTests {
         #expect(model.cachedLineScore?.awayTotals.hits == "7")
     }
 
+    // gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForLiveLikeGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForLiveLikeGames() throws {
         let live = GameDetailViewModel(gameIdentity: "live", initialGame: try makeLiveBoxscoreDetailGame(status: .live))
         let rainDelay = GameDetailViewModel(gameIdentity: "rain", initialGame: try makeLiveBoxscoreDetailGame(status: .rainDelay))
@@ -11144,6 +11512,7 @@ struct kboScoreTests {
         #expect(cancelled.liveRefreshTaskID.hasPrefix("idle:"))
     }
 
+    // upcomingGameDetailSkipsAutomaticOfficialPreviewLoad 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func upcomingGameDetailSkipsAutomaticOfficialPreviewLoad() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let baseGame = try makeLiveBoxscoreDetailGame(status: .upcoming)
@@ -11192,6 +11561,7 @@ struct kboScoreTests {
         #expect(await officialFallback.fetchCount == 0)
     }
 
+    // upcomingGameDetailRefreshSkipsSupabaseSnapshotLookup 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func upcomingGameDetailRefreshSkipsSupabaseSnapshotLookup() async throws {
         let game = try makeLiveBoxscoreDetailGame(status: .upcoming)
         let awayTeamID = supabaseTeamUUID(for: "doosan")
@@ -11237,6 +11607,7 @@ struct kboScoreTests {
         #expect(await tracker.latestSnapshotGameIDs.isEmpty)
     }
 
+    // failedBoxscoreFetchDoesNotFailDetailLoad 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func failedBoxscoreFetchDoesNotFailDetailLoad() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11256,6 +11627,7 @@ struct kboScoreTests {
         #expect(model.boxscoreErrorMessage != nil)
     }
 
+    // slowBoxscoreFetchDoesNotBlockDetailPayloadRendering 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func slowBoxscoreFetchDoesNotBlockDetailPayloadRendering() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
@@ -11275,6 +11647,7 @@ struct kboScoreTests {
         #expect(model.boxscore?.awayBatters.count == 2)
     }
 
+    // gameDetailScreenModelDoesNotRepeatBoxscoreFetchForSameGame 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelDoesNotRepeatBoxscoreFetchForSameGame() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .success(try JSONDecoder().decode(GameBoxscoreResponse.self, from: sampleGameBoxscoreJSON())))
@@ -11294,6 +11667,7 @@ struct kboScoreTests {
         #expect(await state.fetchCount == 1)
     }
 
+    // gameDetailScreenModelSkipsRepeatedFailedBoxscoreFetchDuringCooldown 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameDetailScreenModelSkipsRepeatedFailedBoxscoreFetchDuringCooldown() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
         let state = RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))
@@ -11321,6 +11695,7 @@ struct kboScoreTests {
         #expect(secondModel.boxscoreErrorMessage != nil)
     }
 
+    // bootstrapRefreshRepositoryWritesDocumentsJSONAndStoresETagOn200 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bootstrapRefreshRepositoryWritesDocumentsJSONAndStoresETagOn200() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11383,6 +11758,7 @@ struct kboScoreTests {
         #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == nil)
     }
 
+    // bootstrapRefreshRepositorySendsStoredETagAndSkipsRewriteOn304 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bootstrapRefreshRepositorySendsStoredETagAndSkipsRewriteOn304() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11455,6 +11831,7 @@ struct kboScoreTests {
         #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == "\"bootstrap-v1\"")
     }
 
+    // bootstrapRefreshFailurePreservesExistingDocumentsJSON 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bootstrapRefreshFailurePreservesExistingDocumentsJSON() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11509,6 +11886,7 @@ struct kboScoreTests {
         #expect(snapshot.bootstrapLastResult == .failed)
     }
 
+    // bootstrapRefreshFailureStillFallsBackToBundledJSONWithoutDocumentsFile 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func bootstrapRefreshFailureStillFallsBackToBundledJSONWithoutDocumentsFile() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11558,6 +11936,7 @@ struct kboScoreTests {
         #expect(snapshot.bootstrapLastResult == .failed)
     }
 
+    // appModelRefreshHomeSkipsBootstrapReapplyWhenBootstrapIsNotModified 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelRefreshHomeSkipsBootstrapReapplyWhenBootstrapIsNotModified() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11651,6 +12030,7 @@ struct kboScoreTests {
         #expect(URLProtocolStub.lastRequest?.value(forHTTPHeaderField: "If-None-Match") == "\"bootstrap-v1\"")
     }
 
+    // appModelRefreshHomeReappliesBootstrapAfterSuccessfulDownload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelRefreshHomeReappliesBootstrapAfterSuccessfulDownload() async throws {
         let documentsDirectory = try makeTemporaryDirectory()
         let bundledDirectory = try makeTemporaryDirectory()
@@ -11733,6 +12113,7 @@ struct kboScoreTests {
         #expect(model.debugBootstrapETag == "\"bootstrap-v2\"")
     }
 
+    // appModelMakesProbabilityAvailableBeforeThirtyPercentSeasonProgress 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelMakesProbabilityAvailableBeforeThirtyPercentSeasonProgress() async throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11761,6 +12142,7 @@ struct kboScoreTests {
         #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == nil)
     }
 
+    // localProbabilityCalculatorMakesProbabilityAvailableAtThirtyPercentSeasonProgress 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorMakesProbabilityAvailableAtThirtyPercentSeasonProgress() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11780,6 +12162,7 @@ struct kboScoreTests {
         #expect(signals["team1"]?.postseasonProbabilityUnavailableReason == nil)
     }
 
+    // localProbabilityCalculatorMakesProbabilityAvailableAboveThirtyPercentSeasonProgress 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorMakesProbabilityAvailableAboveThirtyPercentSeasonProgress() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11802,6 +12185,7 @@ struct kboScoreTests {
         #expect(team1Probability > team10Probability)
     }
 
+    // localProbabilityCalculatorAddsVirtualGamesForOfficialPairDeficits 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorAddsVirtualGamesForOfficialPairDeficits() throws {
         let teams = makeProbabilityTestTeams()
         let games = makePairDeficitRegularSeasonSchedule(
@@ -11826,6 +12210,7 @@ struct kboScoreTests {
         #expect(team10Signal.virtualUnscheduledRemainingGames == 9)
     }
 
+    // localProbabilityCalculatorReturnsDeterministicProbabilitiesForSameSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorReturnsDeterministicProbabilitiesForSameSnapshot() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11844,6 +12229,7 @@ struct kboScoreTests {
         #expect(first == second)
     }
 
+    // appModelDoesNotTreatEarlySevenAndOneLeaderAsClinched 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelDoesNotTreatEarlySevenAndOneLeaderAsClinched() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeConservativeEarlySeasonProbabilitySchedule(
@@ -11872,6 +12258,7 @@ struct kboScoreTests {
         #expect(leader.postseasonQualificationText != "100.0%")
     }
 
+    // appModelKeepsEarlyLowerRankedTeamsAboveNearZeroProbability 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelKeepsEarlyLowerRankedTeamsAboveNearZeroProbability() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeConservativeEarlySeasonProbabilitySchedule(
@@ -11899,6 +12286,7 @@ struct kboScoreTests {
         #expect(trailing.postseasonQualificationText != "0.0%")
     }
 
+    // localProbabilityCalculatorReturnsCertainQualificationOutcomesWhenSeasonIsComplete 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorReturnsCertainQualificationOutcomesWhenSeasonIsComplete() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11919,6 +12307,7 @@ struct kboScoreTests {
         #expect(team10Probability == 0)
     }
 
+    // standingsRemainSortedByOfficialRecordWhenProbabilitiesExist 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsRemainSortedByOfficialRecordWhenProbabilitiesExist() throws {
         let teams = makeProbabilityTestTeams()
         let games = makeProbabilityThresholdSchedule(
@@ -11944,6 +12333,7 @@ struct kboScoreTests {
         ])
     }
 
+    // localProbabilityCalculatorFallsBackToNeutralPriorWithoutPreviousSeasonRanks 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorFallsBackToNeutralPriorWithoutPreviousSeasonRanks() throws {
         let teams = makeProbabilityTestTeams(includePreviousRanks: false)
         let games = makeConservativeEarlySeasonProbabilitySchedule(
@@ -11966,6 +12356,7 @@ struct kboScoreTests {
         #expect(team10Probability < 1)
     }
 
+    // localProbabilityCalculatorUsesUnavailableReasonForUnknownClassificationGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorUsesUnavailableReasonForUnknownClassificationGames() throws {
         let teams = makeProbabilityTestTeams()
         let games = [
@@ -11994,6 +12385,7 @@ struct kboScoreTests {
         #expect(signals["team2"]?.unknownClassificationGames == 1)
     }
 
+    // localProbabilityCalculatorDoesNotTreatMappedSupabaseRegularSeasonRowsAsUnknown 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func localProbabilityCalculatorDoesNotTreatMappedSupabaseRegularSeasonRowsAsUnknown() throws {
         let awayTeamID = UUID(uuidString: "aaaaaaaa-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "bbbbbbbb-2222-2222-2222-222222222222")!
@@ -12051,6 +12443,7 @@ struct kboScoreTests {
         #expect(signals["team2"]?.postseasonQualificationProbability != nil)
     }
 
+    // snapshotShowsUnavailablePostseasonProbabilityStateWhenReasonExists 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotShowsUnavailablePostseasonProbabilityStateWhenReasonExists() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -12070,6 +12463,7 @@ struct kboScoreTests {
         #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == .seasonProgressBelowThreshold)
     }
 
+    // snapshotKeepsUnavailablePostseasonStateVisibleAfterThresholdForRealDataIssues 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotKeepsUnavailablePostseasonStateVisibleAfterThresholdForRealDataIssues() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -12089,6 +12483,7 @@ struct kboScoreTests {
         #expect(snapshot.visiblePostseasonProbabilityUnavailableReason == .unknownClassificationGames)
     }
 
+    // snapshotFormatsPostseasonProbabilityAsOneDecimalPercent 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotFormatsPostseasonProbabilityAsOneDecimalPercent() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -12107,6 +12502,7 @@ struct kboScoreTests {
         #expect(snapshot.postseasonProbabilityEstimateText == "공식 미편성 9경기 포함 추정치")
     }
 
+    // snapshotClampsExtremeNonCertainPostseasonProbabilityDisplay 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotClampsExtremeNonCertainPostseasonProbabilityDisplay() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let nearCertain = TeamStandingsSnapshot(
@@ -12134,6 +12530,7 @@ struct kboScoreTests {
         #expect(nearEliminated.postseasonQualificationText == "0.1%")
     }
 
+    // snapshotShowsExactPostseasonProbabilityForClinchedAndEliminatedTeams 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotShowsExactPostseasonProbabilityForClinchedAndEliminatedTeams() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let clinched = TeamStandingsSnapshot(
@@ -12163,6 +12560,7 @@ struct kboScoreTests {
         #expect(eliminated.postseasonQualificationText == "0.0%")
     }
 
+    // snapshotCalculatesPythagoreanWinningPercentageFromRunsScoredAndAllowed 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotCalculatesPythagoreanWinningPercentageFromRunsScoredAndAllowed() throws {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let positiveSnapshot = TeamStandingsSnapshot(
@@ -12208,6 +12606,7 @@ struct kboScoreTests {
         #expect(abs(evenValue - 0.5) < 0.000_1)
     }
 
+    // snapshotPythagoreanWinningPercentageReturnsNeutralForZeroRuns 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotPythagoreanWinningPercentageReturnsNeutralForZeroRuns() throws {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -12228,6 +12627,7 @@ struct kboScoreTests {
         #expect(snapshot.pythagoreanWinningPercentageText == "0.500")
     }
 
+    // snapshotPythagoreanWinningPercentageIsUnavailableWithoutRunData 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func snapshotPythagoreanWinningPercentageIsUnavailableWithoutRunData() {
         let team = Team(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG")
         let snapshot = TeamStandingsSnapshot(
@@ -12244,6 +12644,7 @@ struct kboScoreTests {
         #expect(snapshot.pythagoreanWinningPercentageText == "---")
     }
 
+    // standingsSnapshotUsesOnlyCompletedRegularSeasonGamesForRunTotalsAndPythagoreanWinningPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsSnapshotUsesOnlyCompletedRegularSeasonGamesForRunTotalsAndPythagoreanWinningPercentage() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-03T09:00:00+09:00"))
         let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
@@ -12346,6 +12747,7 @@ struct kboScoreTests {
         #expect(samsungSnapshot.pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 4, runsAllowed: 3))
     }
 
+    // fallbackRepositoryUsesMockWhenLiveRequestFails 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func fallbackRepositoryUsesMockWhenLiveRequestFails() async throws {
         let session = makeStubSession()
         let live = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
@@ -12361,6 +12763,7 @@ struct kboScoreTests {
         #expect(bootstrap.games.isEmpty == false)
     }
 
+    // fallbackRepositoryUsesMockMonthlyScheduleWhenLiveRequestFails 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func fallbackRepositoryUsesMockMonthlyScheduleWhenLiveRequestFails() async throws {
         let session = makeStubSession()
         let live = LiveKBORepository(baseURL: URL(string: "https://example.com/api/")!, session: session)
@@ -12376,6 +12779,7 @@ struct kboScoreTests {
         #expect(games.contains { $0.awayTeam.id == "kiwoom" && $0.homeTeam.id == "lg" })
     }
 
+    // cachedRepositoryReusesFreshGameCache 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryReusesFreshGameCache() async throws {
         let counter = FetchCounter()
         let repository = CachedKBORepository(
@@ -12396,6 +12800,7 @@ struct kboScoreTests {
         #expect(await counter.value == 1)
     }
 
+    // cachedRepositoryFallsBackToStaleCacheAfterFailedRefresh 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryFallsBackToStaleCacheAfterFailedRefresh() async throws {
         let counter = FetchCounter()
         let runtimeState = RepositoryRuntimeState(activeSource: .live, baseURL: "https://example.com", deliverySource: .live)
@@ -12423,6 +12828,7 @@ struct kboScoreTests {
         #expect(snapshot.isUsingStaleCache == true)
     }
 
+    // cachedRepositoryReusesFreshMonthlyScheduleCache 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryReusesFreshMonthlyScheduleCache() async throws {
         let counter = FetchCounter()
         let repository = CachedKBORepository(
@@ -12444,6 +12850,7 @@ struct kboScoreTests {
         #expect(await counter.value == 1)
     }
 
+    // cachedRepositoryBypassesFreshMonthlyScheduleCacheWhenRequested 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryBypassesFreshMonthlyScheduleCacheWhenRequested() async throws {
         let counter = FetchCounter()
         let fullSchedule = stubGames()
@@ -12470,6 +12877,7 @@ struct kboScoreTests {
         #expect(await counter.value == 2)
     }
 
+    // cachedRepositoryFallsBackToPersistedGamesCacheAcrossInstances 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryFallsBackToPersistedGamesCacheAcrossInstances() async throws {
         let cacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -12508,6 +12916,7 @@ struct kboScoreTests {
         #expect(snapshot.isUsingStaleCache == true)
     }
 
+    // cachedRepositoryFallsBackToPersistedMonthlyScheduleAcrossInstances 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRepositoryFallsBackToPersistedMonthlyScheduleAcrossInstances() async throws {
         let cacheDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -12539,6 +12948,7 @@ struct kboScoreTests {
         #expect(cachedSchedule == expectedSchedule)
     }
 
+    // appModelKeepsExistingGamesWhenRefreshFails 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelKeepsExistingGamesWhenRefreshFails() async throws {
         let repository = StubRepository(
             fetchGames: {
@@ -12555,6 +12965,7 @@ struct kboScoreTests {
         #expect(model.statusMessage(for: .home) != nil)
     }
 
+    // myTeamCalendarDerivesMonthGridFromExistingGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func myTeamCalendarDerivesMonthGridFromExistingGames() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-23T12:00:00+09:00")!
         let model = AppModel(
@@ -12571,6 +12982,7 @@ struct kboScoreTests {
         #expect(selectedDayGames.contains { $0.awayTeam.id == "kiwoom" && $0.homeTeam.id == "lg" })
     }
 
+    // myTeamCalendarUsesLoadedOfficialMonthSchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func myTeamCalendarUsesLoadedOfficialMonthSchedule() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
         let schedule = try KBODataMapper.mapGames(
@@ -12592,6 +13004,7 @@ struct kboScoreTests {
         })
     }
 
+    // scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection() async throws {
         let counter = FetchCounter()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
@@ -12613,6 +13026,7 @@ struct kboScoreTests {
         #expect(model.scheduleGames(on: referenceDate, filter: .myTeam).isEmpty)
     }
 
+    // scheduleInitialMonthLoadShowsLoadingBeforeEmptyState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadShowsLoadingBeforeEmptyState() async throws {
         let gate = ScheduleFetchGate()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
@@ -12643,6 +13057,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedGamesContentState == .loadedEmpty)
     }
 
+    // scheduleInitialMonthLoadWithGamesShowsLoadedState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadWithGamesShowsLoadedState() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
         let teams = MockKBOData.makeBootstrap().teams
@@ -12676,6 +13091,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedGamesContentState == .loaded)
     }
 
+    // scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState() async throws {
         let gate = ScheduleFetchGate()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -12721,6 +13137,7 @@ struct kboScoreTests {
         await refreshTask.value
     }
 
+    // failedScheduleInitialLoadDoesNotStayLoading 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func failedScheduleInitialLoadDoesNotStayLoading() async throws {
         let gate = ScheduleFetchGate()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
@@ -12749,6 +13166,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedGamesContentState == .loadedEmpty)
     }
 
+    // scheduleDayLoadUsesLocalCacheForPastCompletedDate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDayLoadUsesLocalCacheForPastCompletedDate() async throws {
         let dayFetchCounter = FetchCounter()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -12789,6 +13207,7 @@ struct kboScoreTests {
         #expect(await dayFetchCounter.value == 0)
     }
 
+    // scheduleDayLoadFetchesTodayOnly 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDayLoadFetchesTodayOnly() async throws {
         let dayFetchCounter = FetchCounter()
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -12827,6 +13246,7 @@ struct kboScoreTests {
         #expect(await dayFetchCounter.value == 1)
     }
 
+    // staleScheduleResolverTreatsPastScheduledGameAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverTreatsPastScheduledGameAsStale() throws {
         let fixture = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-12")
 
@@ -12837,6 +13257,7 @@ struct kboScoreTests {
         ))
     }
 
+    // staleScheduleResolverTreatsPastUnknownMappedGameAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverTreatsPastUnknownMappedGameAsStale() throws {
         let status = KBODataMapper.mapGameStatus(code: "unknown", text: nil)
         let fixture = try makeStaleScheduleFixture(status: status, day: "2026-03-12")
@@ -12849,6 +13270,7 @@ struct kboScoreTests {
         ))
     }
 
+    // staleScheduleResolverTreatsPastLiveGameAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverTreatsPastLiveGameAsStale() throws {
         let fixture = try makeStaleScheduleFixture(status: .live, day: "2026-03-12")
 
@@ -12859,6 +13281,7 @@ struct kboScoreTests {
         ))
     }
 
+    // staleScheduleResolverDoesNotTreatPastFinalGameAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverDoesNotTreatPastFinalGameAsStale() throws {
         let fixture = try makeStaleScheduleFixture(status: .final, day: "2026-03-12")
 
@@ -12869,6 +13292,7 @@ struct kboScoreTests {
         ) == false)
     }
 
+    // staleScheduleResolverDoesNotTreatPastCancelledOrPostponedGameAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverDoesNotTreatPastCancelledOrPostponedGameAsStale() throws {
         let cancelled = try makeStaleScheduleFixture(status: .cancelled, day: "2026-03-12")
         let postponedStatus = KBODataMapper.mapGameStatus(code: "postponed", text: nil)
@@ -12887,6 +13311,7 @@ struct kboScoreTests {
         ) == false)
     }
 
+    // staleScheduleResolverDoesNotTreatTodayOrFutureGamesAsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverDoesNotTreatTodayOrFutureGamesAsStale() throws {
         let todayScheduled = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-13")
         let todayLive = try makeStaleScheduleFixture(status: .live, day: "2026-03-13")
@@ -12909,6 +13334,7 @@ struct kboScoreTests {
         ) == false)
     }
 
+    // staleScheduleResolverDeduplicatesMultipleGamesOnSameDate 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverDeduplicatesMultipleGamesOnSameDate() throws {
         let first = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-12")
         let second = try makeStaleScheduleFixture(status: .live, day: "2026-03-12", id: UUID())
@@ -12922,6 +13348,7 @@ struct kboScoreTests {
         #expect(dates == ["2026-03-12"])
     }
 
+    // staleScheduleResolverSortsDatesNewestFirst 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func staleScheduleResolverSortsDatesNewestFirst() throws {
         let oldest = try makeStaleScheduleFixture(status: .upcoming, day: "2026-03-09")
         let newest = try makeStaleScheduleFixture(status: .live, day: "2026-03-12")
@@ -12936,6 +13363,7 @@ struct kboScoreTests {
         #expect(dates == ["2026-03-12", "2026-03-10", "2026-03-09"])
     }
 
+    // schedulePullToRefreshPreflightFreshDataSkipsBackendReconciliation 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightFreshDataSkipsBackendReconciliation() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -12993,6 +13421,7 @@ struct kboScoreTests {
         #expect(model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: pastDate)).first?.status == .final)
     }
 
+    // schedulePullToRefreshCallsBackendOnlyForDatesStillStaleAfterPreflight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshCallsBackendOnlyForDatesStillStaleAfterPreflight() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13032,6 +13461,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.first?.status == .final)
     }
 
+    // schedulePullToRefreshPreflightOverlayPreservesFullMonthGameCount 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightOverlayPreservesFullMonthGameCount() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-05-22T09:00:00+09:00")!
         let staleDate = ISO8601DateFormatter().date(from: "2026-05-21T18:30:00+09:00")!
@@ -13104,6 +13534,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.allSatisfy { $0.status == .final })
     }
 
+    // schedulePullToRefreshPreflightOverlayUpdatesMatchesAndInsertsMissingGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightOverlayUpdatesMatchesAndInsertsMissingGames() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13142,6 +13573,7 @@ struct kboScoreTests {
         #expect(monthSnapshot.contains { $0.id == unrelatedGame.id })
     }
 
+    // schedulePullToRefreshPreflightRecomputesStaleFromOverlaidDateGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightRecomputesStaleFromOverlaidDateGames() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13176,6 +13608,7 @@ struct kboScoreTests {
         #expect(model.currentScheduleMonthSnapshot(for: KBOMonthScheduleKey(date: pastDate)).count == 2)
     }
 
+    // schedulePullToRefreshSendsOnlyNewestThreeStaleDates 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshSendsOnlyNewestThreeStaleDates() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let teams = MockKBOData.makeBootstrap().teams
@@ -13222,6 +13655,7 @@ struct kboScoreTests {
         #expect(await Array(dateFetchRecorder.calls.map { $0.dayKey }.prefix(3)) == ["2026-03-12", "2026-03-11", "2026-03-10"])
     }
 
+    // schedulePullToRefreshPreservesUnrelatedDatesAfterPostReconciliationRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreservesUnrelatedDatesAfterPostReconciliationRefresh() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13260,6 +13694,7 @@ struct kboScoreTests {
         #expect(monthSnapshot.contains { $0.id == freshGame.id && $0.status == .final })
     }
 
+    // schedulePullToRefreshDoesNotCallReconciliationWhenNoStalePastGamesExist 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshDoesNotCallReconciliationWhenNoStalePastGamesExist() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13298,6 +13733,7 @@ struct kboScoreTests {
         #expect(await fetchSequence.count == 1)
     }
 
+    // schedulePullToRefreshKeepsExistingDataWhenReconciliationFailsAfterPreflight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshKeepsExistingDataWhenReconciliationFailsAfterPreflight() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13326,6 +13762,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.first?.status == .upcoming)
     }
 
+    // schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13353,6 +13790,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.first?.status == .upcoming)
     }
 
+    // schedulePullToRefreshSkipsRecentlyReconciledDatesWhileForceRefreshIsRunning 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshSkipsRecentlyReconciledDatesWhileForceRefreshIsRunning() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13383,6 +13821,7 @@ struct kboScoreTests {
         #expect(await reconciliationClient.calls == [["2026-03-12"]])
     }
 
+    // schedulePullToRefreshDoesNotStartDuplicateReconciliationWhileInFlight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshDoesNotStartDuplicateReconciliationWhileInFlight() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
         let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
@@ -13421,6 +13860,7 @@ struct kboScoreTests {
         #expect(await reconciliationClient.calls == [["2026-03-12"]])
     }
 
+    // scheduleMonthOverlayKeepsFullMonthWhenMergingTodayRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthOverlayKeepsFullMonthWhenMergingTodayRefresh() async throws {
         let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
         let fullMonthGames = try makeScheduleMonthGames()
@@ -13439,6 +13879,7 @@ struct kboScoreTests {
         #expect(Set(mergedGames.map(\.id)).count == 135)
     }
 
+    // scheduleMonthOverlayUpdatesMatchingGamesWithoutDroppingOtherDates 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthOverlayUpdatesMatchingGamesWithoutDroppingOtherDates() async throws {
         let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
         let fullMonthGames = try makeScheduleMonthGames()
@@ -13463,6 +13904,7 @@ struct kboScoreTests {
         #expect(mergedGames.contains { $0.id == untouchedGame.id })
     }
 
+    // scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth() async throws {
         let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
         let mayKey = KBOMonthScheduleKey(year: 2026, month: 5)
@@ -13485,6 +13927,7 @@ struct kboScoreTests {
         #expect(viewModel.monthGameCount == 135)
     }
 
+    // scheduleMonthCachePreservesMayWhenSwitchingAwayAndBackAfterPartialSync 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthCachePreservesMayWhenSwitchingAwayAndBackAfterPartialSync() async throws {
         let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
         let fullMayGames = try makeScheduleMonthGames()
@@ -13522,6 +13965,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.count == 5)
     }
 
+    // scheduleSelectedDateGamesUseFullMonthAfterPartialRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleSelectedDateGamesUseFullMonthAfterPartialRefresh() async throws {
         let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
         let fullMonthGames = try makeScheduleMonthGames()
@@ -13544,6 +13988,7 @@ struct kboScoreTests {
         #expect(viewModel.selectedDateGames.allSatisfy { $0.status == .final })
     }
 
+    // scheduleMonthOverlayIgnoresIncomingGamesOutsideSelectedMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleMonthOverlayIgnoresIncomingGamesOutsideSelectedMonth() async throws {
         let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
         let fullMonthGames = try makeScheduleMonthGames()
@@ -13560,6 +14005,7 @@ struct kboScoreTests {
         #expect(mergedGames.contains { $0.id == juneGame.id } == false)
     }
 
+    // backendScheduleStaleGameReconciliationClientPostsExpectedEndpoint 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func backendScheduleStaleGameReconciliationClientPostsExpectedEndpoint() async throws {
         let session = makeStubSession()
         let client = BackendScheduleStaleGameReconciliationClient(baseURL: URL(string: "http://192.168.45.140:8088")!, session: session)
@@ -13587,6 +14033,7 @@ struct kboScoreTests {
         #expect(payload?["dates"] as? [String] == ["2026-03-12"])
     }
 
+    // scheduleStaleReconciliationResolverPrefersConfiguredLANBackendURL 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleStaleReconciliationResolverPrefersConfiguredLANBackendURL() throws {
         let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
             backendEnvironmentValue: "http://192.168.45.140:8088",
@@ -13599,6 +14046,7 @@ struct kboScoreTests {
         #expect(resolved.url.absoluteString == "http://192.168.45.140:8088")
     }
 
+    // scheduleStaleReconciliationResolverDerivesBackendURLFromNotificationEndpoint 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleStaleReconciliationResolverDerivesBackendURLFromNotificationEndpoint() throws {
         let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
             backendEnvironmentValue: nil,
@@ -13611,6 +14059,7 @@ struct kboScoreTests {
         #expect(resolved.url.absoluteString == "http://192.168.45.140:8088/")
     }
 
+    // scheduleStaleReconciliationResolverUsesLocalhostFallbackOnlyWithoutConfiguration 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleStaleReconciliationResolverUsesLocalhostFallbackOnlyWithoutConfiguration() throws {
         let resolved = try #require(ScheduleStaleGameReconciliationClientFactory.resolveBaseURL(
             backendEnvironmentValue: nil,
@@ -13623,6 +14072,7 @@ struct kboScoreTests {
         #expect(resolved.url.absoluteString == "http://localhost:8088")
     }
 
+    // scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
         let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
@@ -13650,6 +14100,7 @@ struct kboScoreTests {
         #expect(model.scheduleDebugSummary(for: referenceDate)?.contains("실데이터 URL 없음") == true)
     }
 
+    // scheduleDebugSummaryReflectsLiveMonthlyScheduleSource 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDebugSummaryReflectsLiveMonthlyScheduleSource() async throws {
         let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
         let runtimeState = RepositoryRuntimeState(
@@ -13682,6 +14133,7 @@ struct kboScoreTests {
         #expect(model.scheduleDebugSummary(for: referenceDate)?.contains("표시 실시간 응답") == true)
     }
 
+    // scheduleCalendarUsesBackendMonthResponseShapeAndProducesDayMarkers 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleCalendarUsesBackendMonthResponseShapeAndProducesDayMarkers() async throws {
         let backendMonthlyPayload = try makeBackendMonthPayloadJSON()
         let session = makeStubSession()
@@ -13729,6 +14181,7 @@ struct kboScoreTests {
         #expect(markerDays.isEmpty == false)
     }
 
+    // repositoryFactoryWithoutSupabaseConfigKeepsExistingRuntimeDefaults 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repositoryFactoryWithoutSupabaseConfigKeepsExistingRuntimeDefaults() async throws {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle(
             configuration: AppRepositoryConfiguration(
@@ -13742,6 +14195,7 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == nil)
     }
 
+    // supabaseMapperDecodesRowsIntoExistingGameModels 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseMapperDecodesRowsIntoExistingGameModels() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
@@ -13802,6 +14256,7 @@ struct kboScoreTests {
         #expect(components.minute == 30)
     }
 
+    // supabaseMapperTreatsValidKBOGameDateAsRegularSeasonWithoutNumericProviderGameID 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseMapperTreatsValidKBOGameDateAsRegularSeasonWithoutNumericProviderGameID() throws {
         let awayTeamID = UUID(uuidString: "44444444-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "55555555-2222-2222-2222-222222222222")!
@@ -13847,6 +14302,7 @@ struct kboScoreTests {
         #expect(game.status == .upcoming)
     }
 
+    // supabaseMapperPreservesExplicitPreseasonMarker 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseMapperPreservesExplicitPreseasonMarker() throws {
         let awayTeamID = UUID(uuidString: "77777777-1111-1111-1111-111111111111")!
         let homeTeamID = UUID(uuidString: "88888888-2222-2222-2222-222222222222")!
@@ -13890,6 +14346,7 @@ struct kboScoreTests {
         #expect(game.seasonClassification == .exhibitionPreseason)
     }
 
+    // supabaseMapperPreservesExplicitPostseasonMarker 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseMapperPreservesExplicitPostseasonMarker() throws {
         let awayTeamID = UUID(uuidString: "aaaaaaaa-4444-4444-4444-444444444444")!
         let homeTeamID = UUID(uuidString: "bbbbbbbb-5555-5555-5555-555555555555")!
@@ -13933,6 +14390,7 @@ struct kboScoreTests {
         #expect(game.seasonClassification == .postseason)
     }
 
+    // supabaseTeamRowDecodesLegacyTeamCodeColumn 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseTeamRowDecodesLegacyTeamCodeColumn() throws {
         let teamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let row = try JSONDecoder().decode(
@@ -13955,6 +14413,7 @@ struct kboScoreTests {
         #expect(row.shortName == "LG")
     }
 
+    // standingsContentStateSelectsExpectedDisplayBranch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsContentStateSelectsExpectedDisplayBranch() throws {
         let team = try #require(MockKBOData.makeBootstrap().teams.first)
         let snapshot = TeamStandingsSnapshot(
@@ -14001,6 +14460,7 @@ struct kboScoreTests {
         }
     }
 
+    // standingsTabRendersLocalTeamRankRowsImmediately 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsTabRendersLocalTeamRankRowsImmediately() async throws {
         let state = TeamRankFlowState(localRanks: sampleTeamRankRows())
         let repository = TeamRankFlowRepository(state: state)
@@ -14018,6 +14478,7 @@ struct kboScoreTests {
         #expect(await state.remoteFetchCount == 0)
     }
 
+    // standingsTabUsesCachedRankRowsWithoutStandingsSourceFetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsTabUsesCachedRankRowsWithoutStandingsSourceFetch() async throws {
         let fixture = try makeStandingsMovementFixture()
         let staleRankRows = sampleTeamRankRows(
@@ -14059,6 +14520,7 @@ struct kboScoreTests {
         #expect(fallingSnapshot.rankMovement.displayText == "-")
     }
 
+    // cachedRankRowsDoNotStartBackgroundStandingsSourceLoad 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRankRowsDoNotStartBackgroundStandingsSourceLoad() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -14094,6 +14556,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
+    // cachedRankRowsDoNotChangeRevisionFromBackgroundSourceArrival 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func cachedRankRowsDoNotChangeRevisionFromBackgroundSourceArrival() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -14131,6 +14594,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.rankMovement.displayText == "-")
     }
 
+    // repeatedStandingsAppearDoesNotStartStandingsSourceFetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func repeatedStandingsAppearDoesNotStartStandingsSourceFetch() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -14165,6 +14629,7 @@ struct kboScoreTests {
         #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
+    // manualStandingsRefreshUsesRemoteRankRowsWithoutSourceGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func manualStandingsRefreshUsesRemoteRankRowsWithoutSourceGames() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -14202,6 +14667,7 @@ struct kboScoreTests {
         #expect(ssgSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
+    // launchDoesNotPrefetchStandingsSourceWhenRankRowsExist 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func launchDoesNotPrefetchStandingsSourceWhenRankRowsExist() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let state = TeamRankFlowState(
@@ -14246,6 +14712,7 @@ struct kboScoreTests {
         #expect(doosanAfterAppear.rankMovement.displayText == "-")
     }
 
+    // standingsAppearDoesNotJoinLaunchStandingsSourcePrefetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsAppearDoesNotJoinLaunchStandingsSourcePrefetch() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let currentRanks = currentStandingsRanks(
@@ -14278,6 +14745,7 @@ struct kboScoreTests {
         #expect(doosanSnapshot.rankMovement == RankingMovement.unchanged)
     }
 
+    // rankRowsDoNotUseStandingsSourceOrGeneralGamesFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func rankRowsDoNotUseStandingsSourceOrGeneralGamesFallback() async throws {
         let fixture = try makeDoosanSSGStandingsMovementFixture()
         let state = TeamRankFlowState(
@@ -14311,6 +14779,7 @@ struct kboScoreTests {
         #expect(await state.generalGamesFetchCount == 0)
     }
 
+    // standingsTabAutoFetchesTeamRankViewWhenLocalRankCacheIsEmpty 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsTabAutoFetchesTeamRankViewWhenLocalRankCacheIsEmpty() async throws {
         let state = TeamRankFlowState(localRanks: [], remoteRanks: sampleTeamRankRows())
         let repository = TeamRankFlowRepository(state: state)
@@ -14329,6 +14798,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
     }
 
+    // simultaneousStandingsBootstrapCoalescesTeamRankRemoteFetch 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func simultaneousStandingsBootstrapCoalescesTeamRankRemoteFetch() async throws {
         let gate = RankFetchGate()
         let state = TeamRankFlowState(
@@ -14361,6 +14831,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.map(\.rank).prefix(2) == [1, 2])
     }
 
+    // manualStandingsRefreshFetchesTeamRankViewAndUpdatesLocalCache 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func manualStandingsRefreshFetchesTeamRankViewAndUpdatesLocalCache() async throws {
         let state = TeamRankFlowState(
             localRanks: [sampleTeamRankRows()[1]],
@@ -14382,6 +14853,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.first?.team.id == "lg")
     }
 
+    // standingsAreNotClearedWhileTeamRankRefreshIsRunning 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func standingsAreNotClearedWhileTeamRankRefreshIsRunning() async throws {
         let gate = RankFetchGate()
         let state = TeamRankFlowState(
@@ -14408,6 +14880,7 @@ struct kboScoreTests {
         await refreshTask.value
     }
 
+    // emptyTeamRankViewFallsBackToGamesBasedStandingsCalculation 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func emptyTeamRankViewFallsBackToGamesBasedStandingsCalculation() async throws {
         let teams = MockKBOData.makeBootstrap().teams
         let lg = try #require(teams.first { $0.id == "lg" })
@@ -14439,6 +14912,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.first?.wins == 1)
     }
 
+    // teamRankFetchFailureWithEmptyLocalCacheFallsBackToGamesBasedStandingsCalculation 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func teamRankFetchFailureWithEmptyLocalCacheFallsBackToGamesBasedStandingsCalculation() async throws {
         let teams = MockKBOData.makeBootstrap().teams
         let lg = try #require(teams.first { $0.id == "lg" })
@@ -14475,6 +14949,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.first?.wins == 1)
     }
 
+    // teamRankFetchFailureKeepsExistingLocalRanksVisible 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func teamRankFetchFailureKeepsExistingLocalRanksVisible() async throws {
         let state = TeamRankFlowState(
             localRanks: sampleTeamRankRows(),
@@ -14495,6 +14970,7 @@ struct kboScoreTests {
         #expect(model.standingsSnapshots.count == 2)
     }
 
+    // supabaseSnakeCaseColumnsDecodeIntoTeamRankRow 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseSnakeCaseColumnsDecodeIntoTeamRankRow() throws {
         let teamID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
         let rows = try JSONDecoder().decode(
@@ -14539,6 +15015,7 @@ struct kboScoreTests {
         #expect(row.createdAt != nil)
     }
 
+    // teamRankRowsRenderSortedByRankAscending 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func teamRankRowsRenderSortedByRankAscending() async throws {
         let state = TeamRankFlowState(localRanks: Array(sampleTeamRankRows().reversed()))
         let repository = TeamRankFlowRepository(state: state)
@@ -14557,6 +15034,7 @@ struct kboScoreTests {
 
 }
 
+// sampleTeamRankRows 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleTeamRankRows() -> [TeamRankRow] {
     [
         TeamRankRow(
@@ -14594,6 +15072,7 @@ private func sampleTeamRankRows() -> [TeamRankRow] {
     ]
 }
 
+// sampleTeamRankRows 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleTeamRankRows(teams: [Team], ranks: [String: Int]) -> [TeamRankRow] {
     teams
         .compactMap { team -> TeamRankRow? in
@@ -14624,6 +15103,7 @@ private actor RankFetchGate {
     private var didStart = false
     private var didRelease = false
 
+    // wait 메서드는 이 타입의 주요 동작을 수행합니다.
     func wait() async {
         didStart = true
         startedContinuation?.resume()
@@ -14634,6 +15114,7 @@ private actor RankFetchGate {
         }
     }
 
+    // waitUntilStarted 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitUntilStarted() async {
         guard didStart == false else { return }
         await withCheckedContinuation { continuation in
@@ -14641,6 +15122,7 @@ private actor RankFetchGate {
         }
     }
 
+    // release 메서드는 이 타입의 주요 동작을 수행합니다.
     func release() {
         didRelease = true
         releaseContinuation?.resume()
@@ -14660,6 +15142,7 @@ private actor TeamRankFlowState {
     private(set) var standingsSourceFetchCount = 0
     private(set) var generalGamesFetchCount = 0
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         localRanks: [TeamRankRow],
         remoteRanks: [TeamRankRow] = [],
@@ -14680,10 +15163,12 @@ private actor TeamRankFlowState {
         localRanks.count
     }
 
+    // fetchLocalRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchLocalRanks(season: Int) -> [TeamRankRow] {
         localRanks.filter { $0.season == season }.sorted { $0.rank < $1.rank }
     }
 
+    // replaceLocalRanks 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func replaceLocalRanks(_ ranks: [TeamRankRow], season: Int) -> Int {
         localRanks.removeAll { $0.season == season }
         localRanks.append(contentsOf: ranks)
@@ -14691,6 +15176,7 @@ private actor TeamRankFlowState {
         return ranks.count
     }
 
+    // fetchRemoteRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchRemoteRanks(season: Int) async throws -> [TeamRankRow] {
         remoteFetchCount += 1
         if let gate {
@@ -14702,6 +15188,7 @@ private actor TeamRankFlowState {
         return remoteRanks.filter { $0.season == season }.sorted { $0.rank < $1.rank }
     }
 
+    // fetchStandingsSource 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchStandingsSource(season: Int) async -> [GameDetail] {
         standingsSourceFetchCount += 1
         if let standingsSourceGate {
@@ -14710,55 +15197,68 @@ private actor TeamRankFlowState {
         return standingsGames
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchGames() -> [GameDetail] {
         generalGamesFetchCount += 1
         return []
     }
 }
 
+// TeamRankFlowRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct TeamRankFlowRepository: KBORepository, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOStandingsGameDataSource, Sendable {
     let state: TeamRankFlowState
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         MockKBOData.makeBootstrap()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         await state.fetchGames()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         []
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         []
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         []
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         []
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         []
     }
 
+    // fetchTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
         try await state.fetchRemoteRanks(season: season)
     }
 
+    // fetchLocalTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow] {
         await state.fetchLocalRanks(season: season)
     }
 
+    // replaceLocalTeamRanks 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
         await state.replaceLocalRanks(ranks, season: season)
     }
 
+    // fetchStandingsSource 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
         await state.fetchStandingsSource(season: season)
     }
@@ -14768,58 +15268,71 @@ private actor RepositoryCallTracker {
     private(set) var bootstrapFetchCount = 0
     private(set) var monthlyScheduleFetchCount = 0
 
+    // recordBootstrapFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordBootstrapFetch() {
         bootstrapFetchCount += 1
     }
 
+    // recordMonthlyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordMonthlyScheduleFetch() {
         monthlyScheduleFetchCount += 1
     }
 }
 
+// TrackingKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct TrackingKBORepository<Base: KBORepository>: KBORepository, Sendable {
     let base: Base
     let tracker: RepositoryCallTracker
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         await tracker.recordBootstrapFetch()
         return try await base.fetchBootstrapData()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await base.fetchGames()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await base.fetchNotifications()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         await tracker.recordMonthlyScheduleFetch()
         return try await base.fetchMonthlySchedule(for: month)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
     }
 }
 
+// StaticSupabaseSource 구조체는 StaticSupabaseSource 타입의 역할과 값을 정의합니다.
 private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
     let teamRows: [SupabaseTeamRow]
     let gameRows: [SupabaseGameRow]
 
+    // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         teamRows
     }
 
+    // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int {
         gameRows.count
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
         gameRows.filter { row in
             guard let providerGameID = row.providerGameID else { return true }
@@ -14827,26 +15340,32 @@ private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGamesForStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
         Array(gameRows.filter { row in
             switch lookup {
@@ -14871,10 +15390,12 @@ private struct StaticSupabaseSource: SupabaseKBOReading, Sendable {
         }.prefix(1))
     }
 
+    // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
         []
     }
 
+    // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         nil
     }
@@ -14889,35 +15410,43 @@ private actor DetailFetchTracker {
     private(set) var pitcherRecordGameIDs: [UUID] = []
     private(set) var eventRecordGameIDs: [UUID] = []
 
+    // recordSingleLookup 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordSingleLookup(_ lookup: SupabaseGameLookup) {
         singleLookups.append(lookup)
     }
 
+    // recordDateFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordDateFetch() {
         dateFetches += 1
     }
 
+    // recordTeamFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordTeamFetch() {
         teamFetches += 1
     }
 
+    // recordLatestSnapshotFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordLatestSnapshotFetch(gameID: UUID) {
         latestSnapshotGameIDs.append(gameID)
     }
 
+    // recordBatterRecordFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordBatterRecordFetch(gameID: UUID) {
         batterRecordGameIDs.append(gameID)
     }
 
+    // recordPitcherRecordFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordPitcherRecordFetch(gameID: UUID) {
         pitcherRecordGameIDs.append(gameID)
     }
 
+    // recordEventRecordFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordEventRecordFetch(gameID: UUID) {
         eventRecordGameIDs.append(gameID)
     }
 }
 
+// TrackingSupabaseSource 구조체는 TrackingSupabaseSource 타입의 역할과 값을 정의합니다.
 private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
     let teamRows: [SupabaseTeamRow]
     let gameRows: [SupabaseGameRow]
@@ -14926,6 +15455,7 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
     let pitcherRows: [SupabaseGamePitcherRecordRow]
     let eventRows: [SupabaseGameEventRow]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         teamRows: [SupabaseTeamRow],
         gameRows: [SupabaseGameRow],
@@ -14942,19 +15472,23 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         self.eventRows = eventRows
     }
 
+    // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         await tracker.recordTeamFetch()
         return teamRows
     }
 
+    // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int {
         gameRows.count
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
         gameRows.filter { row in
             guard let providerGameID = row.providerGameID else { return true }
@@ -14962,28 +15496,34 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
         await tracker.recordDateFetch()
         return gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
         await tracker.recordDateFetch()
         return gameRows
     }
 
+    // fetchGamesForStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
         gameRows
     }
 
+    // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
         await tracker.recordSingleLookup(lookup)
         return Array(gameRows.filter { row in
@@ -15009,15 +15549,18 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         }.prefix(1))
     }
 
+    // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
         []
     }
 
+    // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         await tracker.recordLatestSnapshotFetch(gameID: gameID)
         return nil
     }
 
+    // fetchGameBatterRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
         await tracker.recordBatterRecordFetch(gameID: gameID)
         return await MainActor.run {
@@ -15025,6 +15568,7 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGamePitcherRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
         await tracker.recordPitcherRecordFetch(gameID: gameID)
         return await MainActor.run {
@@ -15032,6 +15576,7 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGameEvents 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
         await tracker.recordEventRecordFetch(gameID: gameID)
         return await MainActor.run {
@@ -15046,18 +15591,22 @@ private actor ScheduleSyncTestTracker {
     private(set) var monthlyScheduleFetches = 0
     private(set) var dailyScheduleFetches = 0
 
+    // recordRemoteCountCheck 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordRemoteCountCheck() {
         remoteCountChecks += 1
     }
 
+    // recordMissingFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordMissingFetch() {
         missingFetches += 1
     }
 
+    // recordMonthlyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordMonthlyScheduleFetch() {
         monthlyScheduleFetches += 1
     }
 
+    // recordDailyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordDailyScheduleFetch() {
         dailyScheduleFetches += 1
     }
@@ -15068,36 +15617,44 @@ private actor ScheduleTabMonthTestTracker {
     private(set) var monthlyScheduleFetches = 0
     private(set) var dailyScheduleFetches = 0
 
+    // recordScheduleTabMonthFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordScheduleTabMonthFetch() {
         scheduleTabMonthFetches += 1
     }
 
+    // recordMonthlyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordMonthlyScheduleFetch() {
         monthlyScheduleFetches += 1
     }
 
+    // recordDailyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordDailyScheduleFetch() {
         dailyScheduleFetches += 1
     }
 }
 
+// ScheduleTabMonthTestRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct ScheduleTabMonthTestRepository: KBORepository, KBOScheduleTabMonthDataSource, Sendable {
     let bootstrap: KBOBootstrapData
     let scheduleTabGames: [GameDetail]
     let tracker: ScheduleTabMonthTestTracker
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         bootstrap
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         bootstrap.games
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         bootstrap.notifications
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         await tracker.recordMonthlyScheduleFetch()
         return bootstrap.games.filter {
@@ -15105,6 +15662,7 @@ private struct ScheduleTabMonthTestRepository: KBORepository, KBOScheduleTabMont
         }
     }
 
+    // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchScheduleTabMonth(
         for month: KBOMonthScheduleKey,
         bypassingCache _: Bool
@@ -15115,21 +15673,25 @@ private struct ScheduleTabMonthTestRepository: KBORepository, KBOScheduleTabMont
         }
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         await tracker.recordDailyScheduleFetch()
         let calendar = Calendar(identifier: .gregorian)
         return bootstrap.games.filter { calendar.isDate($0.scheduledStart, inSameDayAs: date) }
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache _: Bool) async throws -> [GameDetail] {
         try await fetchSchedule(for: date)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         []
     }
 }
 
+// ScheduleSyncTestRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct ScheduleSyncTestRepository: KBORepository, KBOScheduleRemoteSyncDataSource, Sendable {
     let bootstrap: KBOBootstrapData
     let remoteCount: Int
@@ -15137,18 +15699,22 @@ private struct ScheduleSyncTestRepository: KBORepository, KBOScheduleRemoteSyncD
     let todayGames: [GameDetail]
     let tracker: ScheduleSyncTestTracker
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         bootstrap
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         bootstrap.games
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         bootstrap.notifications
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         await tracker.recordMonthlyScheduleFetch()
         return bootstrap.games.filter { game in
@@ -15156,25 +15722,30 @@ private struct ScheduleSyncTestRepository: KBORepository, KBOScheduleRemoteSyncD
         }
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         await tracker.recordDailyScheduleFetch()
         let calendar = Calendar(identifier: .gregorian)
         return todayGames.filter { calendar.isDate($0.scheduledStart, inSameDayAs: date) }
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         try await fetchSchedule(for: date)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         []
     }
 
+    // fetchRemoteGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchRemoteGameCount() async throws -> Int {
         await tracker.recordRemoteCountCheck()
         return remoteCount
     }
 
+    // fetchMissingScheduleGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
         await tracker.recordMissingFetch()
         let knownAliases = Set(knownGames.flatMap(\.gameIdentityAliases))
@@ -15185,58 +15756,72 @@ private struct ScheduleSyncTestRepository: KBORepository, KBOScheduleRemoteSyncD
     }
 }
 
+// FailingSupabaseSource 구조체는 FailingSupabaseSource 타입의 역할과 값을 정의합니다.
 private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
     private let error = TestRepositoryError.supabaseUnavailable
 
+    // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         throw error
     }
 
+    // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGamesForStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
         throw error
     }
 
+    // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
         throw error
     }
 
+    // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         throw error
     }
 }
 
+// TestRepositoryError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 private enum TestRepositoryError: Error, Sendable {
     case supabaseUnavailable
 }
@@ -15246,10 +15831,12 @@ private actor RecordingBoxscoreState {
     private(set) var fetchCount = 0
     private(set) var requestedGameIDs: [String] = []
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(result: Result<GameBoxscoreResponse, Error>) {
         self.result = result
     }
 
+    // fetch 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetch(gameId: String) throws -> GameBoxscoreResponse {
         fetchCount += 1
         requestedGameIDs.append(gameId)
@@ -15263,11 +15850,13 @@ private actor RecordingOfficialFallback {
     private(set) var fetchCount = 0
     private(set) var requestedGameIDs: [String] = []
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(result: Result<GameCenterReview?, Error>, delayNanoseconds: UInt64 = 0) {
         self.result = result
         self.delayNanoseconds = delayNanoseconds
     }
 
+    // fetch 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetch(game: GameDetail) async throws -> GameCenterReview? {
         fetchCount += 1
         requestedGameIDs.append(game.publicGameID ?? game.officialGameCenterID ?? game.id.uuidString)
@@ -15283,11 +15872,13 @@ private actor RecordingDetailPayloadFetcher {
     private let delayNanoseconds: UInt64
     private(set) var fetchCount = 0
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(payload: GameCenterDetailPayload?, delayNanoseconds: UInt64 = 0) {
         self.payload = payload
         self.delayNanoseconds = delayNanoseconds
     }
 
+    // fetch 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetch(game: GameDetail) async throws -> GameCenterDetailPayload? {
         fetchCount += 1
         if delayNanoseconds > 0 {
@@ -15297,11 +15888,13 @@ private actor RecordingDetailPayloadFetcher {
     }
 }
 
+// RecordingBoxscoreClient 구조체는 외부 서비스나 시스템 기능 호출을 캡슐화합니다.
 private struct RecordingBoxscoreClient: GameBoxscoreFetching {
     let state: RecordingBoxscoreState
     var delayNanoseconds: UInt64 = 0
     var cacheIdentity: String = "recording"
 
+    // fetchGameBoxscore 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse {
         if delayNanoseconds > 0 {
             try await Task.sleep(nanoseconds: delayNanoseconds)
@@ -15314,14 +15907,17 @@ private final class BoxscoreURLProtocolStub: URLProtocol, @unchecked Sendable {
     static var testResponses: [String: StubResponse] = [:]
     static var lastRequest: URLRequest?
 
+    // canInit 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.port == 8088 && request.url?.path.hasSuffix("/boxscore") == true
     }
 
+    // canonicalRequest 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
         request
     }
 
+    // startLoading 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     override func startLoading() {
         Self.lastRequest = request
         guard let url = request.url, let response = Self.testResponses[url.absoluteString] else {
@@ -15341,15 +15937,18 @@ private final class BoxscoreURLProtocolStub: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    // stopLoading 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     override func stopLoading() {}
 }
 
+// makeBoxscoreStubSession 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBoxscoreStubSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [BoxscoreURLProtocolStub.self]
     return URLSession(configuration: configuration)
 }
 
+// sampleGameBoxscoreJSON 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleGameBoxscoreJSON() -> Data {
     Data(
         """
@@ -15463,6 +16062,7 @@ private func sampleGameBoxscoreJSON() -> Data {
     )
 }
 
+// makeBoxscoreDetailGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBoxscoreDetailGame() throws -> GameDetail {
     let teams = MockKBOData.makeBootstrap().teams
     let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -15481,6 +16081,7 @@ private func makeBoxscoreDetailGame() throws -> GameDetail {
     )
 }
 
+// makeLiveBoxscoreDetailGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeLiveBoxscoreDetailGame(
     status: GameStatus = .live,
     id: UUID = UUID(uuidString: "11111111-2222-3333-4444-555555555556")!,
@@ -15507,11 +16108,13 @@ private func makeLiveBoxscoreDetailGame(
     )
 }
 
+// SupabaseDetailedRecordFixture 구조체는 SupabaseDetailedRecordFixture 타입의 역할과 값을 정의합니다.
 private struct SupabaseDetailedRecordFixture {
     let game: GameDetail
     let awayTeamID: UUID
     let homeTeamID: UUID
 
+    // batter 메서드는 이 타입의 주요 동작을 수행합니다.
     func batter(
         name: String,
         teamID: UUID,
@@ -15551,6 +16154,7 @@ private struct SupabaseDetailedRecordFixture {
         )
     }
 
+    // pitcher 메서드는 이 타입의 주요 동작을 수행합니다.
     func pitcher(
         name: String,
         teamID: UUID,
@@ -15592,6 +16196,7 @@ private struct SupabaseDetailedRecordFixture {
     }
 }
 
+// makeSupabaseDetailedRecordFixture 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeSupabaseDetailedRecordFixture() throws -> SupabaseDetailedRecordFixture {
     SupabaseDetailedRecordFixture(
         game: try makeLiveBoxscoreDetailGame(),
@@ -15600,6 +16205,7 @@ private func makeSupabaseDetailedRecordFixture() throws -> SupabaseDetailedRecor
     )
 }
 
+// makeSampleDatabaseRecordReview 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 @MainActor
 private func makeSampleDatabaseRecordReview(game: GameDetail) throws -> GameCenterReview {
     let fixture = SupabaseDetailedRecordFixture(
@@ -15621,6 +16227,7 @@ private func makeSampleDatabaseRecordReview(game: GameDetail) throws -> GameCent
     ))
 }
 
+// makeIdentityLookupGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeIdentityLookupGame(
     id: UUID,
     publicGameID: String,
@@ -15649,11 +16256,13 @@ private func makeIdentityLookupGame(
     )
 }
 
+// IdentityFallbackSupabaseFixture 구조체는 IdentityFallbackSupabaseFixture 타입의 역할과 값을 정의합니다.
 private struct IdentityFallbackSupabaseFixture {
     let tracker: DetailFetchTracker
     let supabaseSource: TrackingSupabaseSource
 }
 
+// makeIdentityFallbackSupabaseSource 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeIdentityFallbackSupabaseSource(
     publicGameID: String,
     providerGameID: String,
@@ -15691,6 +16300,7 @@ private func makeIdentityFallbackSupabaseSource(
     )
 }
 
+// supabaseTeamUUID 메서드는 이 타입의 주요 동작을 수행합니다.
 private func supabaseTeamUUID(for code: String) -> UUID {
     switch code {
     case "lg":
@@ -15710,6 +16320,7 @@ private func supabaseTeamUUID(for code: String) -> UUID {
     }
 }
 
+// supabaseTeamRow 메서드는 이 타입의 주요 동작을 수행합니다.
 private func supabaseTeamRow(code: String, id: UUID) -> SupabaseTeamRow {
     switch code {
     case "lg":
@@ -15729,6 +16340,7 @@ private func supabaseTeamRow(code: String, id: UUID) -> SupabaseTeamRow {
     }
 }
 
+// supabaseGameDate 메서드는 이 타입의 주요 동작을 수행합니다.
 private func supabaseGameDate(from publicGameID: String) -> String {
     let compactDate = String(publicGameID.prefix(8))
     guard compactDate.count == 8 else { return "2026-01-01" }
@@ -15740,6 +16352,7 @@ private func supabaseGameDate(from publicGameID: String) -> String {
     return "\(year)-\(month)-\(day)"
 }
 
+// sampleGameCenterDetailPayload 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleGameCenterDetailPayload(
     game: GameDetail,
     lineScore: GameCenterLineScore? = nil,
@@ -15775,6 +16388,7 @@ private func sampleGameCenterDetailPayload(
     )
 }
 
+// sampleGameCenterLineScore 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleGameCenterLineScore() -> GameCenterLineScore {
     GameCenterLineScore(
         inningLabels: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
@@ -15785,6 +16399,7 @@ private func sampleGameCenterLineScore() -> GameCenterLineScore {
     )
 }
 
+// sampleOfficialFallbackReview 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleOfficialFallbackReview() -> GameCenterReview {
     GameCenterReview(
         summaryItems: [],
@@ -15812,6 +16427,7 @@ private func sampleOfficialFallbackReview() -> GameCenterReview {
     )
 }
 
+// sampleKeyplayerLimitedReview 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleKeyplayerLimitedReview() -> GameCenterReview {
     GameCenterReview(
         summaryItems: [],
@@ -15840,6 +16456,7 @@ private func sampleKeyplayerLimitedReview() -> GameCenterReview {
     )
 }
 
+// sampleLineupLimitedReview 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleLineupLimitedReview() -> GameCenterReview {
     GameCenterReview(
         summaryItems: [],
@@ -15868,6 +16485,7 @@ private func sampleLineupLimitedReview() -> GameCenterReview {
     )
 }
 
+// sampleDatabaseRecordReview 메서드는 이 타입의 주요 동작을 수행합니다.
 private func sampleDatabaseRecordReview(
     game: GameDetail,
     batterCount: Int,
@@ -15954,28 +16572,34 @@ private actor RecordingNotificationRegistrationClient: NotificationRegistrationC
         "https://example.com/devices/register"
     }
 
+    // syncRegistration 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     nonisolated func syncRegistration(_ payload: NotificationRegistrationPayload) async throws -> NotificationRegistrationSyncStatus {
         await record(payload)
         return .synced
     }
 
+    // record 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func record(_ payload: NotificationRegistrationPayload) {
         payloads.append(payload)
     }
 
+    // requestCount 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func requestCount() -> Int {
         payloads.count
     }
 
+    // favoriteTeamIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     func favoriteTeamIDs() -> [String?] {
         payloads.map(\.favoriteTeamID)
     }
 
+    // recordedPayloads 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func recordedPayloads() -> [NotificationRegistrationPayload] {
         payloads
     }
 }
 
+// notificationRegistrationSettings 메서드는 이 타입의 주요 동작을 수행합니다.
 private func notificationRegistrationSettings(
     favoriteTeamID: String?,
     preferences: NotificationPreferences = NotificationPreferences()
@@ -15990,6 +16614,7 @@ private func notificationRegistrationSettings(
     )
 }
 
+// disabledNotificationPreferences 메서드는 이 타입의 주요 동작을 수행합니다.
 private func disabledNotificationPreferences() -> NotificationPreferences {
     NotificationPreferences(
         gameStart: false,
@@ -16007,23 +16632,28 @@ private func disabledNotificationPreferences() -> NotificationPreferences {
 private actor FavoriteScheduleCallRecorder {
     private var recordedFavoriteTeamIDs: [String] = []
 
+    // record 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func record(favoriteTeamID: String) {
         recordedFavoriteTeamIDs.append(favoriteTeamID)
     }
 
+    // callCount 메서드는 이 타입의 주요 동작을 수행합니다.
     func callCount() -> Int {
         recordedFavoriteTeamIDs.count
     }
 
+    // favoriteTeamIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     func favoriteTeamIDs() -> [String] {
         recordedFavoriteTeamIDs
     }
 }
 
+// FavoriteScheduleCountingRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct FavoriteScheduleCountingRepository: KBORepository, KBOFavoriteTeamScheduleDataSource {
     let recorder: FavoriteScheduleCallRecorder
     let base: StubRepository
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         recorder: FavoriteScheduleCallRecorder,
         base: StubRepository = StubRepository()
@@ -16032,34 +16662,42 @@ private struct FavoriteScheduleCountingRepository: KBORepository, KBOFavoriteTea
         self.base = base
     }
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         try await base.fetchBootstrapData()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await base.fetchGames()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await base.fetchNotifications()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await base.fetchMonthlySchedule(for: month)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await base.fetchSchedule(for: date)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
     }
 
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchFavoriteTeamSchedule(
         date _: Date,
         favoriteTeamId: Team.ID,
@@ -16070,6 +16708,7 @@ private struct FavoriteScheduleCountingRepository: KBORepository, KBOFavoriteTea
     }
 }
 
+// eventually 메서드는 이 타입의 주요 동작을 수행합니다.
 private func eventually(
     timeout: TimeInterval,
     interval: UInt64 = 50_000_000,
@@ -16085,11 +16724,13 @@ private func eventually(
     return await condition()
 }
 
+// StubResponse 구조체는 StubResponse 타입의 역할과 값을 정의합니다.
 private struct StubResponse {
     let statusCode: Int
     let data: Data
     let headers: [String: String]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         statusCode: Int,
         data: Data,
@@ -16105,6 +16746,7 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
     static var testResponses: [String: StubResponse] = [:]
     static var lastRequest: URLRequest?
 
+    // canInit 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     override class func canInit(with request: URLRequest) -> Bool {
         guard let host = request.url?.host else { return false }
         return host == "example.com"
@@ -16113,10 +16755,12 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
             || host == "192.168.45.140"
     }
 
+    // canonicalRequest 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
         request
     }
 
+    // startLoading 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     override func startLoading() {
         Self.lastRequest = request
         guard let url = request.url, let response = Self.testResponses[url.absoluteString] else {
@@ -16136,20 +16780,24 @@ private final class URLProtocolStub: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 
+    // stopLoading 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     override func stopLoading() {}
 }
 
+// makeStubSession 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeStubSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [URLProtocolStub.self]
     return URLSession(configuration: configuration)
 }
 
+// jsonStringLiteral 메서드는 이 타입의 주요 동작을 수행합니다.
 private func jsonStringLiteral(_ value: String) throws -> String {
     let data = try JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed])
     return String(data: data, encoding: .utf8) ?? "\"\""
 }
 
+// httpBodyData 메서드는 이 타입의 주요 동작을 수행합니다.
 private func httpBodyData(from request: URLRequest) -> Data? {
     if let httpBody = request.httpBody {
         return httpBody
@@ -16171,6 +16819,7 @@ private func httpBodyData(from request: URLRequest) -> Data? {
     return data.isEmpty ? nil : data
 }
 
+// fixtureData 메서드는 이 타입의 주요 동작을 수행합니다.
 private func fixtureData(named name: String) throws -> Data {
     let fixturesDirectory = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
@@ -16178,6 +16827,7 @@ private func fixtureData(named name: String) throws -> Data {
     return try Data(contentsOf: fixturesDirectory.appendingPathComponent("\(name).json"))
 }
 
+// saveFixtureData 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
 private func saveFixtureData(_ data: Data, named name: String) throws {
     let fixturesDirectory = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
@@ -16186,6 +16836,7 @@ private func saveFixtureData(_ data: Data, named name: String) throws {
     try data.write(to: fixturesDirectory.appendingPathComponent("\(name).json"), options: .atomic)
 }
 
+// makeTemporaryDirectory 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeTemporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -16193,6 +16844,7 @@ private func makeTemporaryDirectory() throws -> URL {
     return directory
 }
 
+// makeTemporaryUserDefaults 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeTemporaryUserDefaults() -> UserDefaults {
     let suiteName = "kboScoreTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
@@ -16200,6 +16852,7 @@ private func makeTemporaryUserDefaults() -> UserDefaults {
     return defaults
 }
 
+// appLocalBootstrapFixtureData 메서드는 이 타입의 주요 동작을 수행합니다.
 private func appLocalBootstrapFixtureData() throws -> Data {
     let projectDirectory = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
@@ -16207,6 +16860,7 @@ private func appLocalBootstrapFixtureData() throws -> Data {
     return try Data(contentsOf: projectDirectory.appendingPathComponent("kboScore/LocalBootstrapData.json"))
 }
 
+// makeBootstrapJSON 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBootstrapJSON(
     teamName: String? = nil,
     firstGameAwayScore: Int? = nil
@@ -16235,6 +16889,7 @@ private func makeBootstrapJSON(
     return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
 }
 
+// makeBootstrapAPIResponseJSON 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBootstrapAPIResponseJSON(
     teamName: String? = nil,
     firstGameAwayScore: Int? = nil,
@@ -16252,33 +16907,34 @@ private func makeBootstrapAPIResponseJSON(
     return try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
 }
 
+// makeBackendMonthPayloadJSON 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBackendMonthPayloadJSON() throws -> Data {
-    func team(_ code: String, _ nameKo: String, _ shortName: String, _ themeColor: String, _ logo: String) -> [String: Any] {
+    // team 메서드는 이 타입의 주요 동작을 수행합니다.
+    func team(_ code: String, _ nameKo: String, _ shortName: String, _ themeColor: String) -> [String: Any] {
         [
             "code": code,
             "nameKo": nameKo,
             "shortName": shortName,
-            "themeColor": themeColor,
-            "logoAssetName": logo
+            "themeColor": themeColor
         ]
     }
 
     let games: [[String: Any]] = [
-        ["id": "bdd3ec7a-69aa-400d-9929-7b27e4f4cde7", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D", "ssg"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029", "kia")],
-        ["id": "19458f95-24ee-4de1-af30-ecc8152c24ee", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452", "lg"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000", "kt")],
-        ["id": "3d17cfd0-358d-4e2c-b40c-35671ca041b2", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288", "nc"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230", "doosan")],
-        ["id": "d3a57c14-2ad5-4baf-b2cf-a5ea4eb26c3b", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3", "samsung"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42", "lotte")],
-        ["id": "ba878f3f-ebe8-40b7-bc72-3f113801b71f", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600", "hanwha"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514", "kiwoom")],
-        ["id": "8eb61818-1148-4f64-9176-eb08cd9e0371", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D", "ssg"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029", "kia")],
-        ["id": "ed85a6ff-d525-4fba-938c-1957da4b76c5", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452", "lg"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000", "kt")],
-        ["id": "c08a2da6-8b3e-4182-a36b-8039c68cbf78", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288", "nc"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230", "doosan")],
-        ["id": "347710af-708a-423e-807a-7805c2a32782", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3", "samsung"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42", "lotte")],
-        ["id": "1697aa01-16cb-41dc-8189-770415b6528b", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600", "hanwha"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514", "kiwoom")],
-        ["id": "5cae24b4-c3b9-46fd-80dc-8072a84c8353", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452", "lg"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029", "kia")],
-        ["id": "32ac800e-88d6-4ad0-9c0c-312ccf71e0b8", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600", "hanwha"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000", "kt")],
-        ["id": "558438b2-a0ed-4f8c-a766-27f332e4f69a", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3", "samsung"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230", "doosan")],
-        ["id": "7d91e0ac-642b-447f-a25b-18865a7a5719", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288", "nc"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42", "lotte")],
-        ["id": "8428cc15-4999-4b38-9f3d-c02ee97c61d9", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D", "ssg"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514", "kiwoom")]
+        ["id": "bdd3ec7a-69aa-400d-9929-7b27e4f4cde7", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029")],
+        ["id": "19458f95-24ee-4de1-af30-ecc8152c24ee", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000")],
+        ["id": "3d17cfd0-358d-4e2c-b40c-35671ca041b2", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230")],
+        ["id": "d3a57c14-2ad5-4baf-b2cf-a5ea4eb26c3b", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42")],
+        ["id": "ba878f3f-ebe8-40b7-bc72-3f113801b71f", "gameDate": "2026-03-28", "gameTime": "14:00", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514")],
+        ["id": "8eb61818-1148-4f64-9176-eb08cd9e0371", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029")],
+        ["id": "ed85a6ff-d525-4fba-938c-1957da4b76c5", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000")],
+        ["id": "c08a2da6-8b3e-4182-a36b-8039c68cbf78", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230")],
+        ["id": "347710af-708a-423e-807a-7805c2a32782", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42")],
+        ["id": "1697aa01-16cb-41dc-8189-770415b6528b", "gameDate": "2026-03-29", "gameTime": "14:00", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514")],
+        ["id": "5cae24b4-c3b9-46fd-80dc-8072a84c8353", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "잠실", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("LG", "LG 트윈스", "LG", "#C30452"), "awayTeam": team("KIA", "KIA 타이거즈", "KIA", "#EA0029")],
+        ["id": "32ac800e-88d6-4ad0-9c0c-312ccf71e0b8", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "대전", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("HANWHA", "한화 이글스", "한화", "#FF6600"), "awayTeam": team("KT", "KT 위즈", "KT", "#000000")],
+        ["id": "558438b2-a0ed-4f8c-a766-27f332e4f69a", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "대구", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SAMSUNG", "삼성 라이온즈", "삼성", "#0066B3"), "awayTeam": team("DOOSAN", "두산 베어스", "두산", "#131230")],
+        ["id": "7d91e0ac-642b-447f-a25b-18865a7a5719", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "창원", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("NC", "NC 다이노스", "NC", "#315288"), "awayTeam": team("LOTTE", "롯데 자이언츠", "롯데", "#041E42")],
+        ["id": "8428cc15-4999-4b38-9f3d-c02ee97c61d9", "gameDate": "2026-03-31", "gameTime": "18:30", "status": "scheduled", "stadium": "문학", "homeScore": 0, "awayScore": 0, "inningState": NSNull(), "homeTeam": team("SSG", "SSG 랜더스", "SSG", "#CE0E2D"), "awayTeam": team("KIWOOM", "키움 히어로즈", "키움", "#570514")]
     ]
 
     let root: [String: Any] = [
@@ -16293,10 +16949,12 @@ private func makeBackendMonthPayloadJSON() throws -> Data {
 private actor FetchCounter {
     private var count = 0
 
+    // increment 메서드는 이 타입의 주요 동작을 수행합니다.
     func increment() {
         count += 1
     }
 
+    // incrementAndReturn 메서드는 이 타입의 주요 동작을 수행합니다.
     func incrementAndReturn() -> Int {
         count += 1
         return count
@@ -16309,10 +16967,12 @@ private actor ScheduleMonthFetchSequence {
     private let responses: [[GameDetail]]
     private var index = 0
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(responses: [[GameDetail]]) {
         self.responses = responses
     }
 
+    // next 메서드는 이 타입의 주요 동작을 수행합니다.
     func next() -> [GameDetail] {
         defer { index += 1 }
         guard responses.isEmpty == false else { return [] }
@@ -16328,6 +16988,7 @@ private actor ScheduleFetchGate {
     private var didStart = false
     private var didRelease = false
 
+    // wait 메서드는 이 타입의 주요 동작을 수행합니다.
     func wait() async {
         didStart = true
         startedContinuation?.resume()
@@ -16338,6 +16999,7 @@ private actor ScheduleFetchGate {
         }
     }
 
+    // waitUntilStarted 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitUntilStarted() async {
         guard didStart == false else { return }
         await withCheckedContinuation { continuation in
@@ -16345,6 +17007,7 @@ private actor ScheduleFetchGate {
         }
     }
 
+    // release 메서드는 이 타입의 주요 동작을 수행합니다.
     func release() {
         didRelease = true
         releaseContinuation?.resume()
@@ -16357,11 +17020,13 @@ private actor ScheduleDateFetchRecorder {
     private let delayNanoseconds: UInt64
     private(set) var calls: [(dayKey: String, bypassingCache: Bool)] = []
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(responses: [String: [GameDetail]], delayNanoseconds: UInt64 = 0) {
         self.responses = responses
         self.delayNanoseconds = delayNanoseconds
     }
 
+    // fetch 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetch(date: Date, bypassingCache: Bool) async -> [GameDetail] {
         let dayKey = scheduleTestDayKey(for: date)
         calls.append((dayKey, bypassingCache))
@@ -16372,6 +17037,7 @@ private actor ScheduleDateFetchRecorder {
     }
 }
 
+// scheduleTestDayKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
 private func scheduleTestDayKey(for date: Date) -> String {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
@@ -16384,12 +17050,14 @@ private func scheduleTestDayKey(for date: Date) -> String {
     )
 }
 
+// standingsMovementCalendar 메서드는 이 타입의 주요 동작을 수행합니다.
 private func standingsMovementCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
     return calendar
 }
 
+// makeStandingsMovementFixture 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeStandingsMovementFixture() throws -> (
     teams: [Team],
     leader: Team,
@@ -16455,6 +17123,7 @@ private func makeStandingsMovementFixture() throws -> (
     )
 }
 
+// makeDoosanSSGStandingsMovementFixture 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeDoosanSSGStandingsMovementFixture() throws -> (
     teams: [Team],
     leader: Team,
@@ -16543,6 +17212,7 @@ private func makeDoosanSSGStandingsMovementFixture() throws -> (
     )
 }
 
+// makeStandingsMovementGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeStandingsMovementGame(
     index: Int,
     day: String,
@@ -16564,6 +17234,7 @@ private func makeStandingsMovementGame(
     )
 }
 
+// currentStandingsRanks 메서드는 이 타입의 주요 동작을 수행합니다.
 private func currentStandingsRanks(
     teams: [Team],
     games: [GameDetail],
@@ -16589,12 +17260,14 @@ private func currentStandingsRanks(
     })
 }
 
+// scheduleTestCalendar 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
 private func scheduleTestCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
     return calendar
 }
 
+// makeScheduleMonthGames 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeScheduleMonthGames(
     count: Int = 135,
     year: Int = 2026,
@@ -16640,6 +17313,7 @@ private func makeScheduleMonthGames(
     }
 }
 
+// makeScheduleTodayRefreshGames 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeScheduleTodayRefreshGames(
     from fullMonthGames: [GameDetail],
     dayKey: String = "2026-05-26"
@@ -16662,6 +17336,7 @@ private func makeScheduleTodayRefreshGames(
         }
 }
 
+// makeSchedulePartialSyncModel 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 @MainActor
 private func makeSchedulePartialSyncModel(
     fullMonthGames: [GameDetail],
@@ -16696,11 +17371,13 @@ private actor RecordingScheduleStaleGameReconciliationClient: ScheduleStaleGameR
     private let delayNanoseconds: UInt64
     private let error: Error?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(delayNanoseconds: UInt64 = 0, error: Error? = nil) {
         self.delayNanoseconds = delayNanoseconds
         self.error = error
     }
 
+    // reconcileStaleGames 메서드는 이 타입의 주요 동작을 수행합니다.
     func reconcileStaleGames(dates: [String]) async throws {
         calls.append(dates)
         if delayNanoseconds > 0 {
@@ -16719,15 +17396,18 @@ private final class TestLiveActivityController: FavoriteTeamLiveActivityControll
     private(set) var activeGameID: UUID?
     private(set) var snapshots: [FavoriteTeamLiveActivitySnapshot] = []
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(isSupported: Bool) {
         self.isSupported = isSupported
     }
 
+    // startOrUpdate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdate(using snapshot: FavoriteTeamLiveActivitySnapshot) async throws {
         activeGameID = snapshot.gameID
         snapshots.append(snapshot)
     }
 
+    // endCurrent 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func endCurrent() async {
         activeGameID = nil
     }
@@ -16737,11 +17417,13 @@ private final class TestLiveActivityController: FavoriteTeamLiveActivityControll
 private final class NotificationRequestCollector {
     private(set) var requests: [UNNotificationRequest] = []
 
+    // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func append(_ request: UNNotificationRequest) {
         requests.append(request)
     }
 }
 
+// StubRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct StubRepository: KBORepository {
     var fetchBootstrapDataHandler: @Sendable () async throws -> KBOBootstrapData = {
         stubBootstrap()
@@ -16763,6 +17445,7 @@ private struct StubRepository: KBORepository {
         []
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         fetchBootstrapData: @escaping @Sendable () async throws -> KBOBootstrapData = { stubBootstrap() },
         fetchGames: @escaping @Sendable () async throws -> [GameDetail] = { stubGames() },
@@ -16781,26 +17464,32 @@ private struct StubRepository: KBORepository {
         self.fetchStandingsHandler = fetchStandings
     }
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         try await fetchBootstrapDataHandler()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await fetchGamesHandler()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await fetchNotificationsHandler()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleHandler(month)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await fetchScheduleHandler(date)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         if let fetchScheduleBypassingCacheHandler {
             return try await fetchScheduleBypassingCacheHandler(date, bypassingCache)
@@ -16808,15 +17497,18 @@ private struct StubRepository: KBORepository {
         return try await fetchScheduleHandler(date)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await fetchStandingsHandler()
     }
 }
 
+// DetailSnapshotStubRepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 private struct DetailSnapshotStubRepository: KBORepository, KBOGameDetailSnapshotDataSource {
     let base: StubRepository
     let fetchGameDetailSnapshotHandler: @Sendable (GameDetail, String, [Team]) async throws -> GameDetail?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         base: StubRepository,
         fetchGameDetailSnapshot: @escaping @Sendable (GameDetail, String, [Team]) async throws -> GameDetail?
@@ -16825,34 +17517,42 @@ private struct DetailSnapshotStubRepository: KBORepository, KBOGameDetailSnapsho
         self.fetchGameDetailSnapshotHandler = fetchGameDetailSnapshot
     }
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         try await base.fetchBootstrapData()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await base.fetchGames()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await base.fetchNotifications()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await base.fetchMonthlySchedule(for: month)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await base.fetchSchedule(for: date)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
     }
 
+    // fetchGameDetailSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailSnapshot(
         for game: GameDetail,
         identity: String,
@@ -16862,22 +17562,27 @@ private struct DetailSnapshotStubRepository: KBORepository, KBOGameDetailSnapsho
     }
 }
 
+// stubBootstrap 메서드는 이 타입의 주요 동작을 수행합니다.
 private func stubBootstrap() -> KBOBootstrapData {
     MockKBOData.makeBootstrap()
 }
 
+// stubGames 메서드는 이 타입의 주요 동작을 수행합니다.
 private func stubGames() -> [GameDetail] {
     stubBootstrap().games
 }
 
+// stubNotifications 메서드는 이 타입의 주요 동작을 수행합니다.
 private func stubNotifications() -> [NotificationItem] {
     stubBootstrap().notifications
 }
 
+// isoDate 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
 private func isoDate(_ rawValue: String) -> Date {
     ISO8601DateFormatter().date(from: rawValue)!
 }
 
+// homeFallbackTestCalendar 메서드는 이 타입의 주요 동작을 수행합니다.
 private func homeFallbackTestCalendar() -> Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
@@ -16886,12 +17591,14 @@ private func homeFallbackTestCalendar() -> Calendar {
     return calendar
 }
 
+// previousKBOWeekStart 메서드는 이 타입의 주요 동작을 수행합니다.
 private func previousKBOWeekStart(referenceDate: Date = Date()) -> Date {
     let calendar = homeFallbackTestCalendar()
     let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: referenceDate)!.start
     return calendar.date(byAdding: .day, value: -7, to: currentWeekStart)!
 }
 
+// dateInKBOWeek 메서드는 이 타입의 주요 동작을 수행합니다.
 private func dateInKBOWeek(start weekStart: Date, dayOffset: Int) -> Date {
     let calendar = homeFallbackTestCalendar()
     return calendar.date(
@@ -16900,6 +17607,7 @@ private func dateInKBOWeek(start weekStart: Date, dayOffset: Int) -> Date {
     )!
 }
 
+// makeStaleScheduleFixture 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeStaleScheduleFixture(
     status: GameStatus,
     day: String,
@@ -16927,6 +17635,7 @@ private func makeStaleScheduleFixture(
     )
 }
 
+// makeGameDetail 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeGameDetail(
     id: UUID,
     scheduledStart: Date,
@@ -16979,6 +17688,7 @@ private func makeGameDetail(
 	    )
 }
 
+// attendanceFixtureTeams 메서드는 이 타입의 주요 동작을 수행합니다.
 private func attendanceFixtureTeams() throws -> (
     lg: Team,
     doosan: Team,
@@ -16994,6 +17704,7 @@ private func attendanceFixtureTeams() throws -> (
     )
 }
 
+// makeAttendanceFixtureGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeAttendanceFixtureGame(
     index: Int,
     venue: String = "잠실",
@@ -17016,6 +17727,7 @@ private func makeAttendanceFixtureGame(
     )
 }
 
+// makeBaseRunnerDisplayGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBaseRunnerDisplayGame(
     id: UUID = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
     providerGameID: String = "20260506WOLT0",
@@ -17046,6 +17758,7 @@ private func makeBaseRunnerDisplayGame(
     )
 }
 
+// makeBaseRunnerLineupSections 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBaseRunnerLineupSections(
     away: [(order: Int, name: String)],
     home: [(order: Int, name: String)]
@@ -17056,6 +17769,7 @@ private func makeBaseRunnerLineupSections(
     ]
 }
 
+// makeBaseRunnerLineupLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBaseRunnerLineupLine(order: Int, name: String) -> GameCenterBattingLine {
     GameCenterBattingLine(
         battingOrder: "\(order)번",
@@ -17072,6 +17786,7 @@ private func makeBaseRunnerLineupLine(order: Int, name: String) -> GameCenterBat
     )
 }
 
+// makeSupabaseGameRow 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeSupabaseGameRow(
     id: UUID,
     publicGameID: String,
@@ -17115,6 +17830,7 @@ private func makeSupabaseGameRow(
     return try JSONDecoder().decode([SupabaseGameRow].self, from: Data(payload.utf8))[0]
 }
 
+// makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 @MainActor
 private func makeStandingsSnapshot(
     team: Team,
@@ -17131,6 +17847,7 @@ private func makeStandingsSnapshot(
     )
 }
 
+// makeProbabilityTestTeams 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeProbabilityTestTeams(includePreviousRanks: Bool = true) -> [Team] {
     (1...10).map { index in
         let previousRegularSeasonRank: Int? = includePreviousRanks ? index : nil
@@ -17145,6 +17862,7 @@ private func makeProbabilityTestTeams(includePreviousRanks: Bool = true) -> [Tea
     }
 }
 
+// makeProbabilityThresholdSchedule 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeProbabilityThresholdSchedule(
     teams: [Team],
     completedGamesPerTeam: Int,
@@ -17196,6 +17914,7 @@ private func makeProbabilityThresholdSchedule(
     return games
 }
 
+// makePairDeficitRegularSeasonSchedule 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makePairDeficitRegularSeasonSchedule(
     teams: [Team],
     gamesPerPair: Int,
@@ -17234,6 +17953,7 @@ private func makePairDeficitRegularSeasonSchedule(
     return games
 }
 
+// completedProbabilityGame 메서드는 이 타입의 주요 동작을 수행합니다.
 private func completedProbabilityGame(
     id: String,
     awayTeam: Team,
@@ -17255,6 +17975,7 @@ private func completedProbabilityGame(
     )
 }
 
+// makeConservativeEarlySeasonProbabilitySchedule 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeConservativeEarlySeasonProbabilitySchedule(
     teams: [Team],
     completedGamesPerTeam: Int,
@@ -17291,6 +18012,7 @@ private func makeConservativeEarlySeasonProbabilitySchedule(
     }
 }
 
+// makeRoundRobinProbabilitySchedule 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeRoundRobinProbabilitySchedule(
     teams: [Team],
     completedGamesPerTeam: Int,
@@ -17359,6 +18081,7 @@ private func makeRoundRobinProbabilitySchedule(
     return games
 }
 
+// liveActivityContentStateKey 메서드는 이 타입의 주요 동작을 수행합니다.
 private func liveActivityContentStateKey(
     isPreGame: Bool = false,
     favoriteScoreText: String = "4",
@@ -17395,6 +18118,7 @@ private func liveActivityContentStateKey(
     )
 }
 
+// roundRobinPairings 메서드는 이 타입의 주요 동작을 수행합니다.
 private func roundRobinPairings(teamCount: Int) -> [[(first: Int, second: Int)]] {
     precondition(teamCount.isMultiple(of: 2))
 
