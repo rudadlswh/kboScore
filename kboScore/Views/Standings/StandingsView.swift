@@ -212,6 +212,9 @@ private struct StandingsRowView: View {
                 .font(isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy))
                 .monospacedDigit()
                 .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
                 .frame(width: metrics.rankWidth, alignment: .trailing)
 
             Text(rankMovement.displayText)
@@ -220,6 +223,7 @@ private struct StandingsRowView: View {
                 .foregroundStyle(rankMovementColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
+                .allowsTightening(true)
                 .frame(width: metrics.movementWidth, alignment: .trailing)
         }
         .frame(width: metrics.rankMovementWidth, alignment: .trailing)

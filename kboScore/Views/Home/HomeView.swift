@@ -378,9 +378,14 @@ private struct TeamHeroBackground: View {
             Text(identity.homeHeroWatermarkLabel)
                 .font(.system(size: 58, weight: .black, design: .rounded))
                 .foregroundStyle(Color.white.opacity(0.10))
+                .lineLimit(1)
+                .minimumScaleFactor(0.45)
+                .allowsTightening(true)
+                .frame(maxWidth: .infinity, alignment: edge == .leading ? .leading : .trailing)
                 .offset(x: edge == .leading ? -10 : 10, y: 12)
         }
         .frame(maxWidth: .infinity)
+        .clipped()
         .accessibilityHidden(true)
     }
 }

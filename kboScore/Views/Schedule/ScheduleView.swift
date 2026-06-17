@@ -214,24 +214,7 @@ private struct ScheduleCalendarCardView: View {
                                     .font(.caption.weight(isSelected(day) ? .bold : .medium))
                                     .foregroundStyle(dayNumberColor(for: day))
 
-                                ZStack {
-                                    Circle()
-                                        .fill(markerColor(for: day))
-                                        .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
-                                        .opacity(day.hasGames ? 1 : 0.12)
-
-                                    if day.gameCount > 1 {
-                                        Text("\(day.gameCount)")
-                                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(
-                                                dayGameCountBadgeColor(for: day),
-                                                in: Capsule()
-                                            )
-                                    }
-                                }
+                                dayMarker(for: day)
                             }
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -387,6 +370,75 @@ private struct ScheduleCalendarCardView: View {
             return "응원 팀을 선택하면 마이팀 일정이 표시됩니다."
         }
         return "선택한 날짜에는 등록된 경기가 없습니다."
+    }
+
+    @ViewBuilder
+    private func dayMarker(for day: MyTeamCalendarDay) -> some View {
+        if let opponentName = opponentMarkerText(for: day) {
+            Text(opponentName)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(markerColor(for: day))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+                .frame(maxWidth: .infinity, minHeight: 18)
+        } else if viewModel.scheduleFilter == .myTeam {
+            Color.clear
+                .frame(height: 18)
+        } else {
+            ZStack {
+                Circle()
+                    .fill(markerColor(for: day))
+                    .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
+                    .opacity(day.hasGames ? 1 : 0.12)
+
+                if day.gameCount > 1 {
+                    Text("\(day.gameCount)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            dayGameCountBadgeColor(for: day),
+                            in: Capsule()
+                        )
+                }
+            }
+            .frame(height: 18)
+        }
+    }
+
+    private func opponentMarkerText(for day: MyTeamCalendarDay) -> String? {
+        guard viewModel.scheduleFilter == .myTeam,
+              let opponentTeam = day.opponentTeam else {
+            return nil
+        }
+        return shortOpponentName(for: opponentTeam)
+    }
+
+    private func shortOpponentName(for team: Team) -> String {
+        switch team.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "samsung":
+            return "삼성"
+        case "doosan":
+            return "두산"
+        case "hanwha":
+            return "한화"
+        case "lotte":
+            return "롯데"
+        case "kiwoom":
+            return "키움"
+        default:
+            break
+        }
+
+        for candidate in [team.shortName, team.displayName, team.name, team.id] {
+            let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedCandidate.isEmpty == false {
+                return trimmedCandidate
+            }
+        }
+        return team.id
     }
 
     // isSelected 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
