@@ -1,6 +1,10 @@
 //
 //  GameDetailScreenModel.swift
 //  kboScore
+//  기능 설명: 경기 상세 화면의 데이터 로딩, 갱신, 표시 상태를 관리합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 4/8/26.
 //
@@ -9,20 +13,24 @@ import Foundation
 import Combine
 import Observation
 
+// GameDetailSection 열거형는 GameDetailSection 타입의 역할과 값을 정의합니다.
 enum GameDetailSection: String, CaseIterable, Identifiable {
     case overview = "개요"
 
     var id: String { rawValue }
 
+    // availableSections 메서드는 이 타입의 주요 동작을 수행합니다.
     static func availableSections(for _: GameStatus) -> [GameDetailSection] {
         [.overview]
     }
 }
 
+// GameDetailOverviewContentKind 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum GameDetailOverviewContentKind: Equatable, Sendable {
     case preview
     case overview
 
+    // contentKind 메서드는 이 타입의 주요 동작을 수행합니다.
     static func contentKind(for status: GameStatus) -> GameDetailOverviewContentKind {
         switch status {
         case .upcoming:
@@ -33,6 +41,7 @@ nonisolated enum GameDetailOverviewContentKind: Equatable, Sendable {
     }
 }
 
+// GameDetailPayloadLoadResult 열거형는 GameDetailPayloadLoadResult 타입의 역할과 값을 정의합니다.
 nonisolated private enum GameDetailPayloadLoadResult: Sendable {
     case success(GameCenterDetailPayload?)
     case failure
@@ -80,6 +89,7 @@ final class GameDetailScreenModel {
     var boxscoreErrorMessage: String?
     var hasAttemptedLoad = false
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         client: OfficialKBOGameCenterClient? = nil,
         boxscoreClient: (any GameBoxscoreFetching)? = nil,
@@ -98,6 +108,7 @@ final class GameDetailScreenModel {
         self.boxscoreClient = boxscoreClient ?? GameBoxscoreClientFactory.makeAppClient()
     }
 
+    // load 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func load(
         for game: GameDetail,
         forceRefresh: Bool = false,
@@ -169,6 +180,7 @@ final class GameDetailScreenModel {
         #endif
     }
 
+    // shouldLoadDetailPayload 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldLoadDetailPayload(for game: GameDetail, forceRefresh: Bool) -> Bool {
         if game.status == .upcoming, forceRefresh == false {
             return false
@@ -176,6 +188,7 @@ final class GameDetailScreenModel {
         return true
     }
 
+    // scheduleDetailPayloadLoad 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDetailPayloadLoad(for game: GameDetail, gameKey: String, forceRefresh: Bool) {
         let task = detailPayloadTask(for: game, gameKey: gameKey)
         Task { [weak self] in
@@ -205,6 +218,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // scheduleDatabaseRecordReviewLoadIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDatabaseRecordReviewLoadIfNeeded(
         for game: GameDetail,
         gameKey: String,
@@ -286,6 +300,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // loadDatabaseRecordReviewIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadDatabaseRecordReviewIfNeeded(
         for game: GameDetail,
         fetcher: (@Sendable (GameDetail) async -> GameCenterReview?)?
@@ -307,6 +322,7 @@ final class GameDetailScreenModel {
         return review?.hasDisplayableRecords == true ? review : nil
     }
 
+    // mergeDatabaseRecordReviewAfterFetchGameSingle 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func mergeDatabaseRecordReviewAfterFetchGameSingle(
         inputLocalGameId: UUID,
         resolvedGame: GameDetail,
@@ -358,6 +374,7 @@ final class GameDetailScreenModel {
             "none"
     }
 
+    // loadDetailPayload 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadDetailPayload(for game: GameDetail, gameKey: String) async -> GameCenterDetailPayload? {
         let task = detailPayloadTask(for: game, gameKey: gameKey)
         let result = await task.value
@@ -368,6 +385,7 @@ final class GameDetailScreenModel {
         return detailPayload(from: result)
     }
 
+    // detailPayloadTask 메서드는 이 타입의 주요 동작을 수행합니다.
     private func detailPayloadTask(for game: GameDetail, gameKey: String) -> Task<GameDetailPayloadLoadResult, Never> {
         if let inFlight = detailLoadTask, activeDetailLoadKey == gameKey {
             #if DEBUG
@@ -392,6 +410,7 @@ final class GameDetailScreenModel {
         return task
     }
 
+    // detailPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     private func detailPayload(from result: GameDetailPayloadLoadResult) -> GameCenterDetailPayload? {
         switch result {
         case .success(let payload):
@@ -402,6 +421,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // scheduleBoxscoreLoadIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleBoxscoreLoadIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final,
               let publicGameID = game.publicGameID?.nilIfBlank else {
@@ -442,6 +462,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // loadBoxscoreIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadBoxscoreIfNeeded(gameID publicGameID: String, cacheKey: String, forceRefresh: Bool) async {
         boxscoreErrorMessage = nil
         let task: Task<GameBoxscoreResponse?, Never>
@@ -484,6 +505,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // scheduleOfficialRecordFallbackIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final || game.status.isLiveLike else { return }
         guard databaseRecordReview?.hasDisplayableRecords != true else {
@@ -529,6 +551,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // loadOfficialRecordFallbackIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadOfficialRecordFallbackIfNeeded(for game: GameDetail, cacheKey: String, forceRefresh: Bool) async {
         let stageStartedAt = Date()
         let task: Task<GameCenterReview?, Never>
@@ -574,6 +597,7 @@ final class GameDetailScreenModel {
         }
     }
 
+    // cancelOfficialFallbackLoad 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func cancelOfficialFallbackLoad() {
         officialFallbackLoadTask?.cancel()
         officialFallbackLoadTask = nil
@@ -581,6 +605,7 @@ final class GameDetailScreenModel {
         officialFallbackReview = nil
     }
 
+    // officialFallbackCacheKey 메서드는 이 타입의 주요 동작을 수행합니다.
     private func officialFallbackCacheKey(for game: GameDetail) -> String {
         [
             game.publicGameID?.nilIfBlank,
@@ -592,27 +617,33 @@ final class GameDetailScreenModel {
             .joined(separator: "::")
     }
 
+    // detailGame 메서드는 이 타입의 주요 동작을 수행합니다.
     private func detailGame(publicGameID: String) -> GameDetail? {
         guard currentGame?.publicGameID == publicGameID else { return nil }
         return currentGame
     }
 
+    // waitForBoxscoreLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForBoxscoreLoadForTesting() async {
         await boxscoreLoadTask?.value
     }
 
+    // waitForDetailLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForDetailLoadForTesting() async {
         _ = await detailLoadTask?.value
     }
 
+    // waitForDatabaseRecordLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForDatabaseRecordLoadForTesting() async {
         await databaseRecordLoadTask?.value
     }
 
+    // waitForOfficialFallbackLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForOfficialFallbackLoadForTesting() async {
         await officialFallbackLoadTask?.value
     }
 
+    // resetBoxscoreLoadingCacheForTesting 메서드는 저장된 상태나 캐시 값을 정리합니다.
     static func resetBoxscoreLoadingCacheForTesting() {
         inFlightBoxscoreTasks.removeAll()
         recentFailedBoxscoreFetches.removeAll()
@@ -622,6 +653,7 @@ final class GameDetailScreenModel {
         recentFailedOfficialFallbacks.removeAll()
     }
 
+    // durationMilliseconds 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func durationMilliseconds(since start: Date) -> Int {
         Int(Date().timeIntervalSince(start) * 1_000)
     }
@@ -663,6 +695,7 @@ final class GameDetailViewModel: ObservableObject {
         shouldAutoRefreshLiveGame ? "live:\(stableIdentity)" : "idle:\(stableIdentity)"
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         gameIdentity: String,
         initialGame: GameDetail? = nil
@@ -681,6 +714,7 @@ final class GameDetailViewModel: ObservableObject {
         #endif
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         stableIdentity: String,
         requestedIdentity: String,
@@ -698,6 +732,7 @@ final class GameDetailViewModel: ObservableObject {
         #endif
     }
 
+    // configureInitialGameIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func configureInitialGameIfNeeded(_ initialGame: GameDetail?) {
         guard game == nil, let initialGame else { return }
         game = initialGame
@@ -706,6 +741,7 @@ final class GameDetailViewModel: ObservableObject {
         baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
     }
 
+    // refreshIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     func refreshIfNeeded(
         appModel: AppModel,
@@ -798,6 +834,7 @@ final class GameDetailViewModel: ObservableObject {
         return fetched?.game ?? game
     }
 
+    // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func apply(_ fetched: GameDetailRefreshResult) {
         rawSupabaseGameID = fetched.rawSupabaseGameID
         rawSupabaseProviderGameID = fetched.providerGameID
@@ -805,6 +842,7 @@ final class GameDetailViewModel: ObservableObject {
         apply(fetched.game)
     }
 
+    // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func apply(_ fetched: GameDetail) {
         let changed = fetched != game
         baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: fetched)
@@ -817,6 +855,7 @@ final class GameDetailViewModel: ObservableObject {
     }
 }
 
+// BaseRunnerDisplayResolution 구조체는 BaseRunnerDisplayResolution 타입의 역할과 값을 정의합니다.
 struct BaseRunnerDisplayResolution: Equatable, Sendable {
     static let empty = BaseRunnerDisplayResolution(
         runners: GameBaseRunners(first: nil, second: nil, third: nil),
@@ -826,6 +865,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
     let runners: GameBaseRunners
     let source: String
 
+    // mergingOfficialNames 메서드는 이 타입의 주요 동작을 수행합니다.
     func mergingOfficialNames(
         snapshot: GameBaseRunners?,
         official: GameBaseRunners?,
@@ -886,6 +926,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
         return BaseRunnerDisplayResolution(runners: mergedRunners, source: "official")
     }
 
+    // snapshotName 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func snapshotName(
         _ value: String?,
         base: RunnerBase,
@@ -910,6 +951,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
         return name
     }
 
+    // cacheName 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func cacheName(_ value: String?, excluding assignedNames: Set<String>) -> String? {
         guard let name = clean(value), assignedNames.contains(name) == false else {
             return nil
@@ -917,6 +959,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
         return name
     }
 
+    // deduplicated 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func deduplicated(first: String?, second: String?, third: String?) -> GameBaseRunners {
         var first = clean(first)
         var second = clean(second)
@@ -932,16 +975,19 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
         return GameBaseRunners(first: first, second: second, third: third)
     }
 
+    // clean 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func clean(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    // displayName 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func displayName(_ value: String?) -> String {
         clean(value) ?? "<nil>"
     }
 
+    // renderedLogName 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func renderedLogName(occupied: Bool, name: String?) -> String {
         guard occupied else {
             return "empty"
@@ -952,6 +998,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
         return cleaned
     }
 
+// RunnerBase 열거형는 RunnerBase 타입의 역할과 값을 정의합니다.
     private enum RunnerBase {
         case first
         case second
@@ -959,11 +1006,13 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
     }
 }
 
+// BaseRunnerDisplayResolver 구조체는 입력 상태를 해석해 필요한 결과 값을 결정합니다.
 struct BaseRunnerDisplayResolver: Sendable {
     private static let fallbackRunnerName = "주자"
     private var statesByGameIdentity: [String: CachedBaseRunnerNames] = [:]
     private var activeGameIdentity: String?
 
+    // resolve 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     mutating func resolve(gameIdentity: String, game: GameDetail) -> BaseRunnerDisplayResolution {
         if let activeGameIdentity, activeGameIdentity != gameIdentity {
             statesByGameIdentity[activeGameIdentity] = nil
@@ -1019,6 +1068,7 @@ struct BaseRunnerDisplayResolver: Sendable {
         return BaseRunnerDisplayResolution(runners: display, source: source)
     }
 
+    // resolveBase 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func resolveBase(
         base: String,
         occupied: Bool,
@@ -1049,11 +1099,13 @@ struct BaseRunnerDisplayResolver: Sendable {
         return ResolvedBaseRunnerDisplay(displayName: Self.fallbackRunnerName, realName: nil)
     }
 
+    // sourceSummary 메서드는 이 타입의 주요 동작을 수행합니다.
     private func sourceSummary(_ sources: Set<String>) -> String {
         let ordered = ["snapshot", "carryForward", "fallback"].filter { sources.contains($0) }
         return ordered.isEmpty ? "empty" : ordered.joined(separator: "+")
     }
 
+    // clean 메서드는 이 타입의 주요 동작을 수행합니다.
     private func clean(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1069,10 +1121,12 @@ struct BaseRunnerDisplayResolver: Sendable {
         return trimmed
     }
 
+// CachedBaseRunnerNames 구조체는 CachedBaseRunnerNames 타입의 역할과 값을 정의합니다.
     private struct CachedBaseRunnerNames: Sendable {
         let runners: GameBaseRunners
     }
 
+// ResolvedBaseRunnerDisplay 구조체는 ResolvedBaseRunnerDisplay 타입의 역할과 값을 정의합니다.
     private struct ResolvedBaseRunnerDisplay: Sendable {
         static let empty = ResolvedBaseRunnerDisplay(displayName: nil, realName: nil)
 

@@ -1,6 +1,10 @@
 //
 //  GameBoxscoreClient.swift
 //  kboScore
+//  기능 설명: 경기 상세 기록 데이터를 외부/원격 소스에서 가져오는 클라이언트 기능을 담당합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/11/26.
 //
@@ -9,9 +13,11 @@ import Foundation
 
 protocol GameBoxscoreFetching: Sendable {
     nonisolated var cacheIdentity: String { get }
+    // fetchGameBoxscore 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse
 }
 
+// GameBoxscoreResponse 구조체는 GameBoxscoreResponse 타입의 역할과 값을 정의합니다.
 nonisolated struct GameBoxscoreResponse: Codable, Equatable, Sendable {
     let gameId: String
     let awayBatters: [GameBatterRecord]
@@ -40,6 +46,7 @@ nonisolated struct GameBoxscoreResponse: Codable, Equatable, Sendable {
         )
     }
 
+    // empty 메서드는 이 타입의 주요 동작을 수행합니다.
     static func empty(gameId: String) -> GameBoxscoreResponse {
         GameBoxscoreResponse(
             gameId: gameId,
@@ -53,6 +60,7 @@ nonisolated struct GameBoxscoreResponse: Codable, Equatable, Sendable {
     }
 }
 
+// GameBatterRecord 구조체는 GameBatterRecord 타입의 역할과 값을 정의합니다.
 nonisolated struct GameBatterRecord: Codable, Equatable, Sendable {
     let sourceOrder: Int
     let battingOrder: Int?
@@ -71,6 +79,7 @@ nonisolated struct GameBatterRecord: Codable, Equatable, Sendable {
     let battingAverage: String?
 }
 
+// GamePitcherRecord 구조체는 GamePitcherRecord 타입의 역할과 값을 정의합니다.
 nonisolated struct GamePitcherRecord: Codable, Equatable, Sendable {
     let sourceOrder: Int
     let pitchingOrder: Int?
@@ -93,7 +102,9 @@ nonisolated struct GamePitcherRecord: Codable, Equatable, Sendable {
     let era: String?
 }
 
+// GameBoxscoreClientFactory 열거형는 실행 환경에 맞는 구현체 생성을 담당합니다.
 nonisolated enum GameBoxscoreClientFactory {
+    // makeAppClient 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeAppClient() -> any GameBoxscoreFetching {
         let processValue = ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"]?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,6 +143,7 @@ nonisolated enum GameBoxscoreClientFactory {
         return BackendGameBoxscoreClient(baseURL: resolved.url)
     }
 
+    // resolveCandidate 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private static func resolveCandidate(_ candidate: (source: String, value: String?)) -> (source: String, url: URL)? {
         guard let rawValue = candidate.value,
               rawValue.isEmpty == false,
@@ -148,6 +160,7 @@ nonisolated enum GameBoxscoreClientFactory {
         return (candidate.source, url)
     }
 
+    // isAllowed 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func isAllowed(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased(),
               url.host?.isEmpty == false else {
@@ -165,26 +178,32 @@ nonisolated enum GameBoxscoreClientFactory {
         #endif
     }
 
+    // isLocalhost 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func isLocalhost(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 }
 
+// NoOpGameBoxscoreClient 구조체는 외부 서비스나 시스템 기능 호출을 캡슐화합니다.
 struct NoOpGameBoxscoreClient: GameBoxscoreFetching {
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init() {}
 
     nonisolated var cacheIdentity: String { "noop" }
 
+    // fetchGameBoxscore 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse {
         GameBoxscoreResponse.empty(gameId: gameId)
     }
 }
 
+// BackendGameBoxscoreClient 구조체는 외부 서비스나 시스템 기능 호출을 캡슐화합니다.
 struct BackendGameBoxscoreClient: GameBoxscoreFetching {
     private let baseURL: URL
     private let session: URLSession
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         baseURL: URL,
         session: URLSession = .shared
@@ -201,6 +220,7 @@ struct BackendGameBoxscoreClient: GameBoxscoreFetching {
         baseURL.absoluteString
     }
 
+    // fetchGameBoxscore 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBoxscore(gameId: String) async throws -> GameBoxscoreResponse {
         guard let encodedGameId = gameId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "api/v1/games/\(encodedGameId)/boxscore", relativeTo: baseURL)?.absoluteURL else {
@@ -226,6 +246,7 @@ struct BackendGameBoxscoreClient: GameBoxscoreFetching {
     }
 }
 
+// GameBoxscoreClientError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 enum GameBoxscoreClientError: Error, Sendable {
     case invalidURL
     case invalidResponse
@@ -253,6 +274,7 @@ extension GameBoxscoreResponse {
         ].compactMap { $0 }
     }
 
+    // teamTotalSummaryItem 메서드는 이 타입의 주요 동작을 수행합니다.
     private func teamTotalSummaryItem(title: String, away: Int?, home: Int?) -> GameCenterSummaryItem? {
         guard away != nil || home != nil else { return nil }
         let awayValue = String(away ?? 0)
@@ -262,6 +284,7 @@ extension GameBoxscoreResponse {
 }
 
 private extension Array where Element == GameBatterRecord {
+    // total 메서드는 이 타입의 주요 동작을 수행합니다.
     func total(_ keyPath: KeyPath<GameBatterRecord, Int?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath] }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -315,6 +338,7 @@ private extension GamePitcherRecord {
 }
 
 private extension Array where Element == GameBatterRecord {
+    // sortedBySourceOrder 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated func sortedBySourceOrder() -> [GameBatterRecord] {
         sorted { lhs, rhs in
             if lhs.sourceOrder == rhs.sourceOrder {
@@ -326,6 +350,7 @@ private extension Array where Element == GameBatterRecord {
 }
 
 private extension Array where Element == GamePitcherRecord {
+    // sortedBySourceOrder 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated func sortedBySourceOrder() -> [GamePitcherRecord] {
         sorted { lhs, rhs in
             if lhs.sourceOrder == rhs.sourceOrder {

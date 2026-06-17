@@ -1,12 +1,17 @@
 //
 //  GameDetailView.swift
 //  kboScore
+//  기능 설명: 선택한 경기의 상세 정보, 기록, 알림 액션 화면을 표시합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// GameDetailView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct GameDetailView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
@@ -15,17 +20,20 @@ struct GameDetailView: View {
 
     let gameIdentity: String
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(gameID: UUID) {
         let identity = gameID.uuidString
         self.gameIdentity = identity
         self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: identity))
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(gameIdentity: String) {
         self.gameIdentity = gameIdentity
         self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: gameIdentity))
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(stableIdentity: String, initialGame: GameDetail) {
         self.gameIdentity = stableIdentity
         self._viewModel = StateObject(
@@ -37,6 +45,7 @@ struct GameDetailView: View {
         )
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(game: GameDetail) {
         self.gameIdentity = game.stableDetailIdentity
         self._viewModel = StateObject(
@@ -202,6 +211,7 @@ struct GameDetailView: View {
         }
     }
 
+    // loadDetailPresentation 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadDetailPresentation(
         for game: GameDetail,
         inputLocalGameId: UUID,
@@ -228,6 +238,7 @@ struct GameDetailView: View {
         )
     }
 
+    // overviewSection 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
     private func overviewSection(
         presentation: GameDetailPresentation
@@ -240,6 +251,7 @@ struct GameDetailView: View {
         }
     }
 
+    // gameStatusOverviewContent 메서드는 이 타입의 주요 동작을 수행합니다.
     private func gameStatusOverviewContent(
         presentation: GameDetailPresentation
     ) -> some View {
@@ -281,6 +293,7 @@ struct GameDetailView: View {
         }
     }
 
+    // previewOverviewContent 메서드는 이 타입의 주요 동작을 수행합니다.
     private func previewOverviewContent(
         for presentation: GameDetailPresentation
     ) -> some View {
@@ -331,6 +344,7 @@ struct GameDetailView: View {
         }
     }
 
+    // actionButtons 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
     private func actionButtons(for game: GameDetail) -> some View {
         let palette = appModel.favoriteStadiumPalette
@@ -368,6 +382,7 @@ struct GameDetailView: View {
     }
 }
 
+// GameDetailPresentation 구조체는 GameDetailPresentation 타입의 역할과 값을 정의합니다.
 struct GameDetailPresentation {
     let game: GameDetail
     let status: GameStatus
@@ -395,6 +410,7 @@ struct GameDetailPresentation {
     let review: GameCenterReview?
     let preview: GameCenterPreview?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         game: GameDetail,
         payload: GameCenterDetailPayload?,
@@ -538,6 +554,7 @@ struct GameDetailPresentation {
         status.isLiveLike || status.isFinishedLike
     }
 
+    // logRenderedBaseRunnersIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func logRenderedBaseRunnersIfNeeded() {
         #if DEBUG
         print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
@@ -548,6 +565,7 @@ struct GameDetailPresentation {
         #endif
     }
 
+    // renderedBaseRunnerName 메서드는 이 타입의 주요 동작을 수행합니다.
     private func renderedBaseRunnerName(_ value: String?) -> String {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let trimmed, trimmed.isEmpty == false, trimmed != "주자" else {
@@ -557,6 +575,7 @@ struct GameDetailPresentation {
     }
 }
 
+// BaseRunnerDisplayItem 구조체는 BaseRunnerDisplayItem 타입의 역할과 값을 정의합니다.
 struct BaseRunnerDisplayItem: Identifiable, Equatable {
     let base: String
     let name: String
@@ -564,6 +583,7 @@ struct BaseRunnerDisplayItem: Identifiable, Equatable {
     var id: String { base }
 }
 
+// GameStatusSummaryCard 구조체는 GameStatusSummaryCard 타입의 역할과 값을 정의합니다.
 private struct GameStatusSummaryCard: View {
     @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
@@ -647,6 +667,7 @@ private struct GameStatusSummaryCard: View {
     }
 }
 
+// ScoreColumn 구조체는 ScoreColumn 타입의 역할과 값을 정의합니다.
 private struct ScoreColumn: View {
     let title: String
     let team: Team
@@ -658,18 +679,18 @@ private struct ScoreColumn: View {
             Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(tint)
-            TeamMarkView(team: team, size: 54)
             Text(team.displayName)
-                .font(.subheadline.weight(.bold))
+                .font(.title3.weight(.heavy))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-
+	
         }
         .frame(maxWidth: .infinity)
     }
 }
 
+// LiveSituationRow 구조체는 LiveSituationRow 타입의 역할과 값을 정의합니다.
 private struct LiveSituationRow: View {
     let presentation: GameDetailPresentation
 
@@ -715,6 +736,7 @@ private struct LiveSituationRow: View {
     }
 }
 
+// BaseRunnerList 구조체는 BaseRunnerList 타입의 역할과 값을 정의합니다.
 private struct BaseRunnerList: View {
     @Environment(AppModel.self) private var appModel
     let runners: [BaseRunnerDisplayItem]
@@ -739,6 +761,7 @@ private struct BaseRunnerList: View {
     }
 }
 
+// CountMetric 구조체는 CountMetric 타입의 역할과 값을 정의합니다.
 private struct CountMetric: View {
     @Environment(AppModel.self) private var appModel
     let label: String
@@ -757,6 +780,7 @@ private struct CountMetric: View {
     }
 }
 
+// FinalDecisionRow 구조체는 FinalDecisionRow 타입의 역할과 값을 정의합니다.
 private struct FinalDecisionRow: View {
     let presentation: GameDetailPresentation
 
@@ -775,6 +799,7 @@ private struct FinalDecisionRow: View {
     }
 }
 
+// DecisionTag 구조체는 DecisionTag 타입의 역할과 값을 정의합니다.
 private struct DecisionTag: View {
     let title: String
     let value: String
@@ -796,6 +821,7 @@ private struct DecisionTag: View {
     }
 }
 
+// ScheduledInfoRow 구조체는 ScheduledInfoRow 타입의 역할과 값을 정의합니다.
 private struct ScheduledInfoRow: View {
     let presentation: GameDetailPresentation
 
@@ -816,11 +842,13 @@ private struct ScheduledInfoRow: View {
     }
 }
 
+// StatusTile 구조체는 StatusTile 타입의 역할과 값을 정의합니다.
 private struct StatusTile<Content: View>: View {
     @Environment(AppModel.self) private var appModel
     let title: String
     let content: Content
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(title: String, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()
@@ -842,6 +870,7 @@ private struct StatusTile<Content: View>: View {
     }
 }
 
+// OverviewMetadataCard 구조체는 OverviewMetadataCard 타입의 역할과 값을 정의합니다.
 private struct OverviewMetadataCard: View {
     let presentation: GameDetailPresentation
 
@@ -863,6 +892,7 @@ private struct OverviewMetadataCard: View {
     }
 }
 
+// MetaValueTile 구조체는 MetaValueTile 타입의 역할과 값을 정의합니다.
 private struct MetaValueTile: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -887,6 +917,7 @@ private struct MetaValueTile: View {
     }
 }
 
+// GameLineScoreCard 구조체는 GameLineScoreCard 타입의 역할과 값을 정의합니다.
 private struct GameLineScoreCard: View {
     @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
@@ -934,6 +965,7 @@ private struct GameLineScoreCard: View {
     }
 }
 
+// LineScoreHeaderRow 구조체는 LineScoreHeaderRow 타입의 역할과 값을 정의합니다.
 private struct LineScoreHeaderRow: View {
     @Environment(AppModel.self) private var appModel
     let inningLabels: [String]
@@ -962,6 +994,7 @@ private struct LineScoreHeaderRow: View {
     }
 }
 
+// LineScoreValueRow 구조체는 LineScoreValueRow 타입의 역할과 값을 정의합니다.
 private struct LineScoreValueRow: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -972,7 +1005,6 @@ private struct LineScoreValueRow: View {
     var body: some View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
-                TeamMarkView(team: team, size: 24)
                 Text(team.displayName)
                     .font(.caption.weight(.bold))
                     .lineLimit(1)
@@ -1004,6 +1036,7 @@ private struct LineScoreValueRow: View {
     }
 }
 
+// FallbackLineScoreRow 구조체는 FallbackLineScoreRow 타입의 역할과 값을 정의합니다.
 private struct FallbackLineScoreRow: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1013,7 +1046,6 @@ private struct FallbackLineScoreRow: View {
     var body: some View {
         HStack {
             HStack(spacing: 8) {
-                TeamMarkView(team: team, size: 26)
                 Text(team.displayName)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
@@ -1038,6 +1070,7 @@ private struct FallbackLineScoreRow: View {
     }
 }
 
+// SummaryItemsCard 구조체는 SummaryItemsCard 타입의 역할과 값을 정의합니다.
 private struct SummaryItemsCard: View {
     let items: [GameCenterSummaryItem]
 
@@ -1064,6 +1097,7 @@ private struct SummaryItemsCard: View {
     }
 }
 
+// GameDetailRecordTab 열거형는 GameDetailRecordTab 타입의 역할과 값을 정의합니다.
 private enum GameDetailRecordTab: String, CaseIterable, Identifiable {
     case batting = "실시간 라인업 / 타자 기록"
     case pitching = "투수 기록"
@@ -1083,6 +1117,7 @@ private enum GameDetailRecordTab: String, CaseIterable, Identifiable {
     }
 }
 
+// GameDetailRecordTeam 열거형는 GameDetailRecordTeam 타입의 역할과 값을 정의합니다.
 private enum GameDetailRecordTeam: String, CaseIterable, Identifiable {
     case away = "원정"
     case home = "홈"
@@ -1090,6 +1125,7 @@ private enum GameDetailRecordTeam: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// GameDetailRecordsPanel 구조체는 GameDetailRecordsPanel 타입의 역할과 값을 정의합니다.
 private struct GameDetailRecordsPanel: View {
     @State private var selectedTab: GameDetailRecordTab = .batting
     @State private var selectedTeam: GameDetailRecordTeam = .away
@@ -1163,6 +1199,7 @@ private struct GameDetailRecordsPanel: View {
     }
 }
 
+// TeamRecordSwitcher 구조체는 TeamRecordSwitcher 타입의 역할과 값을 정의합니다.
 private struct TeamRecordSwitcher: View {
     @Binding var selection: GameDetailRecordTeam
     let awayTeam: Team
@@ -1188,6 +1225,7 @@ private struct TeamRecordSwitcher: View {
     }
 }
 
+// TeamRecordButton 구조체는 TeamRecordButton 타입의 역할과 값을 정의합니다.
 private struct TeamRecordButton: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -1198,7 +1236,6 @@ private struct TeamRecordButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                TeamMarkView(team: team, size: 22)
                 Text(title)
                     .font(.caption.weight(.bold))
                     .lineLimit(1)
@@ -1219,6 +1256,7 @@ private struct TeamRecordButton: View {
     }
 }
 
+// LimitedRecordSourceNote 구조체는 LimitedRecordSourceNote 타입의 역할과 값을 정의합니다.
 private struct LimitedRecordSourceNote: View {
     @Environment(AppModel.self) private var appModel
 
@@ -1233,6 +1271,7 @@ private struct LimitedRecordSourceNote: View {
     }
 }
 
+// BattingSectionTable 구조체는 BattingSectionTable 타입의 역할과 값을 정의합니다.
 private struct BattingSectionTable: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1273,7 +1312,9 @@ private struct BattingSectionTable: View {
     }
 }
 
+// GameDetailBattingTableColumns 열거형는 GameDetailBattingTableColumns 타입의 역할과 값을 정의합니다.
 enum GameDetailBattingTableColumns {
+    // headers 메서드는 이 타입의 주요 동작을 수행합니다.
     static func headers(isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return ["타수", "득점", "안타", "타점", "홈런", "삼진", "볼넷"]
@@ -1281,6 +1322,7 @@ enum GameDetailBattingTableColumns {
         return ["타수", "득점", "안타", "타점", "홈런", "볼넷", "삼진", "도루", "타율"]
     }
 
+    // values 메서드는 이 타입의 주요 동작을 수행합니다.
     static func values(for line: GameCenterBattingLine, isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return [
@@ -1306,6 +1348,7 @@ enum GameDetailBattingTableColumns {
         ]
     }
 
+    // values 메서드는 이 타입의 주요 동작을 수행합니다.
     static func values(for totals: GameCenterBattingTotals, isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return [
@@ -1332,6 +1375,7 @@ enum GameDetailBattingTableColumns {
     }
 }
 
+// BattingHeaderRow 구조체는 BattingHeaderRow 타입의 역할과 값을 정의합니다.
 private struct BattingHeaderRow: View {
     let isLiveLike: Bool
 
@@ -1345,6 +1389,7 @@ private struct BattingHeaderRow: View {
     }
 }
 
+// BattingValueRow 구조체는 BattingValueRow 타입의 역할과 값을 정의합니다.
 private struct BattingValueRow: View {
     let line: GameCenterBattingLine
     let isLiveLike: Bool
@@ -1359,6 +1404,7 @@ private struct BattingValueRow: View {
     }
 }
 
+// BattingTotalsRow 구조체는 BattingTotalsRow 타입의 역할과 값을 정의합니다.
 private struct BattingTotalsRow: View {
     let totals: GameCenterBattingTotals
     let isLiveLike: Bool
@@ -1373,6 +1419,7 @@ private struct BattingTotalsRow: View {
     }
 }
 
+// PitchingSectionTable 구조체는 PitchingSectionTable 타입의 역할과 값을 정의합니다.
 private struct PitchingSectionTable: View {
     let team: Team
     let section: GameCenterPitchingSection
@@ -1417,6 +1464,7 @@ private struct PitchingSectionTable: View {
     }
 }
 
+// PitchingHeaderRow 구조체는 PitchingHeaderRow 타입의 역할과 값을 정의합니다.
 private struct PitchingHeaderRow: View {
     var body: some View {
         StatsTableRow(
@@ -1429,6 +1477,7 @@ private struct PitchingHeaderRow: View {
     }
 }
 
+// PitchingValueRow 구조체는 PitchingValueRow 타입의 역할과 값을 정의합니다.
 private struct PitchingValueRow: View {
     let line: GameCenterPitchingLine
 
@@ -1457,6 +1506,7 @@ private struct PitchingValueRow: View {
     }
 }
 
+// PitchingTotalsRow 구조체는 PitchingTotalsRow 타입의 역할과 값을 정의합니다.
 private struct PitchingTotalsRow: View {
     let totals: GameCenterPitchingTotals
 
@@ -1486,6 +1536,7 @@ private struct PitchingTotalsRow: View {
     }
 }
 
+// StatsTableRow 구조체는 StatsTableRow 타입의 역할과 값을 정의합니다.
 private struct StatsTableRow: View {
     @Environment(AppModel.self) private var appModel
     var order: String? = nil
@@ -1556,6 +1607,7 @@ private struct StatsTableRow: View {
     }
 }
 
+// KeyRecordsComparisonView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct KeyRecordsComparisonView: View {
     let presentation: GameDetailPresentation
     let review: GameCenterReview
@@ -1603,6 +1655,7 @@ private struct KeyRecordsComparisonView: View {
     }
 }
 
+// KeyRecordMetric 구조체는 KeyRecordMetric 타입의 역할과 값을 정의합니다.
 private struct KeyRecordMetric: Identifiable {
     let title: String
     let away: Int?
@@ -1611,6 +1664,7 @@ private struct KeyRecordMetric: Identifiable {
     var id: String { title }
 }
 
+// KeyRecordComparisonRow 구조체는 KeyRecordComparisonRow 타입의 역할과 값을 정의합니다.
 private struct KeyRecordComparisonRow: View {
     let title: String
     let awayValue: Int?
@@ -1638,6 +1692,7 @@ private struct KeyRecordComparisonRow: View {
     }
 }
 
+// ComparisonBar 구조체는 ComparisonBar 타입의 역할과 값을 정의합니다.
 private struct ComparisonBar: View {
     let value: Int?
     let maxValue: Int
@@ -1660,6 +1715,7 @@ private struct ComparisonBar: View {
     }
 }
 
+// RecordsEmptyState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 private struct RecordsEmptyState: View {
     let status: GameStatus
 
@@ -1690,6 +1746,7 @@ private struct RecordsEmptyState: View {
     }
 }
 
+// DetailInlineLoadingView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DetailInlineLoadingView: View {
     @Environment(AppModel.self) private var appModel
     let message: String
@@ -1707,6 +1764,7 @@ private struct DetailInlineLoadingView: View {
     }
 }
 
+// ProbableStartersCard 구조체는 ProbableStartersCard 타입의 역할과 값을 정의합니다.
 private struct ProbableStartersCard: View {
     let awayTeam: Team
     let homeTeam: Team
@@ -1726,6 +1784,7 @@ private struct ProbableStartersCard: View {
     }
 }
 
+// StarterColumn 구조체는 StarterColumn 타입의 역할과 값을 정의합니다.
 private struct StarterColumn: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1735,7 +1794,6 @@ private struct StarterColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                TeamMarkView(team: team, size: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(role)
                         .font(.caption2.weight(.bold))
@@ -1760,6 +1818,7 @@ private struct StarterColumn: View {
     }
 }
 
+// MatchupComparisonCard 구조체는 MatchupComparisonCard 타입의 역할과 값을 정의합니다.
 private struct MatchupComparisonCard: View {
     let awayMatchup: GameCenterMatchupSnapshot
     let homeMatchup: GameCenterMatchupSnapshot
@@ -1778,6 +1837,7 @@ private struct MatchupComparisonCard: View {
     }
 }
 
+// MatchupColumn 구조체는 MatchupColumn 타입의 역할과 값을 정의합니다.
 private struct MatchupColumn: View {
     @Environment(AppModel.self) private var appModel
     let snapshot: GameCenterMatchupSnapshot
@@ -1803,6 +1863,7 @@ private struct MatchupColumn: View {
     }
 }
 
+// MatchupMetric 구조체는 MatchupMetric 타입의 역할과 값을 정의합니다.
 private struct MatchupMetric: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -1821,6 +1882,7 @@ private struct MatchupMetric: View {
     }
 }
 
+// DetailMessageCard 구조체는 DetailMessageCard 타입의 역할과 값을 정의합니다.
 private struct DetailMessageCard: View {
     @Environment(AppModel.self) private var appModel
     let icon: String
@@ -1848,6 +1910,7 @@ private struct DetailMessageCard: View {
     }
 }
 
+// DetailLoadingCard 구조체는 DetailLoadingCard 타입의 역할과 값을 정의합니다.
 private struct DetailLoadingCard: View {
     @Environment(AppModel.self) private var appModel
     let message: String
@@ -1865,12 +1928,14 @@ private struct DetailLoadingCard: View {
 }
 
 private extension Text {
+    // lineScoreTotalStyle 메서드는 이 타입의 주요 동작을 수행합니다.
     func lineScoreTotalStyle(emphasis: Bool = false) -> some View {
         font(.caption.weight(emphasis ? .bold : .semibold))
             .monospacedDigit()
             .frame(width: 34)
     }
 
+    // comparisonValueStyle 메서드는 이 타입의 주요 동작을 수행합니다.
     func comparisonValueStyle() -> some View {
         font(.title3.weight(.semibold))
             .monospacedDigit()
@@ -1938,6 +2003,7 @@ private extension GameCenterBattingSection {
 }
 
 private extension GameCenterBattingTotals {
+    // derived 메서드는 이 타입의 주요 동작을 수행합니다.
     static func derived(from lines: [GameCenterBattingLine]) -> GameCenterBattingTotals? {
         let atBats = lines.sum(\.atBats)
         let runs = lines.sum(\.runs)
@@ -1970,6 +2036,7 @@ private extension GameCenterBattingTotals {
     }
 }
 
+// GameCenterPitchingTotals 구조체는 GameCenterPitchingTotals 타입의 역할과 값을 정의합니다.
 private struct GameCenterPitchingTotals {
     let innings: String?
     let battersFaced: String?
@@ -1984,6 +2051,7 @@ private struct GameCenterPitchingTotals {
     let homeRunsAllowed: String?
     let pitches: String?
 
+    // derived 메서드는 이 타입의 주요 동작을 수행합니다.
     static func derived(from lines: [GameCenterPitchingLine]) -> GameCenterPitchingTotals? {
         let outs = lines.compactMap { $0.innings.outsValue }.reduce(0, +)
         let battersFaced = lines.sum(\.battersFaced)
@@ -2016,11 +2084,13 @@ private struct GameCenterPitchingTotals {
         )
     }
 
+    // combinedWalksOrHitByPitch 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func combinedWalksOrHitByPitch(walks: Int?, hitBatters: Int?) -> Int? {
         guard walks != nil || hitBatters != nil else { return nil }
         return (walks ?? 0) + (hitBatters ?? 0)
     }
 
+    // inningsText 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func inningsText(fromOuts outs: Int) -> String {
         let innings = outs / 3
         let remainder = outs % 3
@@ -2037,6 +2107,7 @@ private extension GameCenterPitchingLine {
 }
 
 private extension GameCenterReview {
+    // teamSummaryValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func teamSummaryValue(titleContains keyword: String, team: Team) -> Int? {
         summaryItems
             .first { $0.title.contains(keyword) }?
@@ -2062,6 +2133,7 @@ private extension String {
         return Int(cleaned).map { $0 * 3 }
     }
 
+    // teamValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func teamValue(for team: Team) -> Int? {
         let names = [team.displayName, team.shortName, team.name]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -2075,6 +2147,7 @@ private extension String {
         return nil
     }
 
+    // firstRegexCapture 메서드는 이 타입의 주요 동작을 수행합니다.
     func firstRegexCapture(pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(startIndex..<endIndex, in: self)
@@ -2088,6 +2161,7 @@ private extension String {
 }
 
 private extension Array where Element == GameCenterBattingLine {
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -2095,6 +2169,7 @@ private extension Array where Element == GameCenterBattingLine {
 }
 
 private extension Array where Element == GameCenterPitchingLine {
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterPitchingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)
