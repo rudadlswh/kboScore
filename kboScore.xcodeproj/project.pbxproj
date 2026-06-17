@@ -371,6 +371,7 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
+                            "$(SRCROOT)/scripts/validate_release_backend_config.sh",
 			);
 			name = "Validate Release Backend Configuration";
 			outputFileListPaths = (
