@@ -1,6 +1,10 @@
 //
 //  LiveKBOResponseCache.swift
 //  kboScore
+//  기능 설명: 실시간 KBO 응답을 키별로 캐싱하고 병합합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
@@ -20,10 +24,12 @@ actor RepositoryResponseCache {
     private var notificationsTask: Task<[NotificationItem], Error>?
     private var monthlyScheduleTasks: [KBOMonthScheduleKey: Task<[GameDetail], Error>] = [:]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(configuration: RepositoryCacheConfiguration) {
         self.diskCache = RepositoryDiskCache(directoryURL: configuration.diskCacheDirectory)
     }
 
+    // bootstrapValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func bootstrapValue(
         ttl: TimeInterval,
         fetch: @escaping @Sendable () async throws -> KBOBootstrapData
@@ -58,6 +64,7 @@ actor RepositoryResponseCache {
         }
     }
 
+    // gamesValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func gamesValue(
         ttl: TimeInterval,
         fetch: @escaping @Sendable () async throws -> [GameDetail]
@@ -92,6 +99,7 @@ actor RepositoryResponseCache {
         }
     }
 
+    // notificationsValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func notificationsValue(
         ttl: TimeInterval,
         fetch: @escaping @Sendable () async throws -> [NotificationItem]
@@ -126,6 +134,7 @@ actor RepositoryResponseCache {
         }
     }
 
+    // monthlyScheduleValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func monthlyScheduleValue(
         for month: KBOMonthScheduleKey,
         ttl: TimeInterval,
@@ -161,6 +170,7 @@ actor RepositoryResponseCache {
         }
     }
 
+    // refreshMonthlyScheduleValue 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshMonthlyScheduleValue(
         for month: KBOMonthScheduleKey,
         fetch: @escaping @Sendable () async throws -> [GameDetail]
@@ -190,6 +200,7 @@ actor RepositoryResponseCache {
         }
     }
 
+    // upsertGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func upsertGames(_ incomingGames: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
         guard incomingGames.isEmpty == false else {
             return (0, 0, 0)
@@ -226,17 +237,20 @@ actor RepositoryResponseCache {
         return (result.inserted, result.updated, result.skippedExisting)
     }
 
+    // localTeamRanks 메서드는 이 타입의 주요 동작을 수행합니다.
     func localTeamRanks(season: Int) async -> [TeamRankRow] {
         let rows = await cachedTeamRankEntry(season: season)?.value ?? []
         return rows.sorted { $0.rank < $1.rank }
     }
 
+    // replaceTeamRanks 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func replaceTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
         let sorted = ranks.sorted { $0.rank < $1.rank }
         await storeTeamRanks(sorted, season: season, timestamp: .now)
         return sorted.count
     }
 
+    // cachedBootstrapEntry 메서드는 이 타입의 주요 동작을 수행합니다.
     private func cachedBootstrapEntry() async -> RepositoryCacheEntry<KBOBootstrapData>? {
         if let bootstrapEntry {
             return bootstrapEntry
@@ -247,6 +261,7 @@ actor RepositoryResponseCache {
         return diskEntry
     }
 
+    // cachedGamesEntry 메서드는 이 타입의 주요 동작을 수행합니다.
     private func cachedGamesEntry() async -> RepositoryCacheEntry<[GameDetail]>? {
         if let gamesEntry {
             return gamesEntry
@@ -257,6 +272,7 @@ actor RepositoryResponseCache {
         return diskEntry
     }
 
+    // cachedNotificationsEntry 메서드는 이 타입의 주요 동작을 수행합니다.
     private func cachedNotificationsEntry() async -> RepositoryCacheEntry<[NotificationItem]>? {
         if let notificationsEntry {
             return notificationsEntry
@@ -267,6 +283,7 @@ actor RepositoryResponseCache {
         return diskEntry
     }
 
+    // cachedMonthlyScheduleEntry 메서드는 이 타입의 주요 동작을 수행합니다.
     private func cachedMonthlyScheduleEntry(for month: KBOMonthScheduleKey) async -> RepositoryCacheEntry<[GameDetail]>? {
         if let entry = monthlyScheduleEntries[month] {
             return entry
@@ -277,6 +294,7 @@ actor RepositoryResponseCache {
         return diskEntry
     }
 
+    // cachedTeamRankEntry 메서드는 이 타입의 주요 동작을 수행합니다.
     private func cachedTeamRankEntry(season: Int) async -> RepositoryCacheEntry<[TeamRankRow]>? {
         if let entry = teamRankEntries[season] {
             return entry
@@ -287,31 +305,37 @@ actor RepositoryResponseCache {
         return diskEntry
     }
 
+    // storeBootstrap 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeBootstrap(_ value: KBOBootstrapData, timestamp: Date) async {
         bootstrapEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeBootstrap(value, timestamp: timestamp)
     }
 
+    // storeGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeGames(_ value: [GameDetail], timestamp: Date) async {
         gamesEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeGames(value, timestamp: timestamp)
     }
 
+    // storeNotifications 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeNotifications(_ value: [NotificationItem], timestamp: Date) async {
         notificationsEntry = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeNotifications(value, timestamp: timestamp)
     }
 
+    // storeMonthlySchedule 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeMonthlySchedule(_ value: [GameDetail], for month: KBOMonthScheduleKey, timestamp: Date) async {
         monthlyScheduleEntries[month] = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeMonthlySchedule(value, for: month, timestamp: timestamp)
     }
 
+    // storeTeamRanks 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeTeamRanks(_ value: [TeamRankRow], season: Int, timestamp: Date) async {
         teamRankEntries[season] = RepositoryCacheEntry(value: value, timestamp: timestamp)
         await diskCache.storeTeamRanks(value, season: season, timestamp: timestamp)
     }
 
+    // upsert 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private static func upsert(
         incomingGames: [GameDetail],
         into existingGames: [GameDetail]

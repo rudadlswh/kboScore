@@ -1,16 +1,22 @@
 //
 //  OfficialKBOGameListDTOs.swift
 //  kboScore
+//  기능 설명: KBO 공식 API 응답을 디코딩하기 위한 DTO를 정의합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/13/26.
 //
 
 import Foundation
 
+// OfficialGameListResponse 구조체는 OfficialGameListResponse 타입의 역할과 값을 정의합니다.
 struct OfficialGameListResponse: Decodable {
     let game: [OfficialGameEntry]
 }
 
+// OfficialGameEntry 구조체는 OfficialGameEntry 타입의 역할과 값을 정의합니다.
 struct OfficialGameEntry: Decodable, Sendable {
     let leagueID: Int
     let seriesID: Int
@@ -43,6 +49,7 @@ struct OfficialGameEntry: Decodable, Sendable {
     let thirdBaseOccupancy: Int?
     private let decodedBaseOrderSourceKeys: [String]
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case leagueID = "LE_ID"
         case seriesID = "SR_ID"
@@ -75,6 +82,7 @@ struct OfficialGameEntry: Decodable, Sendable {
         case thirdBaseOccupancy = "B3_BAT_ORDER_NO"
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         leagueID = try container.decode(Int.self, forKey: .leagueID)
@@ -117,6 +125,7 @@ struct OfficialGameEntry: Decodable, Sendable {
         decodedBaseOrderSourceKeys
     }
 
+    // decodeInt 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private static func decodeInt(
         from decoder: any Decoder,
         keys: [String]
@@ -136,19 +145,23 @@ struct OfficialGameEntry: Decodable, Sendable {
     }
 }
 
+// OfficialFlexibleCodingKey 구조체는 OfficialFlexibleCodingKey 타입의 역할과 값을 정의합니다.
 private struct OfficialFlexibleCodingKey: CodingKey, Hashable, Sendable {
     let stringValue: String
     let intValue: Int?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(_ stringValue: String) {
         self.stringValue = stringValue
         self.intValue = nil
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(stringValue: String) {
         self.init(stringValue)
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(intValue: Int) {
         self.stringValue = String(intValue)
         self.intValue = intValue

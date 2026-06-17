@@ -1,12 +1,17 @@
 //
 //  OfficialBoxScoreBattingInterpreter.swift
 //  kboScore
+//  기능 설명: 공식 박스스코어 타격 행의 위치와 기록 값을 해석합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
 
 import Foundation
 
+// OfficialBattingTableInterpretation 열거형는 OfficialBattingTableInterpretation 타입의 역할과 값을 정의합니다.
 enum OfficialBattingTableInterpretation: String {
     case lineup
     case aggregateBattingStats
@@ -73,6 +78,7 @@ private extension String {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self

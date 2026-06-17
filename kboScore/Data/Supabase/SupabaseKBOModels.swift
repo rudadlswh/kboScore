@@ -1,12 +1,17 @@
 //
 //  SupabaseKBOModels.swift
 //  kboScore
+//  기능 설명: Supabase 공개 테이블 응답과 앱 도메인 모델 간 매핑을 정의합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 4/24/26.
 //
 
 import Foundation
 
+// SupabaseConfiguration 구조체는 SupabaseConfiguration 타입의 역할과 값을 정의합니다.
 nonisolated struct SupabaseConfiguration: Sendable {
     nonisolated static let exposedSchema = "kbo_crawler_api"
 
@@ -15,18 +20,21 @@ nonisolated struct SupabaseConfiguration: Sendable {
 }
 
 private extension Array where Element == SupabaseGameBatterRecordRow {
+    // total 메서드는 이 타입의 주요 동작을 수행합니다.
     func total(_ keyPath: KeyPath<SupabaseGameBatterRecordRow, Int?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath] }
         return values.isEmpty ? nil : values.reduce(0, +)
     }
 }
 
+// SupabaseTeamRow 구조체는 SupabaseTeamRow 타입의 역할과 값을 정의합니다.
 nonisolated struct SupabaseTeamRow: Decodable, Sendable {
     let id: UUID
     let code: String
     let name: String
     let shortName: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case code = "team_code"
@@ -34,6 +42,7 @@ nonisolated struct SupabaseTeamRow: Decodable, Sendable {
         case shortName = "short_name"
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         id: UUID,
         code: String,
@@ -46,6 +55,7 @@ nonisolated struct SupabaseTeamRow: Decodable, Sendable {
         self.shortName = shortName
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -56,6 +66,7 @@ nonisolated struct SupabaseTeamRow: Decodable, Sendable {
     }
 }
 
+// SupabaseGameRow 구조체는 SupabaseGameRow 타입의 역할과 값을 정의합니다.
 nonisolated struct SupabaseGameRow: Codable, Sendable {
     let id: UUID
     let publicGameID: String?
@@ -82,6 +93,7 @@ nonisolated struct SupabaseGameRow: Codable, Sendable {
     let homeStartingPitcherName: String?
     let awayStartingPitcherName: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case publicGameID = "public_game_id"
@@ -109,6 +121,7 @@ nonisolated struct SupabaseGameRow: Codable, Sendable {
         case awayStartingPitcherName = "away_starting_pitcher_name"
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -143,6 +156,7 @@ nonisolated struct SupabaseGameRow: Codable, Sendable {
     }
 }
 
+// SupabaseLatestGameSnapshotRow 구조체는 SupabaseLatestGameSnapshotRow 타입의 역할과 값을 정의합니다.
 nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     nonisolated static let selectColumns = "*"
 
@@ -163,6 +177,7 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     let debugAvailableFieldNames: Set<String>
 #endif
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         gameID = try container.decode(UUID.self, forKey: DynamicCodingKey("game_id"))
@@ -198,6 +213,7 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
 #endif
     }
 
+    // firstNonBlankString 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func firstNonBlankString(
         in container: KeyedDecodingContainer<DynamicCodingKey>,
         keys: [String]
@@ -213,6 +229,7 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     }
 }
 
+// SupabaseGameBatterRecordRow 구조체는 SupabaseGameBatterRecordRow 타입의 역할과 값을 정의합니다.
 struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
     let id: UUID?
     let gameID: UUID
@@ -233,6 +250,7 @@ struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
     let errors: Int?
     let battingAverage: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case gameID = "game_id"
@@ -255,6 +273,7 @@ struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
     }
 }
 
+// SupabaseGamePitcherRecordRow 구조체는 SupabaseGamePitcherRecordRow 타입의 역할과 값을 정의합니다.
 struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
     let id: UUID?
     let gameID: UUID
@@ -279,6 +298,7 @@ struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
     let earnedRuns: Int?
     let era: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case gameID = "game_id"
@@ -305,6 +325,7 @@ struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
     }
 }
 
+// SupabaseGameEventRow 구조체는 SupabaseGameEventRow 타입의 역할과 값을 정의합니다.
 struct SupabaseGameEventRow: Decodable, Sendable, Equatable {
     let id: UUID?
     let gameID: UUID
@@ -315,6 +336,7 @@ struct SupabaseGameEventRow: Decodable, Sendable, Equatable {
     let eventType: String?
     let eventText: String
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case gameID = "game_id"
@@ -327,26 +349,32 @@ struct SupabaseGameEventRow: Decodable, Sendable, Equatable {
     }
 }
 
+// DynamicCodingKey 구조체는 DynamicCodingKey 타입의 역할과 값을 정의합니다.
 nonisolated private struct DynamicCodingKey: CodingKey, Hashable, Sendable {
     let stringValue: String
     let intValue: Int?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(_ stringValue: String) {
         self.stringValue = stringValue
         self.intValue = nil
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(stringValue: String) {
         self.init(stringValue)
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(intValue: Int) {
         self.stringValue = String(intValue)
         self.intValue = intValue
     }
 }
 
+// SupabaseKBOMapper 열거형는 외부 데이터와 도메인 모델 사이의 변환을 담당합니다.
 nonisolated enum SupabaseKBOMapper {
+    // mapTeam 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapTeam(_ row: SupabaseTeamRow) -> Team {
         let normalizedCode = normalizeTeamCode(row.code)
         let identity = TeamIdentity.catalog[normalizedCode]
@@ -363,12 +391,14 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // mapTeams 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapTeams(_ rows: [SupabaseTeamRow]) -> [Team] {
         rows
             .map(mapTeam)
             .sorted { $0.id < $1.id }
     }
 
+    // mapGames 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapGames(
         gameRows: [SupabaseGameRow],
         teamRows: [SupabaseTeamRow],
@@ -390,6 +420,7 @@ nonisolated enum SupabaseKBOMapper {
         return KBODataMapper.mapGames(payload, teams: Array(teamsByUUID.values))
     }
 
+    // mapGame 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapGame(
         row: SupabaseGameRow,
         teamRows: [SupabaseTeamRow],
@@ -412,6 +443,7 @@ nonisolated enum SupabaseKBOMapper {
         return KBODataMapper.mapGames(payload, teams: Array(teamsByUUID.values)).first ?? fallbackGame
     }
 
+    // mapBootstrap 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapBootstrap(
         teamRows: [SupabaseTeamRow],
         gameRows: [SupabaseGameRow],
@@ -427,6 +459,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // mapDetailedRecordReview 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @MainActor
     static func mapDetailedRecordReview(
         game: GameDetail,
@@ -469,6 +502,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // gameCenterSummaryItems 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     private static func gameCenterSummaryItems(
         awayBatters: [SupabaseGameBatterRecordRow],
@@ -481,6 +515,7 @@ nonisolated enum SupabaseKBOMapper {
         ].compactMap { $0 }
     }
 
+    // teamTotalSummaryItem 메서드는 이 타입의 주요 동작을 수행합니다.
     @MainActor
     private static func teamTotalSummaryItem(title: String, away: Int?, home: Int?) -> GameCenterSummaryItem? {
         guard away != nil || home != nil else { return nil }
@@ -489,6 +524,7 @@ nonisolated enum SupabaseKBOMapper {
         return GameCenterSummaryItem(title: title, value: "\(awayValue) - \(homeValue)", values: [awayValue, homeValue])
     }
 
+    // sortedBatterRows 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     @MainActor
     private static func sortedBatterRows(
         _ rows: [SupabaseGameBatterRecordRow]
@@ -511,6 +547,7 @@ nonisolated enum SupabaseKBOMapper {
         }
     }
 
+    // sortedPitcherRows 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     @MainActor
     private static func sortedPitcherRows(
         _ rows: [SupabaseGamePitcherRecordRow]
@@ -533,6 +570,7 @@ nonisolated enum SupabaseKBOMapper {
         }
     }
 
+    // mapBatterRecord 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @MainActor
     private static func mapBatterRecord(_ row: SupabaseGameBatterRecordRow) -> GameCenterBattingLine {
         GameCenterBattingLine(
@@ -551,6 +589,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // mapPitcherRecord 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     @MainActor
     private static func mapPitcherRecord(_ row: SupabaseGamePitcherRecordRow) -> GameCenterPitchingLine {
         GameCenterPitchingLine(
@@ -574,6 +613,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // mapGameDTO 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapGameDTO(
         _ classifiedRow: ClassifiedSupabaseGameRow,
         teamsByUUID: [UUID: Team],
@@ -647,6 +687,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // makeUnknownTeam 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private static func makeUnknownTeam(id: UUID) -> Team {
         let fallbackID = "unknown-\(id.uuidString.lowercased())"
         return Team(
@@ -658,6 +699,7 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // makeNote 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private static func makeNote(
         provider: String?,
         publicGameID: String?,
@@ -701,6 +743,7 @@ nonisolated enum SupabaseKBOMapper {
         return components.isEmpty ? nil : components.joined(separator: " ")
     }
 
+    // statusText 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func statusText(for row: SupabaseGameRow) -> String? {
         if row.isCancelled == true || row.isPostponed == true {
             return "cancelled"
@@ -708,6 +751,7 @@ nonisolated enum SupabaseKBOMapper {
         return row.status?.nilIfBlank ?? row.inningState?.nilIfBlank
     }
 
+    // classifiedRow 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func classifiedRow(from row: SupabaseGameRow) -> ClassifiedSupabaseGameRow {
         let providerGameID = resolvedProviderGameID(for: row)
         return ClassifiedSupabaseGameRow(
@@ -717,10 +761,12 @@ nonisolated enum SupabaseKBOMapper {
         )
     }
 
+    // resolvedProviderGameID 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private static func resolvedProviderGameID(for row: SupabaseGameRow) -> String? {
         row.providerGameID?.nilIfBlank ?? row.officialProviderGameID?.nilIfBlank
     }
 
+    // inferredSeasonClassification 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func inferredSeasonClassification(
         for row: SupabaseGameRow,
         providerGameID: String?
@@ -775,6 +821,7 @@ nonisolated enum SupabaseKBOMapper {
     }
 
 #if DEBUG
+    // debugLogSeasonClassificationSummary 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     nonisolated private static func debugLogSeasonClassificationSummary(_ rows: [ClassifiedSupabaseGameRow]) {
         let regularSeasonCount = rows.filter { $0.seasonClassification == .regularSeason }.count
         let preseasonCount = rows.filter { $0.seasonClassification == .exhibitionPreseason }.count
@@ -793,12 +840,14 @@ nonisolated enum SupabaseKBOMapper {
     }
 #endif
 
+// ClassifiedSupabaseGameRow 구조체는 ClassifiedSupabaseGameRow 타입의 역할과 값을 정의합니다.
     nonisolated private struct ClassifiedSupabaseGameRow: Sendable {
         let row: SupabaseGameRow
         let providerGameID: String?
         let seasonClassification: GameSeasonClassification
     }
 
+    // normalizeTeamCode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func normalizeTeamCode(_ rawValue: String) -> String {
         rawValue
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -806,15 +855,19 @@ nonisolated enum SupabaseKBOMapper {
     }
 }
 
+// SupabaseDateParser 열거형는 원천 데이터를 앱에서 사용할 수 있는 값으로 해석합니다.
 nonisolated enum SupabaseDateParser {
+    // parseGameDate 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func parseGameDate(_ value: String?) -> Date? {
         KBODateParser.parseGameDate(value)
     }
 
+    // parseTimestamp 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func parseTimestamp(_ value: String?) -> Date? {
         KBODateParser.parseTimestamp(value)
     }
 
+    // debugTimestamp 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     nonisolated static func debugTimestamp(_ date: Date) -> String {
         KBODateParser.debugTimestamp(date)
     }

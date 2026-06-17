@@ -1,12 +1,17 @@
 //
 //  AnyKBORepository.swift
 //  kboScore
+//  기능 설명: 여러 저장소 프로토콜 구현을 타입 소거 래퍼로 통합합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
 
 import Foundation
 
+// AnyKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
@@ -32,6 +37,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
     private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
     private let upsertLocalGamesBlock: (@Sendable ([GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int))?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(_ base: any KBORepository) {
         fetchBootstrapDataBlock = { try await base.fetchBootstrapData() }
         fetchGamesBlock = { try await base.fetchGames() }
@@ -156,26 +162,32 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         }
     }
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         try await fetchBootstrapDataBlock()
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await fetchGamesBlock()
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await fetchNotificationsBlock()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleBlock(month)
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
         try await fetchMonthlyScheduleBypassingCacheBlock(month, bypassingCache)
     }
 
+    // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchScheduleTabMonth(for month: KBOMonthScheduleKey, bypassingCache: Bool) async throws -> [GameDetail] {
         guard let fetchScheduleTabMonthBlock else {
             return try await fetchMonthlySchedule(for: month, bypassingCache: bypassingCache)
@@ -183,18 +195,22 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchScheduleTabMonthBlock(month, bypassingCache)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await fetchScheduleByDateBlock(date, false)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         try await fetchScheduleByDateBlock(date, bypassingCache)
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await fetchStandingsBlock()
     }
 
+    // fetchStandingsSource 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
         guard let fetchStandingsSourceBlock else {
             return try await fetchGames()
@@ -203,21 +219,25 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchStandingsSourceBlock(season)
     }
 
+    // fetchTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
         guard let fetchTeamRanksBlock else { return [] }
         return try await fetchTeamRanksBlock(season)
     }
 
+    // fetchLocalTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLocalTeamRanks(season: Int) async -> [TeamRankRow] {
         guard let fetchLocalTeamRanksBlock else { return [] }
         return await fetchLocalTeamRanksBlock(season)
     }
 
+    // replaceLocalTeamRanks 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     nonisolated func replaceLocalTeamRanks(_ ranks: [TeamRankRow], season: Int) async -> Int {
         guard let replaceLocalTeamRanksBlock else { return 0 }
         return await replaceLocalTeamRanksBlock(ranks, season)
     }
 
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchFavoriteTeamSchedule(
         date: Date,
         favoriteTeamId: Team.ID,
@@ -230,6 +250,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchFavoriteTeamScheduleBlock(date, favoriteTeamId, bypassingCache)
     }
 
+    // fetchGameDetailSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailSnapshot(
         for game: GameDetail,
         identity: String,
@@ -239,6 +260,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchGameDetailSnapshotBlock(game, identity, cachedTeams)
     }
 
+    // fetchGameDetailSnapshotResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailSnapshotResult(
         for game: GameDetail,
         identity: String,
@@ -256,6 +278,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         )
     }
 
+    // fetchGameDetailIdentitySnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
@@ -264,11 +287,13 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchGameDetailIdentitySnapshotBlock(identity, cachedTeams)
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
         guard let fetchGameDetailDatabaseReviewBlock else { return nil }
         return try await fetchGameDetailDatabaseReviewBlock(game)
     }
 
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
         if let fetchGameDetailDatabaseReviewResultBlock {
             return try await fetchGameDetailDatabaseReviewResultBlock(game)
@@ -287,6 +312,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         )
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(
         providerGameID: String?,
         publicGameID: String?,
@@ -300,6 +326,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         )
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(
         supabaseGameId: UUID,
         providerGameID: String?,
@@ -315,6 +342,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         )
     }
 
+    // fetchRemoteGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchRemoteGameCount() async throws -> Int {
         guard let fetchRemoteGameCountBlock else {
             throw KBOScheduleSyncError.unsupported
@@ -322,6 +350,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchRemoteGameCountBlock()
     }
 
+    // fetchMissingScheduleGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
         guard let fetchMissingScheduleGamesBlock else {
             throw KBOScheduleSyncError.unsupported
@@ -329,6 +358,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
         return try await fetchMissingScheduleGamesBlock(knownGames)
     }
 
+    // upsertLocalGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
         guard let upsertLocalGamesBlock else {
             return (0, 0, games.count)

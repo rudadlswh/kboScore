@@ -1,6 +1,10 @@
 //
 //  OfficialLineupFallbackParser.swift
 //  kboScore
+//  기능 설명: 공식 라인업 페이지에서 대체 라인업 정보를 파싱합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
@@ -8,6 +12,7 @@
 import Foundation
 
 extension OfficialKBOGameCenterClient {
+    // makeLineupBattingSections 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     func makeLineupBattingSections(from data: Data) -> [GameCenterBattingSection] {
         guard let json = try? JSONSerialization.jsonObject(with: data) else {
             return []
@@ -29,6 +34,7 @@ extension OfficialKBOGameCenterClient {
         return Array(candidates.prefix(2).map(\.section))
     }
 
+    // makeBattingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeBattingSection(fromRawTable rawTable: String) -> GameCenterBattingSection? {
         guard let orderTable = decodeLineupFallbackGridTable(from: rawTable) else {
             return nil
@@ -36,6 +42,7 @@ extension OfficialKBOGameCenterClient {
         return makeBattingSection(orderTable: orderTable, detailTable: nil, summaryTable: nil)
     }
 
+    // battingSectionCandidates 메서드는 이 타입의 주요 동작을 수행합니다.
     func battingSectionCandidates(in value: Any, path: String = "$") -> [BattingSectionCandidate] {
         var candidates: [BattingSectionCandidate] = []
 
@@ -73,6 +80,7 @@ extension OfficialKBOGameCenterClient {
         return candidates
     }
 
+    // makeFieldBasedBattingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeFieldBasedBattingSection(from value: Any) -> GameCenterBattingSection? {
         let rows: [[String: Any]]
         if let array = value as? [[String: Any]] {
@@ -108,15 +116,18 @@ extension OfficialKBOGameCenterClient {
         return lines.isEmpty ? nil : GameCenterBattingSection(lines: lines, totals: nil)
     }
 
+    // battingOrderValue 메서드는 이 타입의 주요 동작을 수행합니다.
     private func battingOrderValue(in row: [String: Any]) -> String? {
         stringValue(in: row, keys: ["BAT_ORDER_NO", "BAT_ORDER", "BO", "BAT_ORDER_CN", "LINEUP_NO", "ORDER_NO", "ORDER"])
             .flatMap { $0.battingOrderNumber }
     }
 
+    // playerNameValue 메서드는 이 타입의 주요 동작을 수행합니다.
     private func playerNameValue(in row: [String: Any]) -> String? {
         stringValue(in: row, keys: ["NAME", "P_NM", "PLAYER_NM", "HITTER_NM", "BATTER_NM", "P_NM_KOR"])
     }
 
+    // stringValue 메서드는 이 타입의 주요 동작을 수행합니다.
     private func stringValue(in row: [String: Any], keys: [String]) -> String? {
         for key in keys {
             guard let rawValue = row[key] else { continue }
@@ -136,6 +147,7 @@ extension OfficialKBOGameCenterClient {
     }
 }
 
+// BattingSectionCandidate 구조체는 BattingSectionCandidate 타입의 역할과 값을 정의합니다.
 struct BattingSectionCandidate {
     let path: String
     let section: GameCenterBattingSection
@@ -165,6 +177,7 @@ private extension String {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self

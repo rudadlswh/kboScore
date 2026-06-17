@@ -1,6 +1,10 @@
 //
 //  OfficialScoreboardParser.swift
 //  kboScore
+//  기능 설명: 공식 스코어보드 HTML/JSON에서 라인스코어와 경기 상태를 파싱합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
@@ -8,6 +12,7 @@
 import Foundation
 
 extension OfficialKBOGameCenterClient {
+    // makeLineScore 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     func makeLineScore(from payload: OfficialScoreboardResponse) -> GameCenterLineScore? {
         guard let rawInningTable = payload.inningTable,
               let rawTotalsTable = payload.totalsTable,
@@ -31,6 +36,7 @@ extension OfficialKBOGameCenterClient {
         )
     }
 
+    // makeLineScoreFromScoreboardPageHTML 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     func makeLineScoreFromScoreboardPageHTML(
         _ html: String,
         context: OfficialGameLookupContext
@@ -48,6 +54,7 @@ extension OfficialKBOGameCenterClient {
         return nil
     }
 
+    // makeBoxScoreFromScoreboardPageHTML 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     func makeBoxScoreFromScoreboardPageHTML(
         _ html: String,
         context: OfficialGameLookupContext
@@ -96,6 +103,7 @@ extension OfficialKBOGameCenterClient {
         return nil
     }
 
+    // makeLineScoreFromScoreboardTableHTML 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLineScoreFromScoreboardTableHTML(_ tableHTML: String) -> GameCenterLineScore? {
         let headers = firstRowCells(in: firstSectionHTML("thead", in: tableHTML) ?? "")
         let rows = rowHTMLs(in: firstSectionHTML("tbody", in: tableHTML) ?? "")
@@ -134,6 +142,7 @@ extension OfficialKBOGameCenterClient {
         )
     }
 
+    // makeRenderedBattingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeRenderedBattingSection(orderTable: String?, summaryTable: String?) -> GameCenterBattingSection? {
         guard let orderTable else { return nil }
         let orderRows = bodyRows(in: orderTable)
@@ -179,6 +188,7 @@ extension OfficialKBOGameCenterClient {
         return GameCenterBattingSection(lines: lines, totals: totals)
     }
 
+    // makeRenderedPitchingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeRenderedPitchingSection(from table: String) -> GameCenterPitchingSection? {
         let headers = headerCells(in: table)
         let lines = bodyRows(in: table).compactMap { row -> GameCenterPitchingLine? in
@@ -208,6 +218,7 @@ extension OfficialKBOGameCenterClient {
         return lines.isEmpty ? nil : GameCenterPitchingSection(lines: lines)
     }
 
+    // makeRenderedSummaryItems 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeRenderedSummaryItems(from table: String) -> [GameCenterSummaryItem] {
         bodyRows(in: table).compactMap { row in
             let cells = rowCells(in: row)
@@ -218,6 +229,7 @@ extension OfficialKBOGameCenterClient {
         }
     }
 
+    // makeTotals 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeTotals(from row: OfficialGridRow) -> GameCenterTeamLineTotals {
         GameCenterTeamLineTotals(
             runs: row.cells[safe: 0]?.text.nilIfBlank,
@@ -227,50 +239,61 @@ extension OfficialKBOGameCenterClient {
         )
     }
 
+    // scoreboardBlocks 메서드는 이 타입의 주요 동작을 수행합니다.
     private func scoreboardBlocks(in html: String) -> [String] {
         matches(pattern: #"(?is)<div\s+class=['"]smsScore['"][^>]*>.*?(?=<div\s+class=['"]smsScore['"]|<!-- //smsscore -->)"#, in: html)
     }
 
+    // teamNames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func teamNames(in html: String) -> [String] {
         matches(pattern: #"(?is)<strong\s+class=['"]teamT['"][^>]*>(.*?)</strong>"#, in: html)
             .map { $0.strippingHTML().decodedHTMLEntities.nilIfBlank ?? "" }
             .filter { $0.isEmpty == false }
     }
 
+    // firstTableHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     private func firstTableHTML(withClass className: String, in html: String) -> String? {
         matches(pattern: #"(?is)<table[^>]*class=['"][^'"]*\#(className)[^'"]*['"][^>]*>.*?</table>"#, in: html).first
     }
 
+    // tableHTMLs 메서드는 이 타입의 주요 동작을 수행합니다.
     private func tableHTMLs(in html: String) -> [String] {
         matches(pattern: #"(?is)<table\b[^>]*>.*?</table>"#, in: html)
     }
 
+    // tableHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     private func tableHTML(withID id: String, in tables: [String]) -> String? {
         tables.first { table in
             table.range(of: #"(?i)\bid=['"]\#(id)['"]"#, options: .regularExpression) != nil
         }
     }
 
+    // firstSectionHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     private func firstSectionHTML(_ section: String, in html: String) -> String? {
         matches(pattern: #"(?is)<\#(section)[^>]*>.*?</\#(section)>"#, in: html).first
     }
 
+    // sectionHTMLs 메서드는 이 타입의 주요 동작을 수행합니다.
     private func sectionHTMLs(_ section: String, in html: String) -> [String] {
         matches(pattern: #"(?is)<\#(section)[^>]*>.*?</\#(section)>"#, in: html)
     }
 
+    // rowHTMLs 메서드는 이 타입의 주요 동작을 수행합니다.
     private func rowHTMLs(in html: String) -> [String] {
         matches(pattern: #"(?is)<tr[^>]*>.*?</tr>"#, in: html)
     }
 
+    // bodyRows 메서드는 이 타입의 주요 동작을 수행합니다.
     private func bodyRows(in table: String) -> [String] {
         sectionHTMLs("tbody", in: table).flatMap(rowHTMLs(in:))
     }
 
+    // footerRows 메서드는 이 타입의 주요 동작을 수행합니다.
     private func footerRows(in table: String) -> [String] {
         sectionHTMLs("tfoot", in: table).flatMap(rowHTMLs(in:))
     }
 
+    // headerCells 메서드는 이 타입의 주요 동작을 수행합니다.
     private func headerCells(in table: String) -> [String] {
         sectionHTMLs("thead", in: table)
             .flatMap(rowHTMLs(in:))
@@ -278,16 +301,19 @@ extension OfficialKBOGameCenterClient {
             .last { $0.contains { $0.nilIfBlank != nil } } ?? []
     }
 
+    // firstRowCells 메서드는 이 타입의 주요 동작을 수행합니다.
     private func firstRowCells(in html: String) -> [String] {
         guard let row = rowHTMLs(in: html).first else { return [] }
         return rowCells(in: row)
     }
 
+    // rowCells 메서드는 이 타입의 주요 동작을 수행합니다.
     private func rowCells(in html: String) -> [String] {
         matches(pattern: #"(?is)<t[hd][^>]*>.*?</t[hd]>"#, in: html)
             .map { $0.strippingHTML().decodedHTMLEntities.nilIfBlank ?? "" }
     }
 
+    // statValue 메서드는 이 타입의 주요 동작을 수행합니다.
     private func statValue(labels: [String], headers: [String], cells: [String], fallbackIndex: Int?) -> String? {
         let normalizedLabels = labels.map(normalizedStatLabel)
         if let index = headers.firstIndex(where: { normalizedLabels.contains(normalizedStatLabel($0)) }),
@@ -298,6 +324,7 @@ extension OfficialKBOGameCenterClient {
         return cells[safe: fallbackIndex]?.nilIfBlank
     }
 
+    // normalizedStatLabel 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizedStatLabel(_ value: String) -> String {
         let scalars = value.unicodeScalars.filter { scalar in
             CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
@@ -307,6 +334,7 @@ extension OfficialKBOGameCenterClient {
         return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
+    // matches 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func matches(pattern: String, in text: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
@@ -316,6 +344,7 @@ extension OfficialKBOGameCenterClient {
         }
     }
 
+    // normalizedTeamName 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizedTeamName(_ value: String) -> String {
         value
             .replacingOccurrences(of: " ", with: "")
@@ -357,6 +386,7 @@ private extension String {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self

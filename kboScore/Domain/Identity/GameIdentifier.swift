@@ -1,6 +1,10 @@
 //
 //  GameIdentifier.swift
 //  kboScore
+//  기능 설명: 여러 데이터 소스의 경기 식별자를 하나의 비교 가능한 키로 정규화합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
@@ -8,19 +12,23 @@
 import CryptoKit
 import Foundation
 
+// GameIdentifier 열거형는 GameIdentifier 타입의 역할과 값을 정의합니다.
 enum GameIdentifier {
+// IdentityMatchToken 구조체는 IdentityMatchToken 타입의 역할과 값을 정의합니다.
     struct IdentityMatchToken: Hashable, Sendable {
         let value: String
         let priority: Int
         let reason: String
     }
 
+// IdentityMatch 구조체는 IdentityMatch 타입의 역할과 값을 정의합니다.
     struct IdentityMatch: Sendable {
         let priority: Int
         let token: String
         let reason: String
     }
 
+    // uuid 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func uuid(from rawValue: String?) -> UUID? {
         guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               rawValue.isEmpty == false else { return nil }
@@ -30,10 +38,12 @@ enum GameIdentifier {
         return stableUUID(from: rawValue)
     }
 
+    // canonicalRawValue 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated static func canonicalRawValue(id: UUID, providerGameID: String?) -> String {
         trimmedProviderGameID(providerGameID) ?? id.uuidString.lowercased()
     }
 
+    // canonicalKey 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated static func canonicalKey(id: UUID, providerGameID: String?) -> String {
         if let providerGameID = trimmedProviderGameID(providerGameID) {
             return providerKey(providerGameID)
@@ -41,6 +51,7 @@ enum GameIdentifier {
         return idKey(id)
     }
 
+    // canonicalUUID 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated static func canonicalUUID(id rawID: String?, providerGameID: String?) -> UUID? {
         if let providerGameID = trimmedProviderGameID(providerGameID) {
             return uuid(from: providerGameID)
@@ -48,6 +59,7 @@ enum GameIdentifier {
         return uuid(from: rawID)
     }
 
+    // canonicalUUID 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated static func canonicalUUID(id: UUID, providerGameID: String?) -> UUID {
         if let providerGameID = trimmedProviderGameID(providerGameID),
            let providerUUID = uuid(from: providerGameID) {
@@ -56,14 +68,17 @@ enum GameIdentifier {
         return id
     }
 
+    // idKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func idKey(_ id: UUID) -> String {
         "id:\(id.uuidString.lowercased())"
     }
 
+    // providerKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func providerKey(_ providerGameID: String) -> String {
         "provider:\(providerGameID)"
     }
 
+    // lookupKeys 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func lookupKeys(from rawValue: String) -> [String] {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return [] }
@@ -100,6 +115,7 @@ enum GameIdentifier {
         ]
     }
 
+    // rawIdentifier 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func rawIdentifier(from identity: String) -> String {
         let trimmed = identity.trimmingCharacters(in: .whitespacesAndNewlines)
         for prefix in ["public:", "provider:"] where trimmed.hasPrefix(prefix) {
@@ -109,6 +125,7 @@ enum GameIdentifier {
         return trimmed
     }
 
+    // requestedIdentityTokens 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     nonisolated static func requestedIdentityTokens(from identity: String) -> Set<String> {
         let trimmed = identity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return [] }
@@ -132,6 +149,7 @@ enum GameIdentifier {
         return [trimmed]
     }
 
+    // bestMatch 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func bestMatch(
         requestTokens: Set<String>,
         candidateTokens: [IdentityMatchToken]
@@ -150,6 +168,7 @@ enum GameIdentifier {
             }
     }
 
+    // trimmedProviderGameID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func trimmedProviderGameID(_ providerGameID: String?) -> String? {
         guard let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
               providerGameID.isEmpty == false else {
@@ -158,6 +177,7 @@ enum GameIdentifier {
         return providerGameID
     }
 
+    // stableUUID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func stableUUID(from value: String) -> UUID {
         let digest = SHA256.hash(data: Data(value.utf8))
         var bytes = Array(digest.prefix(16))

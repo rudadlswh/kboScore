@@ -1,12 +1,17 @@
 //
 //  KBOLiveDTOs.swift
 //  kboScore
+//  기능 설명: 라이브 KBO API 응답 디코딩에 사용하는 DTO를 정의합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import Foundation
 
+// KBOTeamDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOTeamDTO: Codable, Sendable {
     let id: String
     let name: String
@@ -15,6 +20,7 @@ struct KBOTeamDTO: Codable, Sendable {
     let markText: String
     let previousRegularSeasonRank: Int?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         id: String,
         name: String,
@@ -31,6 +37,7 @@ struct KBOTeamDTO: Codable, Sendable {
         self.previousRegularSeasonRank = previousRegularSeasonRank
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -46,6 +53,7 @@ struct KBOTeamDTO: Codable, Sendable {
             container.decodeIfPresent(Int.self, forKey: .previous_regular_season_rank)
     }
 
+    // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -56,6 +64,7 @@ struct KBOTeamDTO: Codable, Sendable {
         try container.encodeIfPresent(previousRegularSeasonRank, forKey: .previousRegularSeasonRank)
     }
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -70,17 +79,20 @@ struct KBOTeamDTO: Codable, Sendable {
     }
 }
 
+// KBORunnerStateDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBORunnerStateDTO: Codable, Sendable {
     let first: Bool
     let second: Bool
     let third: Bool
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(first: Bool, second: Bool, third: Bool) {
         self.first = first
         self.second = second
         self.third = third
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         first = try container.decodeIfPresent(Bool.self, forKey: .first) ?? false
@@ -89,11 +101,13 @@ struct KBORunnerStateDTO: Codable, Sendable {
     }
 }
 
+// KBOBaseRunnersDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOBaseRunnersDTO: Codable, Sendable {
     let first: String?
     let second: String?
     let third: String?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(first: String?, second: String?, third: String?) {
         self.first = first
         self.second = second
@@ -101,6 +115,7 @@ struct KBOBaseRunnersDTO: Codable, Sendable {
     }
 }
 
+// KBOGameEventDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOGameEventDTO: Codable, Sendable {
     let id: UUID
     let type: String
@@ -108,6 +123,7 @@ struct KBOGameEventDTO: Codable, Sendable {
     let inningText: String?
     let timestamp: Date
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         id: UUID,
         type: String,
@@ -122,6 +138,7 @@ struct KBOGameEventDTO: Codable, Sendable {
         self.timestamp = timestamp
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -132,6 +149,7 @@ struct KBOGameEventDTO: Codable, Sendable {
     }
 }
 
+// KBOGameDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOGameDTO: Codable, Sendable {
     let id: UUID
     let providerGameID: String?
@@ -158,6 +176,7 @@ struct KBOGameDTO: Codable, Sendable {
     let currentPitcherName: String?
     let currentBatterName: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case providerGameID
@@ -199,6 +218,7 @@ struct KBOGameDTO: Codable, Sendable {
         case current_batter_name
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         id: UUID,
         providerGameID: String? = nil,
@@ -252,6 +272,7 @@ struct KBOGameDTO: Codable, Sendable {
         self.currentBatterName = currentBatterName
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedOfficialProviderGameID = try container.decodeIfPresent(String.self, forKey: .officialProviderGameID)
@@ -307,6 +328,7 @@ struct KBOGameDTO: Codable, Sendable {
             container.decodeIfPresent(String.self, forKey: .current_batter_name)
     }
 
+    // providerTeamIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func providerTeamIDs(from note: String?) -> (away: String, home: String)? {
         guard let note else { return nil }
         guard let range = note.range(of: "provider_game_id=") else { return nil }
@@ -317,6 +339,7 @@ struct KBOGameDTO: Codable, Sendable {
         return (String(parts[parts.count - 2]), String(parts[parts.count - 1]))
     }
 
+    // nestedTeamIdentifier 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func nestedTeamIdentifier(
         from decoder: any Decoder,
         keyCandidates: [String]
@@ -341,6 +364,7 @@ struct KBOGameDTO: Codable, Sendable {
         return nil
     }
 
+    // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -368,6 +392,7 @@ struct KBOGameDTO: Codable, Sendable {
         try container.encodeIfPresent(currentBatterName, forKey: .currentBatterName)
     }
 
+    // providerGameID 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func providerGameID(from note: String?) -> String? {
         guard let note,
               let range = note.range(of: "provider_game_id=") else {
@@ -383,10 +408,12 @@ struct KBOGameDTO: Codable, Sendable {
     }
 }
 
+// KBOStandingsTeamDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOStandingsTeamDTO: Decodable, Sendable {
     let teamID: String
     let nameKo: String
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case teamID
         case teamId
@@ -394,11 +421,13 @@ struct KBOStandingsTeamDTO: Decodable, Sendable {
         case name_ko
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(teamID: String, nameKo: String) {
         self.teamID = teamID
         self.nameKo = nameKo
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         teamID = try container.decodeIfPresent(String.self, forKey: .teamID) ??
@@ -408,6 +437,7 @@ struct KBOStandingsTeamDTO: Decodable, Sendable {
     }
 }
 
+// KBOStandingsItemDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOStandingsItemDTO: Decodable, Sendable {
     let team: KBOStandingsTeamDTO
     let rank: Int
@@ -424,6 +454,7 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
     let postseasonQualificationProbability: Double?
     let postseasonProbabilityUnavailableReason: String?
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case team
         case rank
@@ -441,6 +472,7 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
         case postseasonProbabilityUnavailableReason
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         team = try container.decode(KBOStandingsTeamDTO.self, forKey: .team)
@@ -460,19 +492,23 @@ struct KBOStandingsItemDTO: Decodable, Sendable {
     }
 }
 
+// KBOStandingsResponseDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOStandingsResponseDTO: Decodable, Sendable {
     let standings: [KBOStandingsItemDTO]
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case standings
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         standings = try container.decodeIfPresent([KBOStandingsItemDTO].self, forKey: .standings) ?? []
     }
 }
 
+// KBONotificationDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBONotificationDTO: Codable, Sendable {
     let id: UUID
     let type: String
@@ -487,6 +523,7 @@ struct KBONotificationDTO: Codable, Sendable {
     let gameStableIdentity: String?
     let relatedTeamIDs: [String]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         id: UUID,
         type: String,
@@ -515,6 +552,7 @@ struct KBONotificationDTO: Codable, Sendable {
         self.relatedTeamIDs = relatedTeamIDs
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -532,12 +570,14 @@ struct KBONotificationDTO: Codable, Sendable {
     }
 }
 
+// KBOBootstrapDTO 구조체는 외부 응답과 내부 모델 변환에 사용하는 데이터 전송 값을 담습니다.
 struct KBOBootstrapDTO: Codable, Sendable {
     let teams: [KBOTeamDTO]
     let games: [KBOGameDTO]
     let notifications: [KBONotificationDTO]
     let settings: AppSettings?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         teams: [KBOTeamDTO],
         games: [KBOGameDTO],
@@ -550,6 +590,7 @@ struct KBOBootstrapDTO: Codable, Sendable {
         self.settings = settings
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         teams = try container.decodeIfPresent([KBOTeamDTO].self, forKey: .teams) ?? []
@@ -559,7 +600,9 @@ struct KBOBootstrapDTO: Codable, Sendable {
     }
 }
 
+// KBODataMapper 열거형는 외부 데이터와 도메인 모델 사이의 변환을 담당합니다.
 enum KBODataMapper {
+    // mapBootstrap 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapBootstrap(_ payload: KBOBootstrapDTO) -> KBOBootstrapData {
         let teams = payload.teams.map(mapTeam)
         let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
@@ -574,17 +617,20 @@ enum KBODataMapper {
         )
     }
 
+    // mapGames 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapGames(_ payload: [KBOGameDTO], teams: [Team]) -> [GameDetail] {
         let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
         return payload.compactMap { mapGame($0, teamsByID: teamsByID) }
             .sorted { $0.scheduledStart > $1.scheduledStart }
     }
 
+    // mapNotifications 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapNotifications(_ payload: [KBONotificationDTO]) -> [NotificationItem] {
         payload.map(mapNotification)
             .sorted { $0.sentAt > $1.sentAt }
     }
 
+    // mapStandings 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapStandings(_ payload: KBOStandingsResponseDTO, teams: [Team]) -> [TeamStandingsSnapshot] {
         let teamsByID = Dictionary(uniqueKeysWithValues: teams.map { (normalizedTeamID($0.id), $0) })
         return payload.standings.compactMap { item in
@@ -610,6 +656,7 @@ enum KBODataMapper {
         }
     }
 
+    // mapGameStatus 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapGameStatus(code: String?, text: String?, inningText: String? = nil) -> GameStatus {
         let normalized = [code, text, inningText]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
@@ -662,6 +709,7 @@ enum KBODataMapper {
         return .upcoming
     }
 
+    // mapTeam 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func mapTeam(_ dto: KBOTeamDTO) -> Team {
         let normalizedID = normalizedTeamID(dto.id)
         return Team(
@@ -674,6 +722,7 @@ enum KBODataMapper {
         )
     }
 
+    // mapGame 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapGame(_ dto: KBOGameDTO, teamsByID: [String: Team]) -> GameDetail? {
         guard let awayTeam = resolvedTeam(id: dto.awayTeamID, teamsByID: teamsByID),
               let homeTeam = resolvedTeam(id: dto.homeTeamID, teamsByID: teamsByID) else {
@@ -719,6 +768,7 @@ enum KBODataMapper {
         )
     }
 
+    // mapRecentResult 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapRecentResult(_ rawValue: String) -> TeamGameResult? {
         switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "win":
@@ -732,6 +782,7 @@ enum KBODataMapper {
         }
     }
 
+    // mapEvent 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapEvent(_ dto: KBOGameEventDTO) -> GameEvent {
         GameEvent(
             id: dto.id,
@@ -742,6 +793,7 @@ enum KBODataMapper {
         )
     }
 
+    // mapNotification 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapNotification(_ dto: KBONotificationDTO) -> NotificationItem {
         let type = mapNotificationType(dto.type)
         return NotificationItem(
@@ -760,6 +812,7 @@ enum KBODataMapper {
         )
     }
 
+    // resolvedTeam 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private static func resolvedTeam(id: String, teamsByID: [String: Team]) -> Team? {
         let normalizedID = normalizedTeamID(id)
         return teamsByID[normalizedID] ?? Team(
@@ -771,10 +824,12 @@ enum KBODataMapper {
         )
     }
 
+    // normalizedTeamID 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func normalizedTeamID(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    // mapSeasonClassification 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapSeasonClassification(
         _ rawValue: String?,
         note: String?
@@ -786,6 +841,7 @@ enum KBODataMapper {
         return classification
     }
 
+    // sanitizedNote 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func sanitizedNote(
         _ raw: String?
     ) -> String? {
@@ -794,6 +850,7 @@ enum KBODataMapper {
         return note
     }
 
+    // mapEventType 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapEventType(_ rawValue: String) -> GameEventType {
         switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "score", "scorechange", "득점":
@@ -809,6 +866,7 @@ enum KBODataMapper {
         }
     }
 
+    // mapNotificationType 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func mapNotificationType(_ rawValue: String) -> NotificationType {
         switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "scorechange", "score", "득점":
@@ -839,6 +897,7 @@ private extension String {
 }
 
 private extension KeyedDecodingContainer {
+    // decodeFlexibleDate 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func decodeFlexibleDate(forKey key: Key) throws -> Date? {
         if let timestamp = try? decodeIfPresent(Date.self, forKey: key) {
             return timestamp
@@ -863,22 +922,27 @@ private extension KeyedDecodingContainer {
     }
 }
 
+// AnyCodingKey 구조체는 AnyCodingKey 타입의 역할과 값을 정의합니다.
 private struct AnyCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(stringValue: String) {
         self.stringValue = stringValue
         self.intValue = nil
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(intValue: Int) {
         self.stringValue = String(intValue)
         self.intValue = intValue
     }
 }
 
+// FlexibleDateParser 열거형는 원천 데이터를 앱에서 사용할 수 있는 값으로 해석합니다.
 enum FlexibleDateParser {
+    // makeFormatter 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private static func makeFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -888,6 +952,7 @@ enum FlexibleDateParser {
         return formatter
     }
 
+    // parse 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func parse(_ value: String) -> Date? {
         let iso8601WithFractional = ISO8601DateFormatter()
         iso8601WithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

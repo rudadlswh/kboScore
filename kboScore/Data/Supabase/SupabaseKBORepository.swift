@@ -1,12 +1,17 @@
 //
 //  SupabaseKBORepository.swift
 //  kboScore
+//  기능 설명: Supabase 공개 API에서 KBO 팀, 경기, 순위, 상세 기록 데이터를 조회합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 4/24/26.
 //
 
 import Foundation
 
+// SupabaseGameLookup 열거형는 SupabaseGameLookup 타입의 역할과 값을 정의합니다.
 enum SupabaseGameLookup: Sendable, Equatable {
     case providerGameID(String)
     case officialProviderGameID(String)
@@ -47,37 +52,57 @@ enum SupabaseGameLookup: Sendable, Equatable {
 }
 
 protocol SupabaseKBOReading: Sendable {
+    // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow]
+    // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow]
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow]
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow]
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow]
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow]
+    // fetchGamesForStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow]
+    // fetchTeamRanks2026 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow]
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow]
+    // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow]
+    // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow]
+    // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow?
+    // fetchGameBatterRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow]
+    // fetchGamePitcherRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow]
+    // fetchGameEvents 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow]
 }
 
 extension SupabaseKBOReading {
+    // fetchTeamRanks2026 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow] {
         []
     }
 
+    // fetchGameBatterRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
         []
     }
 
+    // fetchGamePitcherRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
         []
     }
 
+    // fetchGameEvents 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
         []
     }
@@ -87,6 +112,7 @@ actor SupabaseTeamRowCache {
     private var rows: [SupabaseTeamRow]?
     private var fetchTask: Task<[SupabaseTeamRow], Error>?
 
+    // teams 메서드는 이 타입의 주요 동작을 수행합니다.
     func teams(fetch: @escaping @Sendable () async throws -> [SupabaseTeamRow]) async throws -> [SupabaseTeamRow] {
         if let rows {
             return rows
@@ -109,12 +135,14 @@ actor SupabaseTeamRowCache {
 
 // Read-only overlay: the iOS app only selects public data from Supabase.
 // Inserts/updates/deletes must stay in trusted backend, admin, or scheduled jobs.
+// SupabaseBackedKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReading>: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, Sendable {
     let base: Base
     let source: Source
     let runtimeState: RepositoryRuntimeState?
     let teamCache = SupabaseTeamRowCache()
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         #if DEBUG
         print("[SupabaseKBO] fetchBootstrapData start source=localFirst")
@@ -147,6 +175,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         #if DEBUG
         print("[SupabaseKBO] fetchGames start")
@@ -166,14 +195,17 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await base.fetchNotifications()
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await fetchMonthlySchedule(for: month, bypassingCache: false)
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(
         for month: KBOMonthScheduleKey,
         bypassingCache: Bool
@@ -196,6 +228,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchScheduleTabMonth(
         for month: KBOMonthScheduleKey,
         bypassingCache _: Bool
@@ -218,6 +251,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchSupabaseMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchSupabaseMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         let teamsTask = Task { try await cachedTeamRows() }
         let games = try await source.fetchGames(month: month)
@@ -231,10 +265,12 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         return mapped
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
         try await fetchSchedule(for: date, bypassingCache: false)
     }
 
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
         #if DEBUG
         print("[SupabaseKBO] fetchSchedule(date:) start date=\(date.ISO8601Format())")
@@ -279,6 +315,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchFavoriteTeamSchedule(
         date: Date,
         favoriteTeamId: Team.ID,
@@ -316,10 +353,12 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
         try await base.fetchStandings()
     }
 
+    // fetchStandingsSource 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchStandingsSource(season: Int) async throws -> [GameDetail] {
         #if DEBUG
         print("[SupabaseKBO] fetchStandingsSource start season=\(season)")
@@ -354,6 +393,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         }
     }
 
+    // fetchTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks(season: Int) async throws -> [TeamRankRow] {
         guard season == 2026 else {
             return []
@@ -390,6 +430,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         return enriched
     }
 
+    // fetchSupabaseBootstrap 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchSupabaseBootstrap() async throws -> KBOBootstrapData {
         let teamsTask = Task { try await cachedTeamRows() }
         let gamesTask = Task { try await source.fetchGames() }
@@ -398,6 +439,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         return SupabaseKBOMapper.mapBootstrap(teamRows: teams, gameRows: games)
     }
 
+    // fetchRemoteBootstrap 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchRemoteBootstrap() async throws -> KBOBootstrapData {
         let supabaseBootstrap = try await fetchSupabaseBootstrap()
         await runtimeState?.record(source: .supabase, delivery: .supabase)
@@ -412,6 +454,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         )
     }
 
+    // fetchSupabaseGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchSupabaseGames() async throws -> [GameDetail] {
         let teamsTask = Task { try await cachedTeamRows() }
         let gamesTask = Task { try await source.fetchGames() }
@@ -420,6 +463,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
         return SupabaseKBOMapper.mapGames(gameRows: games, teamRows: teams)
     }
 
+    // cachedTeamRows 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func cachedTeamRows() async throws -> [SupabaseTeamRow] {
         try await teamCache.teams {
             try await source.fetchTeams()
@@ -429,10 +473,12 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
 }
 
 extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource {
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
         try await fetchGameDetailDatabaseReviewResult(for: game)?.review
     }
 
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
         #if DEBUG
         print("[GameDetailDBRecords] dbRecordFetch inputLocalGameId=\(game.id.uuidString) publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
@@ -486,6 +532,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         )
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(
         providerGameID: String?,
         publicGameID: String?,
@@ -517,6 +564,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return nil
     }
 
+    // databaseRecordProviderLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func databaseRecordProviderLookups(
         providerGameID: String?,
         publicGameID: String?
@@ -524,6 +572,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         var lookups: [SupabaseGameLookup] = []
         var seen = Set<String>()
 
+        // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
         func append(_ lookup: SupabaseGameLookup) {
             let key = "\(lookup.debugKey)=\(lookup.debugValue)"
             guard seen.insert(key).inserted else { return }
@@ -542,6 +591,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return lookups
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(
         supabaseGameId: UUID,
         providerGameID: String?,
@@ -600,6 +650,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         )
     }
 
+    // resolveSupabaseGameRowForDatabaseRecords 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private func resolveSupabaseGameRowForDatabaseRecords(for game: GameDetail) async throws -> SupabaseGameRow? {
         let directLookups = databaseRecordDetailLookups(for: game)
         for lookup in directLookups {
@@ -618,10 +669,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return nil
     }
 
+    // databaseRecordDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func databaseRecordDetailLookups(for game: GameDetail) -> [SupabaseGameLookup] {
         var lookups = directDetailLookups(for: game, identity: game.stableDetailIdentity)
         var seen = Set(lookups.map { "\($0.debugKey)=\($0.debugValue)" })
 
+        // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
         func append(_ lookup: SupabaseGameLookup) {
             let key = "\(lookup.debugKey)=\(lookup.debugValue)"
             guard seen.insert(key).inserted else { return }
@@ -640,6 +693,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return lookups
     }
 
+    // fetchGameEventsIfAllowed 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchGameEventsIfAllowed(gameID: UUID) async -> [SupabaseGameEventRow] {
         do {
             return try await source.fetchGameEvents(gameID: gameID)
@@ -651,6 +705,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         }
     }
 
+    // fetchGameDetailIdentitySnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailIdentitySnapshot(
         identity: String,
         cachedTeams: [Team]
@@ -690,6 +745,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return nil
     }
 
+    // fetchGameDetailSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailSnapshot(
         for game: GameDetail,
         identity: String,
@@ -702,6 +758,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         )?.game
     }
 
+    // fetchGameDetailSnapshotResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailSnapshotResult(
         for game: GameDetail,
         identity: String,
@@ -769,6 +826,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return nil
     }
 
+    // latestSnapshotIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func latestSnapshotIfNeeded(
         for row: SupabaseGameRow,
         fallbackGame: GameDetail
@@ -785,12 +843,14 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return try await source.fetchLatestSnapshot(gameID: row.id)
     }
 
+    // identityFallbackDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func identityFallbackDetailLookups(for identity: String) -> [SupabaseGameLookup] {
         let trimmed = identity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return [] }
         var lookups: [SupabaseGameLookup] = []
         var seen: Set<String> = []
 
+        // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
         func append(_ lookup: SupabaseGameLookup) {
             let key = "\(lookup.debugKey)=\(lookup.debugValue)"
             guard seen.insert(key).inserted else { return }
@@ -849,10 +909,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return lookups
     }
 
+    // directDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func directDetailLookups(for game: GameDetail, identity: String) -> [SupabaseGameLookup] {
         var lookups: [SupabaseGameLookup] = []
         var seen: Set<String> = []
 
+        // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
         func append(_ lookup: SupabaseGameLookup) {
             let key = "\(lookup.debugKey)=\(lookup.debugValue)"
             guard seen.insert(key).inserted else { return }
@@ -890,6 +952,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return lookups
     }
 
+    // teamFallbackDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func teamFallbackDetailLookups(
         for game: GameDetail,
         teamRows: [SupabaseTeamRow]
@@ -911,6 +974,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return lookups
     }
 
+    // supabaseGameDateString 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func supabaseGameDateString(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -922,10 +986,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
 }
 
 extension SupabaseBackedKBORepository: KBOScheduleRemoteSyncDataSource {
+    // fetchRemoteGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchRemoteGameCount() async throws -> Int {
         try await source.fetchGameCount()
     }
 
+    // fetchMissingScheduleGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMissingScheduleGames(excludingKnownGames knownGames: [GameDetail]) async throws -> KBOScheduleMissingGamesResult {
         let knownProviderIDs = Set(
             knownGames.compactMap { game in
@@ -943,6 +1009,7 @@ extension SupabaseBackedKBORepository: KBOScheduleRemoteSyncDataSource {
 }
 
 private extension GameDetail {
+    // supabaseNoteToken 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated func supabaseNoteToken(_ key: String) -> String? {
         guard let note,
               let range = note.range(of: "\(key)=") else {
@@ -954,16 +1021,19 @@ private extension GameDetail {
 }
 
 #if DEBUG
+// supabaseDebugText 메서드는 이 타입의 주요 동작을 수행합니다.
 private nonisolated func supabaseDebugText(_ value: String?) -> String {
     let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return trimmed.isEmpty ? "<nil>" : trimmed
 }
 
+// baseDebugText 메서드는 이 타입의 주요 동작을 수행합니다.
 private nonisolated func baseDebugText(_ bases: RunnerState?) -> String {
     guard let bases else { return "---" }
     return "\(bases.first ? "1" : "-")\(bases.second ? "2" : "-")\(bases.third ? "3" : "-")"
 }
 
+// supabaseSchemaMismatchColumn 메서드는 이 타입의 주요 동작을 수행합니다.
 private nonisolated func supabaseSchemaMismatchColumn(from error: any Error) -> String? {
     let text = String(describing: error)
     guard text.contains("42703") || text.localizedCaseInsensitiveContains("does not exist") else {
@@ -999,6 +1069,7 @@ private extension GameDetail {
 import Supabase
 
 // Read-only client for public KBO tables exposed through Supabase's HTTP API layer.
+// SupabaseKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     private let baseURL: URL
     private let schemaName: String
@@ -1085,12 +1156,16 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         "event_text"
     ].joined(separator: ",")
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(configuration: SupabaseConfiguration) {
         self.baseURL = configuration.url
         self.schemaName = SupabaseConfiguration.exposedSchema
         self.client = SupabaseClient(
             supabaseURL: configuration.url,
-            supabaseKey: configuration.publishableKey
+            supabaseKey: configuration.publishableKey,
+            options: .init(
+                auth: .init(emitLocalSessionAsInitialSession: true)
+            )
         )
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
@@ -1101,12 +1176,14 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #endif
     }
 
+    // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeams() async throws -> [SupabaseTeamRow] {
         try await teamCache.teams {
             try await fetchTeamsFromDatabase()
         }
     }
 
+    // fetchTeamsFromDatabase 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchTeamsFromDatabase() async throws -> [SupabaseTeamRow] {
         #if DEBUG
         print("[SupabaseKBO] fetchTeams start schema=\(schemaName) table=teams baseURL=\(baseURL.absoluteString)")
@@ -1123,6 +1200,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int {
         #if DEBUG
         print("[SupabaseKBO] fetchGameCount query start schema=\(schemaName) table=games")
@@ -1138,6 +1216,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return count
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         #if DEBUG
         print("[SupabaseKBO] fetchGames query start schema=\(schemaName) table=games dateRange=all")
@@ -1156,6 +1235,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(excludingProviderGameIDs providerGameIDs: Set<String>) async throws -> [SupabaseGameRow] {
         let excludedIDs = providerGameIDs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -1186,6 +1266,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         let interval = monthInterval(for: month)
         #if DEBUG
@@ -1209,6 +1290,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
         #if DEBUG
         print("[SupabaseKBO] fetchGames(date:) query start schema=\(schemaName) table=games date=\(gameDateString(date))")
@@ -1227,6 +1309,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date, favoriteTeamID: String) async throws -> [SupabaseGameRow] {
         let teams = try await fetchTeams()
         let normalizedFavoriteTeamID = SupabaseKBOMapper.normalizeTeamCode(favoriteTeamID)
@@ -1254,6 +1337,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGamesForStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamesForStandings(season: Int) async throws -> [SupabaseGameRow] {
         let dateRange = standingsSeasonDateRange(for: season)
         let startDate = gameDateString(dateRange.start)
@@ -1280,6 +1364,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchTeamRanks2026 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchTeamRanks2026() async throws -> [TeamRankRow] {
         #if DEBUG
         print("[SupabaseKBO] fetchTeamRanks query start schema=\(schemaName) view=team_rank_2026")
@@ -1296,6 +1381,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
         #if DEBUG
         print("[SupabaseKBO] fetchGame(single:) query start schema=\(schemaName) table=games key=\(lookup.debugKey) value=\(lookup.debugValue)")
@@ -1365,6 +1451,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
         let ids = Array(Set(gameIDs)).map(\.uuidString).sorted()
         guard ids.isEmpty == false else {
@@ -1386,6 +1473,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         #if DEBUG
         print("[SupabaseKBO] fetchLatestSnapshot query start schema=\(schemaName) view=public_latest_game_snapshots game_id=\(gameID.uuidString)")
@@ -1404,6 +1492,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows.first
     }
 
+    // fetchGameBatterRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameBatterRecords(gameID: UUID) async throws -> [SupabaseGameBatterRecordRow] {
         #if DEBUG
         print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_batter_records game_id=\(gameID.uuidString)")
@@ -1438,6 +1527,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGamePitcherRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGamePitcherRecords(gameID: UUID) async throws -> [SupabaseGamePitcherRecordRow] {
         #if DEBUG
         print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_pitcher_records game_id=\(gameID.uuidString)")
@@ -1474,6 +1564,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         }
     }
 
+    // fetchGameEvents 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
         #if DEBUG
         print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) table=game_events game_id=\(gameID.uuidString)")
@@ -1491,6 +1582,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return rows
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(teamID: String) async throws -> [SupabaseGameRow] {
         let teams = try await fetchTeams()
         guard let teamUUID = teams.first(where: { $0.code.caseInsensitiveCompare(teamID) == .orderedSame })?.id else {
@@ -1519,6 +1611,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         client.schema(schemaName)
     }
 
+    // monthInterval 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func monthInterval(for month: KBOMonthScheduleKey) -> DateInterval {
         let startComponents = DateComponents(calendar: calendar, year: month.year, month: month.month, day: 1)
         let start = calendar.date(from: startComponents) ?? .distantPast
@@ -1526,12 +1619,14 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         return DateInterval(start: start, end: end)
     }
 
+    // standingsSeasonDateRange 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func standingsSeasonDateRange(for season: Int) -> (start: Date, end: Date) {
         let start = calendar.date(from: DateComponents(calendar: calendar, year: season, month: 3, day: 1)) ?? .distantPast
         let end = calendar.date(from: DateComponents(calendar: calendar, year: season, month: 11, day: 30)) ?? start
         return (start, end)
     }
 
+    // gameDateString 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func gameDateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = calendar
@@ -1544,6 +1639,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
 #endif
 
 #if DEBUG
+// logLatestSnapshotFieldDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
 private nonisolated func logLatestSnapshotFieldDiagnostics(
     _ rows: [SupabaseLatestGameSnapshotRow],
     context: String

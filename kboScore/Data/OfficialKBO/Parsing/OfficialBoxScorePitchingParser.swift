@@ -1,6 +1,10 @@
 //
 //  OfficialBoxScorePitchingParser.swift
 //  kboScore
+//  기능 설명: 공식 박스스코어 투구 테이블을 앱 투구 기록 모델로 파싱합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
@@ -8,6 +12,7 @@
 import Foundation
 
 extension OfficialKBOGameCenterClient {
+    // makePitchingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     func makePitchingSection(from table: OfficialGridTable) -> GameCenterPitchingSection? {
         logPitcherDiagnosticsIfNeeded(table)
 
@@ -37,6 +42,7 @@ extension OfficialKBOGameCenterClient {
         return GameCenterPitchingSection(lines: lines)
     }
 
+    // logPitcherDiagnosticsIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logPitcherDiagnosticsIfNeeded(_ table: OfficialGridTable) {
         #if DEBUG
         let labels = table.headers.first?.cells.map { normalizePitchingStatLabel($0.text) }.joined(separator: ",") ?? "<none>"
@@ -46,6 +52,7 @@ extension OfficialKBOGameCenterClient {
         #endif
     }
 
+    // pitchingStat 메서드는 이 타입의 주요 동작을 수행합니다.
     private func pitchingStat(_ table: OfficialGridTable, row: OfficialGridRow, labels: [String], fallbackIndex: Int?) -> String? {
         if let index = pitchingColumnIndex(in: table, labels: labels),
            let value = row.cells[safe: index]?.text.nilIfBlank {
@@ -55,6 +62,7 @@ extension OfficialKBOGameCenterClient {
         return row.cells[safe: fallbackIndex]?.text.nilIfBlank
     }
 
+    // pitchingColumnIndex 메서드는 이 타입의 주요 동작을 수행합니다.
     private func pitchingColumnIndex(in table: OfficialGridTable?, labels: [String]) -> Int? {
         guard let headerCells = table?.headers.first?.cells else { return nil }
         let normalizedLabels = labels.map(normalizePitchingStatLabel)
@@ -63,6 +71,7 @@ extension OfficialKBOGameCenterClient {
         }
     }
 
+    // normalizePitchingStatLabel 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizePitchingStatLabel(_ value: String) -> String {
         let scalars = value.normalizedGridText.unicodeScalars.filter { scalar in
             CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
@@ -91,6 +100,7 @@ private extension String {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self
