@@ -14,7 +14,7 @@ import Foundation
 // StandingsSorter 열거형는 StandingsSorter 타입의 역할과 값을 정의합니다.
 enum StandingsSorter {
     // compare 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
-    static func compare(
+    nonisolated static func compare(
         _ lhs: TeamStandingsSnapshot,
         _ rhs: TeamStandingsSnapshot,
         previousRankProvider: (Team) -> Int?

@@ -976,7 +976,7 @@ struct BaseRunnerDisplayResolution: Equatable, Sendable {
     }
 
     // clean 메서드는 이 타입의 주요 동작을 수행합니다.
-    private static func clean(_ value: String?) -> String? {
+    nonisolated static func clean(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
