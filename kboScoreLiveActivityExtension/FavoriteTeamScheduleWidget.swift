@@ -1,11 +1,16 @@
 //
 //  FavoriteTeamScheduleWidget.swift
 //  kboScoreLiveActivityExtension
+//  기능 설명: 마이팀 일정 위젯의 타임라인과 화면 구성을 담당합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 
 import SwiftUI
 import WidgetKit
 
+// FavoriteTeamScheduleWidgetV2 구조체는 FavoriteTeamScheduleWidgetV2 타입의 역할과 값을 정의합니다.
 struct FavoriteTeamScheduleWidgetV2: Widget {
     static let kind = FavoriteTeamScheduleWidgetShared.widgetKind
 
@@ -22,11 +27,14 @@ struct FavoriteTeamScheduleWidgetV2: Widget {
     }
 }
 
+// FavoriteTeamScheduleWidgetV2Provider 구조체는 FavoriteTeamScheduleWidgetV2Provider 타입의 역할과 값을 정의합니다.
 private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
+    // placeholder 메서드는 이 타입의 주요 동작을 수행합니다.
     func placeholder(in context: Context) -> FavoriteTeamScheduleWidgetV2Entry {
         .placeholder(date: Date())
     }
 
+    // getSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     func getSnapshot(in context: Context, completion: @escaping (FavoriteTeamScheduleWidgetV2Entry) -> Void) {
         if context.isPreview {
             completion(.preview(date: Date()))
@@ -35,11 +43,13 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
         completion(makeEntry(date: Date()))
     }
 
+    // getTimeline 메서드는 이 타입의 주요 동작을 수행합니다.
     func getTimeline(in context: Context, completion: @escaping (Timeline<FavoriteTeamScheduleWidgetV2Entry>) -> Void) {
         let entry = makeEntry(date: Date())
         completion(Timeline(entries: [entry], policy: .after(entry.refreshAfter)))
     }
 
+    // makeEntry 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeEntry(date: Date) -> FavoriteTeamScheduleWidgetV2Entry {
         let loadState = FavoriteTeamScheduleWidgetShared.loadState()
 
@@ -68,7 +78,9 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
     }
 }
 
+// FavoriteTeamScheduleWidgetV2Entry 구조체는 FavoriteTeamScheduleWidgetV2Entry 타입의 역할과 값을 정의합니다.
 private struct FavoriteTeamScheduleWidgetV2Entry: TimelineEntry {
+// Content 열거형는 Content 타입의 역할과 값을 정의합니다.
     enum Content {
         case placeholder(FavoriteTeamScheduleWidgetSnapshot)
         case noFavorite
@@ -80,6 +92,7 @@ private struct FavoriteTeamScheduleWidgetV2Entry: TimelineEntry {
     let refreshAfter: Date
     let content: Content
 
+    // placeholder 메서드는 이 타입의 주요 동작을 수행합니다.
     static func placeholder(date: Date) -> FavoriteTeamScheduleWidgetV2Entry {
         FavoriteTeamScheduleWidgetV2Entry(
             date: date,
@@ -88,6 +101,7 @@ private struct FavoriteTeamScheduleWidgetV2Entry: TimelineEntry {
         )
     }
 
+    // preview 메서드는 이 타입의 주요 동작을 수행합니다.
     static func preview(date: Date) -> FavoriteTeamScheduleWidgetV2Entry {
         FavoriteTeamScheduleWidgetV2Entry(
             date: date,
@@ -97,6 +111,7 @@ private struct FavoriteTeamScheduleWidgetV2Entry: TimelineEntry {
     }
 }
 
+// FavoriteTeamScheduleWidgetV2EntryView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct FavoriteTeamScheduleWidgetV2EntryView: View {
     let entry: FavoriteTeamScheduleWidgetV2Entry
 
@@ -111,6 +126,7 @@ private struct FavoriteTeamScheduleWidgetV2EntryView: View {
     }
 }
 
+// FavoriteTeamSchedulePlaceholderView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct FavoriteTeamSchedulePlaceholderView: View {
     let snapshot: FavoriteTeamScheduleWidgetSnapshot
 
@@ -149,6 +165,7 @@ private struct FavoriteTeamSchedulePlaceholderView: View {
     private static let weekdaySymbols = ["일", "월", "화", "수", "목", "금", "토"]
 }
 
+// FavoriteTeamScheduleContentView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct FavoriteTeamScheduleContentView: View {
     @Environment(\.widgetRenderingMode) private var renderingMode
 
@@ -182,6 +199,7 @@ private struct FavoriteTeamScheduleContentView: View {
     }
 }
 
+// FavoriteTeamScheduleMessageView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct FavoriteTeamScheduleMessageView: View {
     let title: String
     let message: String
@@ -204,6 +222,7 @@ private struct FavoriteTeamScheduleMessageView: View {
     }
 }
 
+// FavoriteTeamScheduleCalendarView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct FavoriteTeamScheduleCalendarView: View {
     let snapshot: FavoriteTeamScheduleWidgetSnapshot
     let isFullColor: Bool
@@ -274,6 +293,7 @@ private struct FavoriteTeamScheduleCalendarView: View {
     }
 }
 
+// FavoriteTeamScheduleDayCell 구조체는 FavoriteTeamScheduleDayCell 타입의 역할과 값을 정의합니다.
 private struct FavoriteTeamScheduleDayCell: View {
     let day: FavoriteTeamScheduleWidgetSnapshot.Day
     let accent: Color
@@ -345,6 +365,7 @@ private struct FavoriteTeamScheduleDayCell: View {
     }
 }
 
+// FavoriteTeamScheduleOpponentMark 구조체는 FavoriteTeamScheduleOpponentMark 타입의 역할과 값을 정의합니다.
 private struct FavoriteTeamScheduleOpponentMark: View {
     let teamID: String?
     let status: FavoriteTeamScheduleWidgetGameStatus?
@@ -363,29 +384,7 @@ private struct FavoriteTeamScheduleOpponentMark: View {
     }
 
     var body: some View {
-        if let teamID, let identity = TeamIdentity.catalog[teamID], isFullColor, identity.hasLogoAsset {
-            ZStack {
-                RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                    .fill(identity.theme.badgeBackground)
-
-                Image(identity.logoAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(size * 0.20)
-            }
-            .frame(width: size, height: size)
-            .overlay(
-                RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-            )
-            .overlay(alignment: .bottomTrailing) {
-                if let homeAwayLabel {
-                    FavoriteTeamScheduleHomeAwayBadge(label: homeAwayLabel, isFullColor: isFullColor)
-                        .offset(x: 3, y: 3)
-                }
-            }
-            .accessibilityLabel(accessibilityLabel(teamName: identity.teamDisplayName))
-        } else if let teamID, let identity = TeamIdentity.catalog[teamID] {
+        if let teamID, let identity = TeamIdentity.catalog[teamID] {
             Text(identity.monogram)
                 .font(.system(size: 9, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
@@ -411,12 +410,14 @@ private struct FavoriteTeamScheduleOpponentMark: View {
         }
     }
 
+    // accessibilityLabel 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func accessibilityLabel(teamName: String) -> String {
         guard let favoriteTeamIsHome else { return "\(teamName)" }
         return favoriteTeamIsHome ? "\(teamName), 홈 경기" : "\(teamName), 원정 경기"
     }
 }
 
+// FavoriteTeamScheduleHomeAwayBadge 구조체는 FavoriteTeamScheduleHomeAwayBadge 타입의 역할과 값을 정의합니다.
 private struct FavoriteTeamScheduleHomeAwayBadge: View {
     let label: String
     let isFullColor: Bool
@@ -438,7 +439,9 @@ private struct FavoriteTeamScheduleHomeAwayBadge: View {
     }
 }
 
+// FavoriteTeamScheduleWidgetV2Preview 열거형는 FavoriteTeamScheduleWidgetV2Preview 타입의 역할과 값을 정의합니다.
 private enum FavoriteTeamScheduleWidgetV2Preview {
+    // sampleSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     static func sampleSnapshot(referenceDate: Date) -> FavoriteTeamScheduleWidgetSnapshot {
         let calendar = Calendar(identifier: .gregorian)
         let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: referenceDate)) ?? referenceDate
