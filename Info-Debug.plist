@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.chogm.kboScore.liveActivityRefresh</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
@@ -18,18 +22,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.chogm.kboScore.liveActivityRefresh</string>
-	</array>
-    <key>SupabaseURL</key>
-    <string>$(SUPABASE_URL)</string>
-    <key>SupabasePublishableKey</key>
-    <string>$(SUPABASE_PUBLISHABLE_KEY)</string>
-    <key>NotificationRegistrationURL</key>
-    <string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
-    <key>KBOBackendBaseURL</key>
-    <string>$(KBO_BACKEND_BASE_URL)</string>
+	<key>KBOBackendBaseURL</key>
+	<string>$(KBO_BACKEND_BASE_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -49,6 +43,12 @@
 	<string>Debug builds connect to a local KBO backend on this network.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>NotificationRegistrationURL</key>
+	<string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
+	<key>SupabasePublishableKey</key>
+	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
+	<key>SupabaseURL</key>
+	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
