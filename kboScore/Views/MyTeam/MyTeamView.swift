@@ -1,17 +1,12 @@
 //
 //  MyTeamView.swift
 //  kboScore
-//  기능 설명: 응원팀 중심의 오늘 경기, 다음 경기, 최근 결과 화면을 구성합니다.
-//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
-//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
-//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
-// MyTeamView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct MyTeamView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -146,7 +141,6 @@ struct MyTeamView: View {
     }
 }
 
-// MyTeamAttendanceSummaryView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct MyTeamAttendanceSummaryView: View {
     @Environment(AppModel.self) private var appModel
     let summary: AttendedGameSummary
@@ -172,7 +166,6 @@ struct MyTeamAttendanceSummaryView: View {
         }
     }
 
-    // attendanceMetric 메서드는 이 타입의 주요 동작을 수행합니다.
     private func attendanceMetric(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -193,7 +186,6 @@ struct MyTeamAttendanceSummaryView: View {
     }
 }
 
-// MyTeamHeaderView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct MyTeamHeaderView: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -288,7 +280,6 @@ private struct MyTeamHeaderView: View {
     }
 }
 
-// SectionTitleView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct SectionTitleView: View {
     @Environment(AppModel.self) private var appModel
     let title: String
