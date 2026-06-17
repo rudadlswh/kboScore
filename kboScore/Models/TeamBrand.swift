@@ -82,20 +82,20 @@ struct TeamIdentity: Sendable {
             id: "doosan",
             displayName: "두산 베어스",
             shortLabel: "두산",
-            monogram: "DOO",
+            monogram: "OB",
             homeHeroWatermarkLabel: "Bears",
             themeID: .doosan,
             theme: TeamTheme(
                 id: .doosan,
-                accent: Color(hex: 0xF7262A),
-                accentSecondary: Color(hex: 0xFFB4AB),
-                heroStart: Color(hex: 0x11102E),
-                heroEnd: Color(hex: 0xF7262A),
-                chipBackground: Color(hex: 0xF7262A).opacity(0.12),
-                badgeBackground: Color(hex: 0x191836),
-                badgeForeground: Color(hex: 0xFFB4AB),
-                scoreboardBackground: Color(hex: 0x1D1C3A),
-                shadowTint: Color(hex: 0x11102E).opacity(0.24)
+                accent: Color(hex: 0x1A1D29),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0x12305C),
+                heroEnd: Color(hex: 0x1A1D29),
+                chipBackground: Color(hex: 0x1A1D29).opacity(0.12),
+                badgeBackground: Color(hex: 0x12305C),
+                badgeForeground: Color(hex: 0xFDFCF8),
+                scoreboardBackground: Color(hex: 0x263247),
+                shadowTint: Color(hex: 0x1A1D29).opacity(0.22)
             )
         ),
         "hanwha": TeamIdentity(
@@ -107,15 +107,15 @@ struct TeamIdentity: Sendable {
             themeID: .hanwha,
             theme: TeamTheme(
                 id: .hanwha,
-                accent: Color(hex: 0xFF7936),
-                accentSecondary: Color(hex: 0xFF915D),
+                accent: Color(hex: 0xEF5F18),
+                accentSecondary: Color(hex: 0xFDFCF8),
                 heroStart: Color(hex: 0x0E0E0E),
-                heroEnd: Color(hex: 0xFF7936),
-                chipBackground: Color(hex: 0xFF7936).opacity(0.14),
+                heroEnd: Color(hex: 0xEF5F18),
+                chipBackground: Color(hex: 0xEF5F18).opacity(0.14),
                 badgeBackground: Color(hex: 0x191919),
-                badgeForeground: Color(hex: 0xFFF3EB),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color(hex: 0x1F1F1F),
-                shadowTint: Color(hex: 0xFF7936).opacity(0.14)
+                shadowTint: Color(hex: 0xEF5F18).opacity(0.14)
             )
         ),
         "kia": TeamIdentity(
@@ -127,15 +127,15 @@ struct TeamIdentity: Sendable {
             themeID: .kia,
             theme: TeamTheme(
                 id: .kia,
-                accent: Color(hex: 0xE51937),
-                accentSecondary: Color(hex: 0x76D4E4),
+                accent: Color(hex: 0xD81F25),
+                accentSecondary: Color(hex: 0xD81F25),
                 heroStart: Color(hex: 0x061520),
-                heroEnd: Color(hex: 0xE51937),
-                chipBackground: Color(hex: 0xE51937).opacity(0.12),
+                heroEnd: Color(hex: 0xD81F25),
+                chipBackground: Color(hex: 0xD81F25).opacity(0.12),
                 badgeBackground: Color(hex: 0x10202D),
-                badgeForeground: Color(hex: 0xD5E4F4),
+                badgeForeground: Color(hex: 0xD81F25),
                 scoreboardBackground: Color(hex: 0x132633),
-                shadowTint: Color(hex: 0xD5E4F4).opacity(0.10)
+                shadowTint: Color(hex: 0xD81F25).opacity(0.10)
             )
         ),
         "kiwoom": TeamIdentity(
@@ -147,15 +147,15 @@ struct TeamIdentity: Sendable {
             themeID: .kiwoom,
             theme: TeamTheme(
                 id: .kiwoom,
-                accent: Color(hex: 0xE3007E),
-                accentSecondary: Color(hex: 0x570514),
+                accent: Color(hex: 0x8E0320),
+                accentSecondary: Color(hex: 0x5C3A21),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0x570514),
-                chipBackground: Color(hex: 0xE3007E).opacity(0.12),
+                heroEnd: Color(hex: 0x8E0320),
+                chipBackground: Color(hex: 0x8E0320).opacity(0.12),
                 badgeBackground: Color(hex: 0x1C1B1B),
-                badgeForeground: Color(hex: 0xF6D0E7),
+                badgeForeground: Color(hex: 0x5C3A21),
                 scoreboardBackground: Color(hex: 0x2A2A2A),
-                shadowTint: Color(hex: 0x570514).opacity(0.20)
+                shadowTint: Color(hex: 0x8E0320).opacity(0.20)
             )
         ),
         "kt": TeamIdentity(
@@ -167,13 +167,13 @@ struct TeamIdentity: Sendable {
             themeID: .kt,
             theme: TeamTheme(
                 id: .kt,
-                accent: Color(hex: 0xEC1C24),
-                accentSecondary: Color(hex: 0xBEC8CE),
+                accent: Color(hex: 0x0A0A0A),
+                accentSecondary: Color(hex: 0xFDFCF8),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0xEC1C24),
-                chipBackground: Color(hex: 0xEC1C24).opacity(0.12),
+                heroEnd: Color(hex: 0x0A0A0A),
+                chipBackground: Color(hex: 0x0A0A0A).opacity(0.12),
                 badgeBackground: Color(hex: 0x201F1F),
-                badgeForeground: Color(hex: 0xE5E2E1),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color(hex: 0x353534),
                 shadowTint: Color.black.opacity(0.18)
             )
@@ -187,13 +187,13 @@ struct TeamIdentity: Sendable {
             themeID: .lg,
             theme: TeamTheme(
                 id: .lg,
-                accent: Color(hex: 0xA50034),
-                accentSecondary: Color(hex: 0xC6C6C6),
+                accent: Color(hex: 0xC3042F),
+                accentSecondary: Color(hex: 0x161616),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0xA50034),
-                chipBackground: Color(hex: 0xA50034).opacity(0.12),
+                heroEnd: Color(hex: 0x161616),
+                chipBackground: Color(hex: 0x161616).opacity(0.12),
                 badgeBackground: Color(hex: 0x1C1B1B),
-                badgeForeground: Color(hex: 0xF4ECEE),
+                badgeForeground: Color(hex: 0xC3042F),
                 scoreboardBackground: Color(hex: 0x2A2A2A),
                 shadowTint: Color.black.opacity(0.18)
             )
@@ -207,15 +207,15 @@ struct TeamIdentity: Sendable {
             themeID: .lotte,
             theme: TeamTheme(
                 id: .lotte,
-                accent: Color(hex: 0xD11B2E),
-                accentSecondary: Color(hex: 0x001B3C),
-                heroStart: Color(hex: 0x001B3C),
-                heroEnd: Color(hex: 0xD11B2E),
-                chipBackground: Color(hex: 0xD11B2E).opacity(0.12),
+                accent: Color(hex: 0x002F6C),
+                accentSecondary: Color(hex: 0xE60033),
+                heroStart: Color(hex: 0xE60033),
+                heroEnd: Color(hex: 0x002F6C),
+                chipBackground: Color(hex: 0x002F6C).opacity(0.12),
                 badgeBackground: Color(hex: 0xF7F9FC),
-                badgeForeground: Color(hex: 0x001B3C),
+                badgeForeground: Color(hex: 0xE60033),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x001B3C).opacity(0.12)
+                shadowTint: Color(hex: 0x002F6C).opacity(0.12)
             )
         ),
         "nc": TeamIdentity(
@@ -227,15 +227,15 @@ struct TeamIdentity: Sendable {
             themeID: .nc,
             theme: TeamTheme(
                 id: .nc,
-                accent: Color(hex: 0x00275D),
-                accentSecondary: Color(hex: 0xE3C191),
+                accent: Color(hex: 0x191970),
+                accentSecondary: Color(hex: 0xC7A079),
                 heroStart: Color(hex: 0x0F141B),
-                heroEnd: Color(hex: 0x00275D),
-                chipBackground: Color(hex: 0xE3C191).opacity(0.16),
+                heroEnd: Color(hex: 0x191970),
+                chipBackground: Color(hex: 0x191970).opacity(0.16),
                 badgeBackground: Color(hex: 0x1B2027),
-                badgeForeground: Color(hex: 0xF4E7D5),
+                badgeForeground: Color(hex: 0xC7A079),
                 scoreboardBackground: Color(hex: 0x30353D),
-                shadowTint: Color(hex: 0x00275D).opacity(0.20)
+                shadowTint: Color(hex: 0x191970).opacity(0.20)
             )
         ),
         "samsung": TeamIdentity(
@@ -247,15 +247,15 @@ struct TeamIdentity: Sendable {
             themeID: .samsung,
             theme: TeamTheme(
                 id: .samsung,
-                accent: Color(hex: 0x0066B3),
-                accentSecondary: Color(hex: 0xC6C6C6),
-                heroStart: Color(hex: 0xF7F9FF),
-                heroEnd: Color(hex: 0x0066B3),
-                chipBackground: Color(hex: 0x0066B3).opacity(0.12),
+                accent: Color(hex: 0x0047AB),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0xFDFCF8),
+                heroEnd: Color(hex: 0x0047AB),
+                chipBackground: Color(hex: 0x0047AB).opacity(0.12),
                 badgeBackground: Color(hex: 0xECEEF3),
-                badgeForeground: Color(hex: 0x004E8B),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x004E8B).opacity(0.12)
+                shadowTint: Color(hex: 0x0047AB).opacity(0.12)
             )
         ),
         "ssg": TeamIdentity(
@@ -267,15 +267,15 @@ struct TeamIdentity: Sendable {
             themeID: .ssg,
             theme: TeamTheme(
                 id: .ssg,
-                accent: Color(hex: 0xCE0E2D),
-                accentSecondary: Color(hex: 0xA0A0A0),
-                heroStart: Color(hex: 0xF9F9F9),
-                heroEnd: Color(hex: 0xCE0E2D),
-                chipBackground: Color(hex: 0xCE0E2D).opacity(0.12),
+                accent: Color(hex: 0xB80F0A),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0xFDFCF8),
+                heroEnd: Color(hex: 0xB80F0A),
+                chipBackground: Color(hex: 0xB80F0A).opacity(0.12),
                 badgeBackground: Color(hex: 0xF3F3F3),
-                badgeForeground: Color(hex: 0xA3001F),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x410006).opacity(0.12)
+                shadowTint: Color(hex: 0xB80F0A).opacity(0.12)
             )
         )
     ]

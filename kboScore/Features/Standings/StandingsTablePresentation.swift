@@ -28,9 +28,9 @@ struct StandingsTableMetrics {
     var rowHeight: CGFloat { isCompact ? 48 : 52 }
     var horizontalPadding: CGFloat { isNarrow ? 4 : (isCompact ? 5 : 6) }
     var spacing: CGFloat { isNarrow ? 2 : (isCompact ? 3 : 4) }
-    var rankMovementWidth: CGFloat { isNarrow ? 36 : (isCompact ? 40 : 42) }
-    var rankWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
-    var movementWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
+    var rankMovementWidth: CGFloat { isNarrow ? 46 : 48 }
+    var rankWidth: CGFloat { isNarrow ? 22 : 24 }
+    var movementWidth: CGFloat { 22 }
     var logoSize: CGFloat { isNarrow ? 18 : (isCompact ? 20 : 22) }
     var gamesWidth: CGFloat { isNarrow ? 21 : (isCompact ? 22 : 24) }
     var countWidth: CGFloat { isNarrow ? 17 : (isCompact ? 18 : 19) }
