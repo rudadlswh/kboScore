@@ -1,12 +1,17 @@
 //
 //  FavoriteTeamOnboardingView.swift
 //  kboScore
+//  기능 설명: 첫 실행 시 응원팀 선택 온보딩 화면을 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 4/22/26.
 //
 
 import SwiftUI
 
+// FavoriteTeamCatalog 열거형는 FavoriteTeamCatalog 타입의 역할과 값을 정의합니다.
 enum FavoriteTeamCatalog {
     nonisolated static let orderedTeamIDs: [String] = [
         "kia",
@@ -33,11 +38,13 @@ enum FavoriteTeamCatalog {
     }
 }
 
+// FavoriteTeamOnboardingView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct FavoriteTeamOnboardingView: View {
     @Environment(AppModel.self) private var appModel
     @State private var selectedTeamID: String?
     private let teams = FavoriteTeamCatalog.teams
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init() {
         #if DEBUG
         print("[FavoriteTeamOnboarding] using static catalog count=\(FavoriteTeamCatalog.teams.count)")
@@ -62,8 +69,6 @@ struct FavoriteTeamOnboardingView: View {
                                 selectedTeamID = team.id
                             } label: {
                                 HStack(spacing: 12) {
-                                    TeamMarkView(team: team, size: 38)
-
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(team.displayName)
                                             .font(.subheadline.weight(.bold))

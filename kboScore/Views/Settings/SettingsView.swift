@@ -1,12 +1,17 @@
 //
 //  SettingsView.swift
 //  kboScore
+//  기능 설명: 앱 설정, 응원팀, 알림 옵션 화면을 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// SettingsView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -33,6 +38,7 @@ struct SettingsView: View {
         }
     }
 
+    // defaultSections 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
     private func defaultSections(appModel: AppModel, bindableAppModel: Bindable<AppModel>) -> some View {
         Section("응원 팀") {
@@ -87,6 +93,7 @@ struct SettingsView: View {
 
     }
 
+    // doosanSections 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
     private func doosanSections(appModel: AppModel, bindableAppModel: Bindable<AppModel>, palette: StadiumPalette) -> some View {
         Section {
@@ -174,6 +181,7 @@ struct SettingsView: View {
         return "\(shortVersion) (\(build))"
     }
 
+    // currentFavoriteTeamDisplayName 메서드는 이 타입의 주요 동작을 수행합니다.
     private func currentFavoriteTeamDisplayName(appModel: AppModel) -> String {
         guard let favoriteTeamID = appModel.settings.favoriteTeamID else {
             return "미설정"
@@ -185,6 +193,7 @@ struct SettingsView: View {
             )
     }
 
+    // notificationPreferenceBinding 메서드는 이 타입의 주요 동작을 수행합니다.
     private func notificationPreferenceBinding(
         _ keyPath: WritableKeyPath<NotificationPreferences, Bool>,
         appModel: AppModel
@@ -199,6 +208,7 @@ struct SettingsView: View {
     }
 }
 
+// DoosanFavoriteTeamSelectionView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DoosanFavoriteTeamSelectionView: View {
     @Environment(AppModel.self) private var appModel
     @Binding var selection: String?
@@ -258,6 +268,7 @@ private struct DoosanFavoriteTeamSelectionView: View {
         .tint(palette.primary)
     }
 
+    // teamSelectionRow 메서드는 이 타입의 주요 동작을 수행합니다.
     private func teamSelectionRow(
         title: String,
         subtitle: String,
@@ -270,9 +281,7 @@ private struct DoosanFavoriteTeamSelectionView: View {
             selection = value
         } label: {
             HStack(spacing: 12) {
-                if let team {
-                    TeamMarkView(team: team, size: 36)
-                } else {
+                if team == nil {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(isSelected ? palette.primary : palette.textSecondary)
@@ -309,9 +318,11 @@ private struct DoosanFavoriteTeamSelectionView: View {
     }
 }
 
+// SettingsFormModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct SettingsFormModifier: ViewModifier {
     let palette: StadiumPalette?
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if let palette {
             content
@@ -330,6 +341,7 @@ private struct SettingsFormModifier: ViewModifier {
     }
 }
 
+// InfoRow 구조체는 InfoRow 타입의 역할과 값을 정의합니다.
 private struct InfoRow: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -347,6 +359,7 @@ private struct InfoRow: View {
     }
 }
 
+// DebugRowsView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DebugRowsView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -406,6 +419,7 @@ private struct DebugRowsView: View {
     }
 }
 
+// SettingsSectionHeader 구조체는 SettingsSectionHeader 타입의 역할과 값을 정의합니다.
 private struct SettingsSectionHeader: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -427,20 +441,24 @@ private struct SettingsSectionHeader: View {
 }
 
 private extension View {
+    // settingsRowStyle 메서드는 이 타입의 주요 동작을 수행합니다.
     func settingsRowStyle(_ palette: StadiumPalette) -> some View {
         listRowBackground(palette.sectionBackground)
             .listRowSeparator(.hidden)
             .foregroundStyle(palette.textPrimary)
     }
 
+    // applyDoosanDebugRowStyleIfNeeded 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func applyDoosanDebugRowStyleIfNeeded() -> some View {
         modifier(DoosanDebugRowStyleModifier())
     }
 }
 
+// DoosanDebugRowStyleModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct DoosanDebugRowStyleModifier: ViewModifier {
     @Environment(AppModel.self) private var appModel
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if let palette = appModel.favoriteStadiumPalette {
             content.settingsRowStyle(palette)
