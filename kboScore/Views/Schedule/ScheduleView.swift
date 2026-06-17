@@ -1,18 +1,24 @@
 //
 //  ScheduleView.swift
 //  kboScore
+//  기능 설명: 월별/일별 경기 일정 화면과 경기 선택 흐름을 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
 import SwiftUI
 
+// ScheduleDayResultAppearance 열거형는 ScheduleDayResultAppearance 타입의 역할과 값을 정의합니다.
 enum ScheduleDayResultAppearance: Equatable, Sendable {
     case win
     case loss
     case draw
     case neutral
 
+    // from 메서드는 이 타입의 주요 동작을 수행합니다.
     static func from(dominantStatus: GameStatus?, favoriteTeamResult: TeamGameResult?) -> ScheduleDayResultAppearance {
         guard dominantStatus == .final, let favoriteTeamResult else {
             return .neutral
@@ -28,24 +34,29 @@ enum ScheduleDayResultAppearance: Equatable, Sendable {
     }
 }
 
+// ScheduleGameDetailRoute 구조체는 ScheduleGameDetailRoute 타입의 역할과 값을 정의합니다.
 struct ScheduleGameDetailRoute: Hashable {
     let stableIdentity: String
     let initialGame: GameDetail
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(game: GameDetail) {
         stableIdentity = game.stableDetailIdentity
         initialGame = game
     }
 
+    // == 메서드는 이 타입의 주요 동작을 수행합니다.
     static func == (lhs: ScheduleGameDetailRoute, rhs: ScheduleGameDetailRoute) -> Bool {
         lhs.stableIdentity == rhs.stableIdentity
     }
 
+    // hash 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func hash(into hasher: inout Hasher) {
         hasher.combine(stableIdentity)
     }
 }
 
+// ScheduleView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct ScheduleView: View {
     @Environment(AppModel.self) private var appModel
     @StateObject private var viewModel = ScheduleViewModel()
@@ -103,6 +114,7 @@ struct ScheduleView: View {
     }
 }
 
+// ScheduleCalendarCardView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct ScheduleCalendarCardView: View {
     @Environment(AppModel.self) private var appModel
     @ObservedObject var viewModel: ScheduleViewModel
@@ -203,15 +215,10 @@ private struct ScheduleCalendarCardView: View {
                                     .foregroundStyle(dayNumberColor(for: day))
 
                                 ZStack {
-                                    if let opponentTeam = day.opponentTeam {
-                                        TeamMarkView(team: opponentTeam, size: day.gameCount > 1 ? 18 : 16)
-                                            .opacity(day.hasGames ? 1 : 0)
-                                    } else {
-                                        Circle()
-                                            .fill(markerColor(for: day))
-                                            .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
-                                            .opacity(day.hasGames ? 1 : 0.12)
-                                    }
+                                    Circle()
+                                        .fill(markerColor(for: day))
+                                        .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
+                                        .opacity(day.hasGames ? 1 : 0.12)
 
                                     if day.gameCount > 1 {
                                         Text("\(day.gameCount)")
@@ -236,15 +243,6 @@ private struct ScheduleCalendarCardView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(daySelectionBorderColor(for: day), lineWidth: isSelected(day) ? (appModel.isStadiumFavoriteSelected ? 1.4 : 2) : 0)
                             )
-                            .overlay(alignment: .topTrailing) {
-                                if day.hasAttendedGame {
-                                    FavoriteTeamAttendanceMarker(
-                                        favoriteTeamID: appModel.settings.favoriteTeamID,
-                                        size: 15
-                                    )
-                                        .padding(3)
-                                }
-                            }
                         }
                         .buttonStyle(.plain)
                     }
@@ -391,10 +389,12 @@ private struct ScheduleCalendarCardView: View {
         return "선택한 날짜에는 등록된 경기가 없습니다."
     }
 
+    // isSelected 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isSelected(_ day: MyTeamCalendarDay) -> Bool {
         Calendar(identifier: .gregorian).isDate(day.date, inSameDayAs: viewModel.selectedDate)
     }
 
+    // dayNumberColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayNumberColor(for day: MyTeamCalendarDay) -> Color {
         if isSelected(day) {
             return appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent
@@ -405,6 +405,7 @@ private struct ScheduleCalendarCardView: View {
         return day.isInDisplayedMonth ? .primary : .secondary.opacity(0.6)
     }
 
+    // markerColor 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markerColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return day.dominantStatus?.stadiumTintColor(palette) ?? palette.primary
@@ -412,6 +413,7 @@ private struct ScheduleCalendarCardView: View {
         return day.dominantStatus?.tintColor ?? appModel.currentTheme.accent
     }
 
+    // dayResultAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayResultAppearance(for day: MyTeamCalendarDay) -> ScheduleDayResultAppearance {
         ScheduleDayResultAppearance.from(
             dominantStatus: day.dominantStatus,
@@ -419,6 +421,7 @@ private struct ScheduleCalendarCardView: View {
         )
     }
 
+    // dayGameCountBadgeColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayGameCountBadgeColor(for day: MyTeamCalendarDay) -> Color {
         switch dayResultAppearance(for: day) {
         case .win:
@@ -435,6 +438,7 @@ private struct ScheduleCalendarCardView: View {
         }
     }
 
+    // dayBackground 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             if day.isInDisplayedMonth == false {
@@ -479,6 +483,7 @@ private struct ScheduleCalendarCardView: View {
         }
     }
 
+    // stadiumNoGameDayBackground 메서드는 이 타입의 주요 동작을 수행합니다.
     private func stadiumNoGameDayBackground(for day: MyTeamCalendarDay, palette: StadiumPalette) -> Color {
         isSelected(day) ? palette.elevatedCardStrong : palette.recessedSurface
     }
@@ -487,6 +492,7 @@ private struct ScheduleCalendarCardView: View {
         .clear
     }
 
+    // dayTodayBorderColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayTodayBorderColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return day.isToday ? palette.secondary.opacity(0.85) : .clear
@@ -494,6 +500,7 @@ private struct ScheduleCalendarCardView: View {
         return day.isToday ? KBOLivePalette.upcoming.opacity(0.9) : .clear
     }
 
+    // daySelectionBorderColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func daySelectionBorderColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return isSelected(day) ? palette.primary : .clear
@@ -502,6 +509,7 @@ private struct ScheduleCalendarCardView: View {
     }
 }
 
+// ScheduleLoadingPlaceholderView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct ScheduleLoadingPlaceholderView: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -523,6 +531,7 @@ private struct ScheduleLoadingPlaceholderView: View {
     }
 }
 
+// DoosanScheduleFilterControl 구조체는 DoosanScheduleFilterControl 타입의 역할과 값을 정의합니다.
 private struct DoosanScheduleFilterControl: View {
     @Binding var selection: ScheduleFilter
     let palette: StadiumPalette
@@ -558,6 +567,7 @@ private struct DoosanScheduleFilterControl: View {
     }
 }
 
+// ScheduleGameRow 구조체는 ScheduleGameRow 타입의 역할과 값을 정의합니다.
 private struct ScheduleGameRow: View {
     @Environment(AppModel.self) private var appModel
     let game: GameDetail
@@ -565,9 +575,7 @@ private struct ScheduleGameRow: View {
     let filter: ScheduleFilter
 
     var body: some View {
-        HStack(spacing: 10) {
-            TeamMarkView(team: leadingTeam, size: 34)
-
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(titleText)
@@ -582,12 +590,6 @@ private struct ScheduleGameRow: View {
                             appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.chipBackground,
                             in: Capsule()
                         )
-                    if appModel.isGameAttended(game) {
-                        FavoriteTeamAttendanceMarker(
-                            favoriteTeamID: favoriteTeamID,
-                            size: 18
-                        )
-                    }
                 }
 
                 Text(subtitleText)
@@ -671,53 +673,6 @@ private struct ScheduleGameRow: View {
             }
         }
         return "리그"
-    }
-}
-
-private struct FavoriteTeamAttendanceMarker: View {
-    let favoriteTeamID: String?
-    let size: CGFloat
-
-    var body: some View {
-        Group {
-            if let imageAssetName {
-                Image(imageAssetName)
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Text("⭐")
-                    .font(.system(size: size * 0.82))
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityElement()
-        .accessibilityLabel("직관 경기")
-    }
-
-    private var imageAssetName: String? {
-        switch favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "doosan":
-            return "attendance-cheering-doosan"
-        case "hanwha":
-            return "attendance-cheering-hanwha"
-        case "kia":
-            return "attendance-cheering-kia"
-        case "kiwoom":
-            return "attendance-cheering-kiwoom"
-        case "lg":
-            return "attendance-cheering-lg"
-        case "lotte":
-            return "attendance-cheering-lotte"
-        case "nc":
-            return "attendance-cheering-nc"
-        case "samsung":
-            return "attendance-cheering-samsung"
-        case "ssg":
-            return "attendance-cheering-ssg"
-        default:
-            return nil
-        }
     }
 }
 

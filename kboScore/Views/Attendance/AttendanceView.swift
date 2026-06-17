@@ -1,12 +1,17 @@
 //
 //  AttendanceView.swift
 //  kboScore
+//  기능 설명: 직관 기록과 관전 성적 대시보드 화면을 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 5/20/26.
 //
 
 import SwiftUI
 
+// AttendanceView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct AttendanceView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -92,6 +97,7 @@ struct AttendanceView: View {
     }
 }
 
+// AttendanceSummaryCard 구조체는 AttendanceSummaryCard 타입의 역할과 값을 정의합니다.
 private struct AttendanceSummaryCard: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -124,6 +130,7 @@ private struct AttendanceSummaryCard: View {
     }
 }
 
+// AttendanceMetricView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct AttendanceMetricView: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -150,6 +157,7 @@ private struct AttendanceMetricView: View {
     }
 }
 
+// AttendanceGameRecordRow 구조체는 AttendanceGameRecordRow 타입의 역할과 값을 정의합니다.
 private struct AttendanceGameRecordRow: View {
     @Environment(AppModel.self) private var appModel
     let record: AttendanceGameRecord

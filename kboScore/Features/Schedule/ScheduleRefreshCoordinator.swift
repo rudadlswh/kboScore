@@ -1,6 +1,10 @@
 //
 //  ScheduleRefreshCoordinator.swift
 //  kboScore
+//  기능 설명: 일정 탭의 월별 새로고침 요청과 캐시 정책을 조정합니다.
+//  월별·일별 일정 상태를 일관되게 계산해 홈, 일정, 위젯이 같은 경기 선택 기준을 공유합니다.
+//  우천 취소, 더블헤더, 시간 미정, 오래된 캐시가 섞일 수 있어 날짜 키와 동기화 순서를 엄격히 다룹니다.
+//  TODO : 공식 일정 변경 감지와 보정 로직을 더 작은 단위로 검증합니다.
 //
 //  Created by Codex on 6/10/26.
 //
@@ -29,14 +33,17 @@ final class ScheduleRefreshCoordinator {
         Set(failedMonths.map(\.yearMonthText))
     }
 
+    // hasCachedMonth 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func hasCachedMonth(_ key: KBOMonthScheduleKey) -> Bool {
         cachedMonths[key] != nil
     }
 
+    // firstGameDate 메서드는 이 타입의 주요 동작을 수행합니다.
     func firstGameDate(in key: KBOMonthScheduleKey) -> Date? {
         cachedMonths[key]?.games.first?.scheduledStart
     }
 
+    // loadMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadMonth(
         _ key: KBOMonthScheduleKey,
         forceRefresh: Bool,
@@ -108,6 +115,7 @@ final class ScheduleRefreshCoordinator {
         }
     }
 
+    // refreshTodayLiveIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshTodayLiveIfNeeded(
         selectedDate: Date,
         displayedMonthKey: KBOMonthScheduleKey,
@@ -152,6 +160,7 @@ final class ScheduleRefreshCoordinator {
         )
     }
 
+    // syncStartersIntoMonthCache 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func syncStartersIntoMonthCache(
         _ refreshedGames: [GameDetail],
         monthKey: KBOMonthScheduleKey,
@@ -209,6 +218,7 @@ final class ScheduleRefreshCoordinator {
         )
     }
 
+    // reconcileStalePastGamesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func reconcileStalePastGamesIfNeeded(
         displayedMonthKey: KBOMonthScheduleKey,
         appModel: AppModel,
@@ -267,6 +277,7 @@ final class ScheduleRefreshCoordinator {
         }
     }
 
+    // logDateSelectionLocalOnly 메서드는 이 타입의 주요 동작을 수행합니다.
     func logDateSelectionLocalOnly(
         date: Date,
         selectedGame: GameDetail?,
@@ -283,6 +294,7 @@ final class ScheduleRefreshCoordinator {
         )
     }
 
+    // logLocalMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logLocalMonth(
         _ key: KBOMonthScheduleKey,
         callSite: String,
@@ -295,6 +307,7 @@ final class ScheduleRefreshCoordinator {
         #endif
     }
 
+    // logMonthCache 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logMonthCache(
         _ key: KBOMonthScheduleKey,
         callSite: String,
@@ -307,6 +320,7 @@ final class ScheduleRefreshCoordinator {
         #endif
     }
 
+    // log 메서드는 이 타입의 주요 동작을 수행합니다.
     private func log(
         callSite: String,
         reason: String,
@@ -331,6 +345,7 @@ final class ScheduleRefreshCoordinator {
         #endif
     }
 
+    // logStarterSync 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logStarterSync(
         callSite: String,
         reason: String,
@@ -343,6 +358,7 @@ final class ScheduleRefreshCoordinator {
         #endif
     }
 
+    // durationMilliseconds 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func durationMilliseconds(since start: Date) -> Int {
         Int(Date().timeIntervalSince(start) * 1_000)
     }

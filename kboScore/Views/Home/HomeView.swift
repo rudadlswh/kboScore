@@ -1,12 +1,17 @@
 //
 //  HomeView.swift
 //  kboScore
+//  기능 설명: 홈 화면에서 오늘 경기와 경기 없는 날의 대체 요약을 표시합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// HomeView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct HomeView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -88,8 +93,7 @@ struct HomeView: View {
                             GameCardView(
                                 summary: game.summary(isMyTeamGame: game.involves(teamID: appModel.settings.favoriteTeamID)),
                                 showsHomeTeamBadge: true,
-                                liveColorStyle: .white,
-                                teamMarkAssetStyle: .mascotPreferred
+                                liveColorStyle: .white
                             )
                         }
                         .buttonStyle(.plain)
@@ -101,6 +105,7 @@ struct HomeView: View {
         .padding(.vertical, 10)
     }
 
+    // stadiumContent 메서드는 이 타입의 주요 동작을 수행합니다.
     private func stadiumContent(_ palette: StadiumPalette) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if let statusMessage = appModel.statusMessage(for: .home) {
@@ -171,6 +176,7 @@ struct HomeView: View {
 
 }
 
+// HomeHeroGameCard 구조체는 HomeHeroGameCard 타입의 역할과 값을 정의합니다.
 private struct HomeHeroGameCard: View {
     let summary: GameSummary
     let palette: StadiumPalette
@@ -349,6 +355,7 @@ private struct HomeHeroGameCard: View {
     }
 }
 
+// TeamHeroBackground 구조체는 TeamHeroBackground 타입의 역할과 값을 정의합니다.
 private struct TeamHeroBackground: View {
     let team: Team
     let edge: HorizontalAlignment
@@ -368,25 +375,17 @@ private struct TeamHeroBackground: View {
             )
             Color.black.opacity(0.18)
 
-            if TeamLogoAssetResolver.hasPreferredAsset(for: identity, style: .mascotPreferred) {
-                Image(TeamLogoAssetResolver.preferredAssetName(for: identity, style: .mascotPreferred))
-                    .resizable()
-                    .scaledToFit()
-                    .opacity(0.16)
-                    .frame(width: 132, height: 132)
-                    .offset(x: edge == .leading ? -26 : 26, y: 14)
-            } else {
-                Text(identity.monogram)
-                    .font(.system(size: 58, weight: .black, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(0.10))
-                    .offset(x: edge == .leading ? -10 : 10, y: 12)
-            }
+            Text(identity.homeHeroWatermarkLabel)
+                .font(.system(size: 58, weight: .black, design: .rounded))
+                .foregroundStyle(Color.white.opacity(0.10))
+                .offset(x: edge == .leading ? -10 : 10, y: 12)
         }
         .frame(maxWidth: .infinity)
         .accessibilityHidden(true)
     }
 }
 
+// HeroTeamMatchupSide 구조체는 HeroTeamMatchupSide 타입의 역할과 값을 정의합니다.
 private struct HeroTeamMatchupSide: View {
     let team: Team
     let role: String
@@ -395,8 +394,6 @@ private struct HeroTeamMatchupSide: View {
 
     var body: some View {
         VStack(alignment: alignment, spacing: 10) {
-            TeamMarkView(team: team, size: 38, assetStyle: .mascotPreferred)
-
             VStack(alignment: alignment, spacing: 5) {
                 Text(team.identity.displayName)
                     .font(.system(size: 28, weight: .black, design: .rounded))
@@ -424,6 +421,7 @@ private struct HeroTeamMatchupSide: View {
     }
 }
 
+// HomeFallbackStandingsSection 구조체는 HomeFallbackStandingsSection 타입의 역할과 값을 정의합니다.
 private struct HomeFallbackStandingsSection: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -450,6 +448,7 @@ private struct HomeFallbackStandingsSection: View {
     }
 }
 
+// HomeFallbackStandingsRow 구조체는 HomeFallbackStandingsRow 타입의 역할과 값을 정의합니다.
 private struct HomeFallbackStandingsRow: View {
     @Environment(AppModel.self) private var appModel
 
@@ -462,8 +461,6 @@ private struct HomeFallbackStandingsRow: View {
                 .monospacedDigit()
                 .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
                 .frame(width: 28)
-
-            TeamMarkView(team: snapshot.team, size: 42, assetStyle: .mascotPreferred)
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 6) {
@@ -496,6 +493,7 @@ private struct HomeFallbackStandingsRow: View {
         }
     }
 
+    // metric 메서드는 이 타입의 주요 동작을 수행합니다.
     private func metric(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)

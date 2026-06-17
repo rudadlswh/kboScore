@@ -1,6 +1,10 @@
 //
 //  ScheduleScreenModel.swift
 //  kboScore
+//  기능 설명: 일정 화면의 월 이동, 필터, 경기 목록 상태를 관리합니다.
+//  월별·일별 일정 상태를 일관되게 계산해 홈, 일정, 위젯이 같은 경기 선택 기준을 공유합니다.
+//  우천 취소, 더블헤더, 시간 미정, 오래된 캐시가 섞일 수 있어 날짜 키와 동기화 순서를 엄격히 다룹니다.
+//  TODO : 공식 일정 변경 감지와 보정 로직을 더 작은 단위로 검증합니다.
 //
 //  Created by Codex on 6/5/26.
 //
@@ -8,6 +12,7 @@
 import Combine
 import Foundation
 
+// ScheduleSelectedGamesContentState 열거형는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 enum ScheduleSelectedGamesContentState: Equatable, Sendable {
     case initialLoading
     case loadedEmpty
@@ -54,6 +59,7 @@ final class ScheduleViewModel: ObservableObject {
         return .loadedEmpty
     }
 
+    // loadDisplayedMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadDisplayedMonth(appModel: AppModel) async {
         await loadMonth(
             displayedMonth,
@@ -63,6 +69,7 @@ final class ScheduleViewModel: ObservableObject {
         await normalizeDisplayedMonth(appModel: appModel)
     }
 
+    // refreshDisplayedMonth 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshDisplayedMonth(appModel: AppModel) async {
         await loadMonth(
             displayedMonth,
@@ -90,6 +97,7 @@ final class ScheduleViewModel: ObservableObject {
         )
     }
 
+    // changeDisplayedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func changeDisplayedMonth(
         to month: Date,
         favoriteTeamID: String?,
@@ -116,6 +124,7 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    // selectDate 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     func selectDate(
         _ date: Date,
         favoriteTeamID: String?,
@@ -140,6 +149,7 @@ final class ScheduleViewModel: ObservableObject {
         }
     }
 
+    // rebuildPresentation 메서드는 이 타입의 주요 동작을 수행합니다.
     func rebuildPresentation(
         favoriteTeamID: String?,
         attendedGameKeys: Set<String>
@@ -157,6 +167,7 @@ final class ScheduleViewModel: ObservableObject {
         apply(presentation)
     }
 
+    // normalizeDisplayedMonth 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizeDisplayedMonth(appModel: AppModel) async {
         if calendar.isDate(selectedDate, equalTo: displayedMonth, toGranularity: .month) == false {
             selectedDate = preferredSelectedDate(for: displayedMonthKey)
@@ -167,6 +178,7 @@ final class ScheduleViewModel: ObservableObject {
         )
     }
 
+    // loadMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadMonth(
         _ month: Date,
         forceRefresh: Bool,
@@ -193,6 +205,7 @@ final class ScheduleViewModel: ObservableObject {
         )
     }
 
+    // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func apply(_ presentation: SchedulePresentation) {
         objectWillChange.send()
         calendarDays = presentation.calendarDays
@@ -208,27 +221,32 @@ final class ScheduleViewModel: ObservableObject {
 #endif
     }
 
+    // setLoadingDisplayedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     private func setLoadingDisplayedMonth(_ isLoading: Bool) {
         guard isLoadingDisplayedMonth != isLoading else { return }
         objectWillChange.send()
         isLoadingDisplayedMonth = isLoading
     }
 
+    // applyPendingAutomaticSelectionIfNeeded 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func applyPendingAutomaticSelectionIfNeeded(for key: KBOMonthScheduleKey) {
         guard pendingAutomaticSelectionMonthKey == key else { return }
         selectedDate = preferredSelectedDate(for: key)
         pendingAutomaticSelectionMonthKey = nil
     }
 
+    // startOfMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func startOfMonth(for date: Date) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
     }
 
+    // shiftedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     private func shiftedMonth(from date: Date, by offset: Int) -> Date {
         calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
     }
 
+    // preferredSelectedDate 메서드는 이 타입의 주요 동작을 수행합니다.
     private func preferredSelectedDate(for key: KBOMonthScheduleKey) -> Date {
         let monthStart = monthStart(for: key)
         let today = Date()
@@ -241,14 +259,17 @@ final class ScheduleViewModel: ObservableObject {
         return monthStart
     }
 
+    // monthStart 메서드는 이 타입의 주요 동작을 수행합니다.
     private func monthStart(for key: KBOMonthScheduleKey) -> Date {
         calendar.date(from: DateComponents(year: key.year, month: key.month, day: 1)) ?? Date()
     }
 
+    // monthKey 메서드는 이 타입의 주요 동작을 수행합니다.
     private func monthKey(for date: Date) -> KBOMonthScheduleKey {
         KBOMonthScheduleKey(date: date, calendar: calendar)
     }
 
+    // adjacentMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func adjacentMonth(offset: Int) -> Date {
         shiftedMonth(from: displayedMonth, by: offset)
     }

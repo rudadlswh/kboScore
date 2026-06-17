@@ -1,13 +1,19 @@
 //
 //  ScheduleCalendarDayBuilder.swift
 //  kboScore
+//  기능 설명: 월간 캘린더 그리드에 표시할 날짜 셀 모델을 생성합니다.
+//  월별·일별 일정 상태를 일관되게 계산해 홈, 일정, 위젯이 같은 경기 선택 기준을 공유합니다.
+//  우천 취소, 더블헤더, 시간 미정, 오래된 캐시가 섞일 수 있어 날짜 키와 동기화 순서를 엄격히 다룹니다.
+//  TODO : 공식 일정 변경 감지와 보정 로직을 더 작은 단위로 검증합니다.
 //
 //  Created by Codex on 6/5/26.
 //
 
 import Foundation
 
+// ScheduleCalendarDayBuilder 열거형는 화면이나 도메인 모델에 필요한 값을 조립합니다.
 nonisolated enum ScheduleCalendarDayBuilder {
+    // makeDays 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeDays(
         monthStart: Date,
         gamesByDate: [String: [GameDetail]],
@@ -51,11 +57,13 @@ nonisolated enum ScheduleCalendarDayBuilder {
         return days
     }
 
+    // myTeamGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func myTeamGames(from games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
         guard let favoriteTeamID else { return [] }
         return games.filter { $0.involves(teamID: favoriteTeamID) }
     }
 
+    // opponentTeam 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func opponentTeam(
         for games: [GameDetail],
         filter: ScheduleFilter,
@@ -69,6 +77,7 @@ nonisolated enum ScheduleCalendarDayBuilder {
         return nil
     }
 
+    // favoriteTeamIsHome 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func favoriteTeamIsHome(
         for games: [GameDetail],
         filter: ScheduleFilter,

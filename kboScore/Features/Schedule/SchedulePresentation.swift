@@ -1,17 +1,23 @@
 //
 //  SchedulePresentation.swift
 //  kboScore
+//  기능 설명: 일정 화면에서 날짜, 상태, 경기 정보를 표시하기 위한 문구를 구성합니다.
+//  월별·일별 일정 상태를 일관되게 계산해 홈, 일정, 위젯이 같은 경기 선택 기준을 공유합니다.
+//  우천 취소, 더블헤더, 시간 미정, 오래된 캐시가 섞일 수 있어 날짜 키와 동기화 순서를 엄격히 다룹니다.
+//  TODO : 공식 일정 변경 감지와 보정 로직을 더 작은 단위로 검증합니다.
 //
 //  Created by Codex on 6/8/26.
 //
 
 import Foundation
 
+// ScheduleMonthCacheEntry 구조체는 ScheduleMonthCacheEntry 타입의 역할과 값을 정의합니다.
 struct ScheduleMonthCacheEntry: Sendable {
     let key: KBOMonthScheduleKey
     let games: [GameDetail]
     let gamesByDate: [String: [GameDetail]]
 
+    // build 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated static func build(key: KBOMonthScheduleKey, games: [GameDetail]) async -> ScheduleMonthCacheEntry {
         await Task.detached(priority: .userInitiated) {
             let sortedGames = games.sorted { $0.scheduledStart < $1.scheduledStart }
@@ -23,6 +29,7 @@ struct ScheduleMonthCacheEntry: Sendable {
     }
 }
 
+// SchedulePresentation 구조체는 SchedulePresentation 타입의 역할과 값을 정의합니다.
 struct SchedulePresentation: Sendable {
     let calendarDays: [MyTeamCalendarDay]
     let selectedDateGames: [GameDetail]
@@ -36,6 +43,7 @@ struct SchedulePresentation: Sendable {
     let debugSummary: String?
 #endif
 
+    // build 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated static func build(
         displayedMonth: Date,
         selectedDate: Date,
@@ -60,10 +68,12 @@ struct SchedulePresentation: Sendable {
         }.value
     }
 
+    // dayKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func dayKey(for date: Date) -> String {
         ScheduleDateKeyFormatter.dayKey(for: date)
     }
 
+    // buildSynchronously 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private static func buildSynchronously(
         displayedMonth: Date,
         selectedDate: Date,
@@ -143,6 +153,7 @@ struct SchedulePresentation: Sendable {
 #endif
     }
 
+    // filteredGamesByDate 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private static func filteredGamesByDate(
         from entry: ScheduleMonthCacheEntry?,
         filter: ScheduleFilter,
@@ -160,15 +171,18 @@ struct SchedulePresentation: Sendable {
         }
     }
 
+    // startOfMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     nonisolated private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
     }
 
+    // sortSelectedGames 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
         ScheduleGameSelector.sortSelectedGames(games, favoriteTeamID: favoriteTeamID)
     }
 
+    // calendarFavoriteTeamResult 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func calendarFavoriteTeamResult(
         for games: [GameDetail],
         favoriteTeamID: String?

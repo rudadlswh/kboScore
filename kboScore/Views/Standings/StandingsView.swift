@@ -1,12 +1,17 @@
 //
 //  StandingsView.swift
 //  kboScore
+//  기능 설명: KBO 순위표 화면과 순위 상태 표시를 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 4/2/26.
 //
 
 import SwiftUI
 
+// StandingsView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct StandingsView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -80,6 +85,7 @@ struct StandingsView: View {
         )
     }
 
+    // standingsTable 메서드는 이 타입의 주요 동작을 수행합니다.
     private func standingsTable(
         rows: [TeamStandingsSnapshot],
         revision: Int,
@@ -114,6 +120,7 @@ struct StandingsView: View {
     }
 
 #if DEBUG
+    // logVisibleRows 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func logVisibleRows(_ rows: [TeamStandingsSnapshot], revision: Int) {
         let movementCount = rows.filter { $0.rankMovement != .unchanged }.count
         print("[StandingsRankMovement] visible rows source count=\(rows.count) movementCount=\(movementCount) revision=\(revision)")
@@ -121,6 +128,7 @@ struct StandingsView: View {
 #endif
 }
 
+// StandingsTableHeader 구조체는 StandingsTableHeader 타입의 역할과 값을 정의합니다.
 private struct StandingsTableHeader: View {
     @Environment(AppModel.self) private var appModel
 
@@ -146,6 +154,7 @@ private struct StandingsTableHeader: View {
         .frame(height: 18)
     }
 
+    // headerLabel 메서드는 이 타입의 주요 동작을 수행합니다.
     private func headerLabel(_ title: String, width: CGFloat) -> some View {
         Text(title)
             .lineLimit(1)
@@ -154,6 +163,7 @@ private struct StandingsTableHeader: View {
     }
 }
 
+// StandingsRowView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct StandingsRowView: View {
     let snapshot: TeamStandingsSnapshot
     let leaderSnapshot: TeamStandingsSnapshot?
@@ -167,7 +177,7 @@ private struct StandingsRowView: View {
         ZStack(alignment: .leading) {
             rowBackground
 
-            TeamLogoAccentView(
+            TeamAccentView(
                 identity: identity,
                 isFavorite: isFavorite,
                 width: metrics.accentWidth
@@ -216,10 +226,7 @@ private struct StandingsRowView: View {
     }
 
     private var teamCell: some View {
-        HStack(spacing: metrics.isCompact ? 4 : 6) {
-            TeamMarkView(team: snapshot.team, size: metrics.logoSize)
-                .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
-
+        HStack(spacing: 0) {
             Text(teamName)
                 .font(.system(size: 15, weight: isFavorite ? .black : .bold, design: .default))
                 .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.96))
@@ -292,6 +299,7 @@ private struct StandingsRowView: View {
     }
 
 #if DEBUG
+    // logRender 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logRender() {
         let preGameRankText = snapshot.preGameRank.map(String.init) ?? "<nil>"
         print("[StandingsRankMovement] row render teamId=\(snapshot.team.id) rank=\(snapshot.rank) preGameRank=\(preGameRankText) movement displayText=\(rankMovement.displayText)")
@@ -299,6 +307,7 @@ private struct StandingsRowView: View {
 #endif
 }
 
+// StandingsColumnValue 구조체는 StandingsColumnValue 타입의 역할과 값을 정의합니다.
 private struct StandingsColumnValue: View {
     let value: String
     let width: CGFloat
@@ -316,37 +325,22 @@ private struct StandingsColumnValue: View {
     }
 }
 
-private struct TeamLogoAccentView: View {
+// TeamAccentView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
+private struct TeamAccentView: View {
     let identity: TeamIdentity
     let isFavorite: Bool
     let width: CGFloat
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            LinearGradient(
-                colors: [
-                    identity.theme.accent.opacity(isFavorite ? 0.12 : 0.86),
-                    identity.theme.accent.opacity(isFavorite ? 0.08 : 0.36),
-                    Color.clear
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-
-            if identity.hasLogoAsset {
-                Image(identity.logoAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .opacity(isFavorite ? 0.18 : 0.14)
-                    .frame(width: width * 0.78, height: 58)
-                    .offset(x: -14)
-            } else {
-                Text(identity.monogram)
-                    .font(.system(size: 28, weight: .black, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(isFavorite ? 0.14 : 0.10))
-                    .offset(x: 8)
-            }
-        }
+        LinearGradient(
+            colors: [
+                identity.theme.accent.opacity(isFavorite ? 0.12 : 0.86),
+                identity.theme.accent.opacity(isFavorite ? 0.08 : 0.36),
+                Color.clear
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
         .frame(width: width)
         .clipped()
     }

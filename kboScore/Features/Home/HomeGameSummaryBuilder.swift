@@ -1,13 +1,19 @@
 //
 //  HomeGameSummaryBuilder.swift
 //  kboScore
+//  기능 설명: 홈 화면에 표시할 경기 요약 데이터를 생성합니다.
+//  오늘 경기와 경기 없는 날의 대체 정보를 홈에서 바로 판단할 수 있도록 표시용 요약을 별도로 구성합니다.
+//  월요일 직전 주 요약, 마이팀 경기 우선순위, 빈 일정 상태가 겹칠 수 있어 선택 순서를 명확히 유지합니다.
+//  TODO : 홈 요약 정책이 바뀌면 날짜별 스냅샷 테스트를 추가합니다.
 //
 //  Created by Codex on 5/18/26.
 //
 
 import Foundation
 
+// HomeGameSummaryBuilder 열거형는 화면이나 도메인 모델에 필요한 값을 조립합니다.
 enum HomeGameSummaryBuilder {
+    // makeSummary 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeSummary(
         game: GameDetail,
         teams: [Team],
@@ -47,6 +53,7 @@ enum HomeGameSummaryBuilder {
         )
     }
 
+    // resolveHomeCardTeam 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private static func resolveHomeCardTeam(_ team: Team, fallbackID: String? = nil, teams: [Team]) -> Team {
         let canonicalID = canonicalTeamIdentifier(team.id) ?? team.id
         let resolvedID: String
@@ -80,6 +87,7 @@ enum HomeGameSummaryBuilder {
         )
     }
 
+    // homeCardProviderTeamIDs 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func homeCardProviderTeamIDs(from note: String?) -> (awayID: String, homeID: String)? {
         guard let note else { return nil }
         guard let providerRange = note.range(of: "provider_game_id=") else { return nil }
@@ -99,6 +107,7 @@ enum HomeGameSummaryBuilder {
         return (awayID: awayID, homeID: homeID)
     }
 
+    // sanitizeHomeCardRecentEvent 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func sanitizeHomeCardRecentEvent(
         _ text: String?,
         awayTeam: Team,
@@ -116,6 +125,7 @@ enum HomeGameSummaryBuilder {
         return trimmed
     }
 
+    // canonicalTeamIdentifier 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func canonicalTeamIdentifier(_ value: String?) -> String? {
         guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.isEmpty == false else {
