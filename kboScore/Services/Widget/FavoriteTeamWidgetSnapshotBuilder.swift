@@ -1,17 +1,11 @@
 //
 //  FavoriteTeamWidgetSnapshotBuilder.swift
 //  kboScore
-//  기능 설명: 마이팀 일정 위젯에 전달할 최신 경기 스냅샷을 생성합니다.
-//  마이팀 일정 위젯에 전달할 최신 경기 스냅샷을 생성합니다.을 명확히 분리해 변경 범위와 책임을 예측 가능하게 유지합니다.
-//  입력 데이터 누락, 비동기 실행 순서, 플랫폼별 동작 차이를 고려해 방어적으로 처리합니다.
-//  TODO : 반복되는 정책이나 화면 상태가 늘어나면 전용 모델과 테스트로 분리합니다.
 //
 
 import Foundation
 
-// FavoriteTeamWidgetSnapshotBuilder 열거형는 화면이나 도메인 모델에 필요한 값을 조립합니다.
 enum FavoriteTeamWidgetSnapshotBuilder {
-    // makeSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeSnapshot(
         teamID: String,
         teamName: String,
@@ -53,7 +47,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
         )
     }
 
-    // semanticKey 메서드는 이 타입의 주요 동작을 수행합니다.
     static func semanticKey(
         favoriteTeamID: String?,
         snapshot: FavoriteTeamScheduleWidgetSnapshot?
@@ -80,7 +73,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
         ].joined(separator: "#")
     }
 
-    // gameStatus 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func gameStatus(_ status: GameStatus?) -> FavoriteTeamScheduleWidgetGameStatus? {
         switch status {
         case .upcoming:
@@ -98,7 +90,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
         }
     }
 
-    // teamResult 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func teamResult(_ result: TeamGameResult?) -> FavoriteTeamScheduleWidgetTeamResult? {
         switch result {
         case .win:
@@ -112,7 +103,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
         }
     }
 
-    // nextRefreshDate 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func nextRefreshDate(from startDate: Date, calendar: Calendar) -> Date {
         let nextMorning = calendar.nextDate(
             after: startDate,
@@ -122,7 +112,6 @@ enum FavoriteTeamWidgetSnapshotBuilder {
         return nextMorning ?? startDate.addingTimeInterval(60 * 60 * 6)
     }
 
-    // scheduleDayKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private static func scheduleDayKey(for date: Date) -> String {
         ScheduleDateKeyFormatter.dayKey(for: date)
     }
