@@ -1,12 +1,17 @@
 //
 //  BrandStyles.swift
 //  kboScore
+//  기능 설명: 팀 브랜드 색상과 경기장 테마 스타일을 SwiftUI에서 사용하도록 정의합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// KBOLivePalette 열거형는 KBOLivePalette 타입의 역할과 값을 정의합니다.
 enum KBOLivePalette {
     static let primary = Color(red: 0.11, green: 0.28, blue: 0.67)
     static let secondary = Color(red: 0.29, green: 0.48, blue: 0.91)
@@ -18,6 +23,7 @@ enum KBOLivePalette {
     static let cancellation = Color(red: 0.44, green: 0.48, blue: 0.56)
 }
 
+// DoosanPalette 열거형는 DoosanPalette 타입의 역할과 값을 정의합니다.
 enum DoosanPalette {
     static let primary = Color(red: 0.9686, green: 0.1490, blue: 0.1647) // #f7262a
     static let secondary = Color(red: 1.0, green: 0.7059, blue: 0.6706) // #ffb4ab
@@ -41,6 +47,7 @@ enum DoosanPalette {
     static let weather = Color(red: 0.95, green: 0.72, blue: 0.28)
 }
 
+// StadiumPalette 구조체는 StadiumPalette 타입의 역할과 값을 정의합니다.
 struct StadiumPalette: Sendable {
     let id: String
     let primary: Color
@@ -71,6 +78,7 @@ struct StadiumPalette: Sendable {
         usesLightForegroundStyle ? textPrimary : Color.white.opacity(0.94)
     }
 
+    // tabBarForeground 메서드는 이 타입의 주요 동작을 수행합니다.
     func tabBarForeground(isSelected: Bool) -> Color {
         isSelected ? primary : tabBarForeground
     }
@@ -400,6 +408,7 @@ extension GameStatus {
         }
     }
 
+    // stadiumTintColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .live:
@@ -415,6 +424,7 @@ extension GameStatus {
         }
     }
 
+    // stadiumCardBackgroundColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumCardBackgroundColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .live:
@@ -458,6 +468,7 @@ extension NotificationType {
         }
     }
 
+    // stadiumTintColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .scoreChange, .leadChange, .onBase, .inningChange:
@@ -491,6 +502,7 @@ extension NotificationType {
     }
 }
 
+// CardSurface 구조체는 CardSurface 타입의 역할과 값을 정의합니다.
 struct CardSurface: ViewModifier {
     @Environment(AppModel.self) private var appModel
     let padding: CGFloat
@@ -498,6 +510,7 @@ struct CardSurface: ViewModifier {
     let fillColor: Color?
     let showsGhostBorder: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         let stadiumPalette = appModel.favoriteStadiumPalette
         let resolvedFillColor = fillColor ?? (stadiumPalette?.elevatedCard ?? Color(.secondarySystemBackground))
@@ -524,6 +537,7 @@ struct CardSurface: ViewModifier {
 }
 
 extension View {
+    // cardSurface 메서드는 이 타입의 주요 동작을 수행합니다.
     func cardSurface(
         padding: CGFloat = 16,
         cornerRadius: CGFloat = 20,
@@ -540,22 +554,27 @@ extension View {
         )
     }
 
+    // doosanNavigationChrome 메서드는 이 타입의 주요 동작을 수행합니다.
     func doosanNavigationChrome(isEnabled: Bool) -> some View {
         modifier(DoosanNavigationChromeModifier(isEnabled: isEnabled))
     }
 
+    // doosanInlineNavigationTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func doosanInlineNavigationTitle(isEnabled: Bool) -> some View {
         modifier(DoosanInlineNavigationTitleModifier(isEnabled: isEnabled))
     }
 
+    // stadiumNavigationChrome 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumNavigationChrome(_ palette: StadiumPalette?) -> some View {
         modifier(StadiumNavigationChromeModifier(palette: palette))
     }
 }
 
+// StadiumNavigationChromeModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct StadiumNavigationChromeModifier: ViewModifier {
     let palette: StadiumPalette?
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if let palette {
             content
@@ -568,9 +587,11 @@ private struct StadiumNavigationChromeModifier: ViewModifier {
     }
 }
 
+// DoosanNavigationChromeModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct DoosanNavigationChromeModifier: ViewModifier {
     let isEnabled: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if isEnabled {
             content
@@ -583,9 +604,11 @@ private struct DoosanNavigationChromeModifier: ViewModifier {
     }
 }
 
+// DoosanInlineNavigationTitleModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct DoosanInlineNavigationTitleModifier: ViewModifier {
     let isEnabled: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if isEnabled {
             content.navigationBarTitleDisplayMode(.inline)
@@ -595,49 +618,7 @@ private struct DoosanInlineNavigationTitleModifier: ViewModifier {
     }
 }
 
-struct TeamMarkView: View {
-    @Environment(AppModel.self) private var appModel
-    let team: Team
-    var size: CGFloat = 38
-    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
-
-    var body: some View {
-        let identity = team.identity
-        let stadiumPalette = appModel.favoriteStadiumPalette
-
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(stadiumPalette?.recessedSurface ?? identity.theme.badgeBackground)
-
-            if TeamLogoAssetResolver.hasPreferredAsset(for: identity, style: assetStyle) {
-                Image(TeamLogoAssetResolver.preferredAssetName(for: identity, style: assetStyle))
-                    .resizable()
-                    .scaledToFit()
-                    .padding(assetStyle == .mascotPreferred ? size * 0.08 : size * 0.16)
-            } else {
-                Text(identity.monogram)
-                    .font(.system(size: size * 0.28, weight: .bold, design: .rounded))
-                    .foregroundStyle(stadiumPalette?.textSecondary ?? identity.theme.badgeForeground)
-            }
-        }
-        .frame(width: size, height: size)
-        .overlay(
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .stroke(
-                    stadiumPalette?.ghostBorder ?? Color.primary.opacity(0.06),
-                    lineWidth: stadiumPalette == nil ? 1 : 0.7
-                )
-        )
-        .shadow(
-            color: stadiumPalette?.ambientShadow.opacity(0.28) ?? identity.theme.shadowTint,
-            radius: stadiumPalette == nil ? size * 0.12 : size * 0.14,
-            y: stadiumPalette == nil ? size * 0.06 : size * 0.08
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(TeamLogoAssetResolver.accessibilityLabel(for: identity, style: assetStyle))
-    }
-}
-
+// BasesDiamondView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct BasesDiamondView: View {
     let bases: RunnerState
 
@@ -656,6 +637,7 @@ struct BasesDiamondView: View {
     }
 }
 
+// DiamondBase 구조체는 DiamondBase 타입의 역할과 값을 정의합니다.
 private struct DiamondBase: View {
     @Environment(AppModel.self) private var appModel
     let isFilled: Bool

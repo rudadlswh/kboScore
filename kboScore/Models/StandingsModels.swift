@@ -1,12 +1,17 @@
 //
 //  StandingsModels.swift
 //  kboScore
+//  기능 설명: 순위표 표시와 계산에 사용하는 팀 순위 스냅샷 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 4/2/26.
 //
 
 import Foundation
 
+// TeamRankRow 구조체는 TeamRankRow 타입의 역할과 값을 정의합니다.
 nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
     let season: Int
     let teamID: UUID
@@ -29,6 +34,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
 
     var id: String { "\(season)-\(teamID.uuidString)" }
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case season
         case teamID = "team_id"
@@ -50,6 +56,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
         case createdAt = "created_at"
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         season: Int,
         teamID: UUID,
@@ -90,6 +97,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         season = try container.decode(Int.self, forKey: .season)
@@ -115,6 +123,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
             KBODateParser.parseTimestamp(try? container.decodeIfPresent(String.self, forKey: .createdAt))
     }
 
+    // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(season, forKey: .season)
@@ -137,6 +146,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
         try container.encodeIfPresent(createdAt, forKey: .createdAt)
     }
 
+    // dateString 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func dateString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -148,6 +158,7 @@ nonisolated struct TeamRankRow: Identifiable, Codable, Hashable, Sendable {
 }
 
 private extension KeyedDecodingContainer {
+    // decodeFlexibleDouble 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func decodeFlexibleDouble(forKey key: Key) throws -> Double {
         if let value = try? decode(Double.self, forKey: key) {
             return value
@@ -160,11 +171,13 @@ private extension KeyedDecodingContainer {
     }
 }
 
+// StandingsRankingResolution 열거형는 StandingsRankingResolution 타입의 역할과 값을 정의합니다.
 nonisolated enum StandingsRankingResolution: String, Codable, Hashable, Sendable {
     case resolved
     case tiebreakGameRequired = "tiebreak_game_required"
 }
 
+// PostseasonProbabilityUnavailableReason 열거형는 PostseasonProbabilityUnavailableReason 타입의 역할과 값을 정의합니다.
 nonisolated enum PostseasonProbabilityUnavailableReason: String, Codable, Hashable, Sendable {
     case unknownClassificationGames = "unknown_classification_games"
     case incompleteRegularSeasonSchedule = "incomplete_regular_season_schedule"
@@ -185,11 +198,13 @@ nonisolated enum PostseasonProbabilityUnavailableReason: String, Codable, Hashab
     }
 }
 
+// PostseasonQualificationStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 nonisolated enum PostseasonQualificationStatus: String, Codable, Hashable, Sendable {
     case clinched
     case eliminated
 }
 
+// StandingsMetrics 열거형는 StandingsMetrics 타입의 역할과 값을 정의합니다.
 nonisolated enum StandingsMetrics {
     nonisolated static let pythagoreanExponent = 1.83
     nonisolated static let postseasonQualifierCount = 5
@@ -213,6 +228,7 @@ nonisolated enum StandingsMetrics {
 #endif
     }()
 
+    // pythagoreanWinningPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func pythagoreanWinningPercentage(runsScored: Int, runsAllowed: Int) -> Double {
         let scored = max(0, Double(runsScored))
         let allowed = max(0, Double(runsAllowed))
@@ -236,6 +252,7 @@ nonisolated enum StandingsMetrics {
     }
 }
 
+// TeamStandingsSnapshot 구조체는 TeamStandingsSnapshot 타입의 역할과 값을 정의합니다.
 nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let team: Team
     let rank: Int
@@ -257,6 +274,7 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     let precomputedStreakText: String?
     let preGameRank: Int?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         team: Team,
         rank: Int,
@@ -299,6 +317,7 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
         self.preGameRank = preGameRank
     }
 
+    // withPreGameRank 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated func withPreGameRank(_ preGameRank: Int?) -> TeamStandingsSnapshot {
         TeamStandingsSnapshot(
             team: team,
@@ -448,12 +467,14 @@ nonisolated struct TeamStandingsSnapshot: Identifiable, Hashable, Sendable {
     }
 }
 
+// StandingsRowRenderIdentity 구조체는 StandingsRowRenderIdentity 타입의 역할과 값을 정의합니다.
 nonisolated struct StandingsRowRenderIdentity: Hashable, Sendable {
     let teamID: String
     let rank: Int
     let preGameRank: Int?
     let movementDisplayText: String
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(snapshot: TeamStandingsSnapshot) {
         self.teamID = snapshot.team.id
         self.rank = snapshot.rank
@@ -475,6 +496,7 @@ extension TeamGameResult {
     }
 }
 
+// LocalStandingsProbabilitySignal 구조체는 LocalStandingsProbabilitySignal 타입의 역할과 값을 정의합니다.
 struct LocalStandingsProbabilitySignal: Hashable, Sendable {
     let unknownClassificationGames: Int
     let virtualUnscheduledRemainingGames: Int
@@ -489,6 +511,7 @@ struct LocalStandingsProbabilitySignal: Hashable, Sendable {
 // the result unavailable, but officially unscheduled season deficits are added
 // as simulation-only neutral games. These virtual games are never persisted or
 // exposed as scheduled games.
+// LocalPostseasonQualificationCalculator 구조체는 LocalPostseasonQualificationCalculator 타입의 역할과 값을 정의합니다.
 struct LocalPostseasonQualificationCalculator: Sendable {
     nonisolated private static let fallbackPreviousRegularSeasonRankByTeamID: [String: Int] = [
         "lg": 1,
@@ -508,6 +531,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
     let simulationCount: Int
     let minimumCompletedGamesPerTeam: Int
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         regularSeasonLength: Int = 144,
         postseasonQualifierCount: Int = StandingsMetrics.postseasonQualifierCount,
@@ -520,6 +544,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         self.minimumCompletedGamesPerTeam = minimumCompletedGamesPerTeam ?? Int((Double(regularSeasonLength) * 0.3).rounded(.up))
     }
 
+    // makeSignals 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated func makeSignals(
         teams: [Team],
         games: [GameDetail]
@@ -585,6 +610,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // qualificationProbabilities 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func qualificationProbabilities(
         teams: [Team],
         teamsByID: [String: Team],
@@ -663,6 +689,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return probabilities
     }
 
+    // makeUnavailableSignals 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private func makeUnavailableSignals(
         teams: [Team],
         rankingSignals: [String: LocalStandingsProbabilitySignal],
@@ -684,6 +711,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // currentRankingSignals 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func currentRankingSignals(
         teams: [Team],
         games: [GameDetail]
@@ -711,6 +739,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return signals
     }
 
+    // currentRecords 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func currentRecords(
         teams: [Team],
         games: [GameDetail]
@@ -747,6 +776,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return records
     }
 
+    // groupedRecordsByWinPercentage 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated private func groupedRecordsByWinPercentage(
         for records: [_ProbabilityRecord]
     ) -> [[_ProbabilityRecord]] {
@@ -764,6 +794,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return groups
     }
 
+    // qualificationShares 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func qualificationShares(for records: [_ProbabilityRecord]) -> [String: Double] {
         let groups = groupedRecordsByWinPercentage(for: records)
         var shares: [String: Double] = [:]
@@ -793,6 +824,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return shares
     }
 
+    // completedRegularSeasonGameCountsByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func completedRegularSeasonGameCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
@@ -805,6 +837,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
+    // virtualRemainingGames 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func virtualRemainingGames(
         teams: [Team],
         games: [GameDetail]
@@ -873,6 +906,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return virtualGames
     }
 
+    // unknownClassificationCountsByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func unknownClassificationCountsByTeamID(
         teams: [Team],
         games: [GameDetail]
@@ -885,6 +919,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
+    // qualificationStatuses 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func qualificationStatuses(
         teams: [Team],
         currentRecords: [String: _ProbabilityRecord],
@@ -946,6 +981,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // strengthByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func strengthByTeamID(
         teams: [Team],
         currentRecords: [String: _ProbabilityRecord],
@@ -1012,6 +1048,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // averageOpponentStrengthByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func averageOpponentStrengthByTeamID(
         teams: [Team],
         completedGames: [GameDetail],
@@ -1043,6 +1080,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // priorStrength 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func priorStrength(for team: Team, teamCount: Int) -> Double {
         let fallbackRank = Self.fallbackPreviousRegularSeasonRankByTeamID[Self.canonicalTeamIdentifier(team.id)]
         guard let rawRank = team.previousRegularSeasonRank ?? fallbackRank,
@@ -1058,11 +1096,13 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         )
     }
 
+    // credibilityWeight 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func credibilityWeight(gamesPlayed: Double) -> Double {
         guard gamesPlayed > 0 else { return 0 }
         return gamesPlayed / (gamesPlayed + StandingsMetrics.postseasonStrengthCredibilityGames)
     }
 
+    // simulatedStrength 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func simulatedStrength(
         from effectiveStrength: Double,
         generator: inout SplitMix64
@@ -1071,6 +1111,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return boundedStrength(logistic(logit(boundedStrength(effectiveStrength)) + shock))
     }
 
+    // matchupWinProbability 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func matchupWinProbability(
         awayStrength: Double,
         homeStrength: Double,
@@ -1086,10 +1127,12 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         )
     }
 
+    // teamPairKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func teamPairKey(_ lhs: String, _ rhs: String) -> String {
         lhs <= rhs ? "\(lhs)|\(rhs)" : "\(rhs)|\(lhs)"
     }
 
+    // minimumPossibleWinPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func minimumPossibleWinPercentage(
         for record: _ProbabilityRecord,
         remainingGames: Int
@@ -1099,6 +1142,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return Double(record.wins) / Double(decisions)
     }
 
+    // maximumPossibleWinPercentage 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func maximumPossibleWinPercentage(
         for record: _ProbabilityRecord,
         remainingGames: Int
@@ -1108,6 +1152,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return Double(record.wins + remainingGames) / Double(decisions)
     }
 
+    // remainingRegularSeasonGameCountsByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func remainingRegularSeasonGameCountsByTeamID(
         teams: [Team],
         games: [_SimulationGame]
@@ -1120,19 +1165,23 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return counts
     }
 
+    // boundedStrength 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func boundedStrength(_ value: Double) -> Double {
         min(max(value, StandingsMetrics.postseasonStrengthFloor), StandingsMetrics.postseasonStrengthCeiling)
     }
 
+    // logit 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func logit(_ value: Double) -> Double {
         let bounded = boundedStrength(value)
         return log(bounded / (1 - bounded))
     }
 
+    // logistic 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func logistic(_ value: Double) -> Double {
         1 / (1 + exp(-value))
     }
 
+    // deterministicSeed 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func deterministicSeed(
         teams: [Team],
         completedGames: [GameDetail],
@@ -1140,6 +1189,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
     ) -> UInt64 {
         var hash: UInt64 = 1_469_598_103_934_665_603
 
+        // mix 메서드는 이 타입의 주요 동작을 수행합니다.
         func mix(_ string: String) {
             for byte in string.utf8 {
                 hash ^= UInt64(byte)
@@ -1176,6 +1226,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return hash == 0 ? 0x9E37_79B9_7F4A_7C15 : hash
     }
 
+    // recordSortComparator 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     nonisolated private func recordSortComparator(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
         switch (lhs.winPercentage, rhs.winPercentage) {
         case let (left?, right?) where left != right:
@@ -1198,6 +1249,7 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         }
     }
 
+    // hasSameWinPercentage 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated private func hasSameWinPercentage(_ lhs: _ProbabilityRecord, _ rhs: _ProbabilityRecord) -> Bool {
         let lhsDecisions = lhs.wins + lhs.losses
         let rhsDecisions = rhs.wins + rhs.losses
@@ -1207,11 +1259,13 @@ struct LocalPostseasonQualificationCalculator: Sendable {
         return lhs.wins * rhsDecisions == rhs.wins * lhsDecisions
     }
 
+    // canonicalTeamIdentifier 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     nonisolated private static func canonicalTeamIdentifier(_ rawValue: String) -> String {
         Team.canonicalID(for: rawValue) ?? rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 
+// _ProbabilityRecord 구조체는 _ProbabilityRecord 타입의 역할과 값을 정의합니다.
 private struct _ProbabilityRecord: Hashable, Sendable {
     let teamID: String
     var wins = 0
@@ -1225,17 +1279,20 @@ private struct _ProbabilityRecord: Hashable, Sendable {
     }
 }
 
+// _ScoringAggregate 구조체는 _ScoringAggregate 타입의 역할과 값을 정의합니다.
 private struct _ScoringAggregate: Hashable, Sendable {
     var runsScored = 0
     var runsAllowed = 0
     var gamesPlayed = 0
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(runsScored: Int = 0, runsAllowed: Int = 0, gamesPlayed: Int = 0) {
         self.runsScored = runsScored
         self.runsAllowed = runsAllowed
         self.gamesPlayed = gamesPlayed
     }
 
+    // record 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     nonisolated mutating func record(scored: Int, allowed: Int) {
         runsScored += scored
         runsAllowed += allowed
@@ -1243,12 +1300,14 @@ private struct _ScoringAggregate: Hashable, Sendable {
     }
 }
 
+// _SimulationGame 구조체는 _SimulationGame 타입의 역할과 값을 정의합니다.
 private struct _SimulationGame: Hashable, Sendable {
     let awayTeamID: String
     let homeTeamID: String
     let isNeutralSite: Bool
     let seedKey: String
 
+    // real 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func real(_ game: GameDetail) -> _SimulationGame {
         _SimulationGame(
             awayTeamID: game.awayTeam.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
@@ -1259,14 +1318,17 @@ private struct _SimulationGame: Hashable, Sendable {
     }
 }
 
+// _ScoringRate 구조체는 _ScoringRate 타입의 역할과 값을 정의합니다.
 private struct _ScoringRate: Hashable, Sendable {
     let offense: Double
     let defense: Double
 }
 
+// SplitMix64 구조체는 SplitMix64 타입의 역할과 값을 정의합니다.
 private struct SplitMix64: Sendable {
     var state: UInt64
 
+    // next 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
         var z = state
@@ -1275,16 +1337,19 @@ private struct SplitMix64: Sendable {
         return z ^ (z >> 31)
     }
 
+    // nextUnitInterval 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated mutating func nextUnitInterval() -> Double {
         Double(next() >> 11) / Double(1 << 53)
     }
 
+    // sampleStandardNormal 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated mutating func sampleStandardNormal() -> Double {
         let u1 = max(nextUnitInterval(), Double.leastNonzeroMagnitude)
         let u2 = nextUnitInterval()
         return sqrt(-2 * log(u1)) * cos(2 * Double.pi * u2)
     }
 
+    // samplePoisson 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated mutating func samplePoisson(lambda: Double) -> Int {
         guard lambda > 0 else { return 0 }
         let threshold = exp(-lambda)

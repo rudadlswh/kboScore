@@ -1,13 +1,17 @@
 //
 //  TeamBrand.swift
 //  kboScore
+//  기능 설명: 팀별 색상, 이미지, 경기장 팔레트 등 브랜드 정보를 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
 import SwiftUI
-import UIKit
 
+// TeamThemeMode 열거형는 TeamThemeMode 타입의 역할과 값을 정의합니다.
 enum TeamThemeMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case systemDefault = "시스템 기본"
     case favoriteTeam = "마이팀 테마 사용"
@@ -15,6 +19,7 @@ enum TeamThemeMode: String, CaseIterable, Identifiable, Codable, Sendable {
     var id: String { rawValue }
 }
 
+// TeamThemeID 열거형는 TeamThemeID 타입의 역할과 값을 정의합니다.
 enum TeamThemeID: String, Codable, Sendable {
     case doosan
     case hanwha
@@ -29,11 +34,7 @@ enum TeamThemeID: String, Codable, Sendable {
     case neutral
 }
 
-enum TeamImageAssetStyle: Equatable, Sendable {
-    case officialLogoPreferred
-    case mascotPreferred
-}
-
+// TeamTheme 구조체는 TeamTheme 타입의 역할과 값을 정의합니다.
 struct TeamTheme: Sendable {
     let id: TeamThemeID
     let accent: Color
@@ -59,25 +60,22 @@ struct TeamTheme: Sendable {
         shadowTint: Color(hex: 0x1C47AB).opacity(0.12)
     )
 
+    // resolve 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated static func resolve(for teamID: String?) -> TeamTheme {
         guard let identity = TeamIdentity.catalog[teamID ?? ""] else { return .neutral }
         return identity.theme
     }
 }
 
+// TeamIdentity 구조체는 TeamIdentity 타입의 역할과 값을 정의합니다.
 struct TeamIdentity: Sendable {
     let id: String
     let displayName: String
     let shortLabel: String
     let monogram: String
-    let logoAssetName: String
-    let mascotAssetName: String?
+    let homeHeroWatermarkLabel: String
     let themeID: TeamThemeID
     let theme: TeamTheme
-
-    var hasLogoAsset: Bool {
-        UIImage(named: logoAssetName) != nil
-    }
 
     nonisolated static let catalog: [String: TeamIdentity] = [
         "doosan": TeamIdentity(
@@ -85,8 +83,7 @@ struct TeamIdentity: Sendable {
             displayName: "두산 베어스",
             shortLabel: "두산",
             monogram: "DOO",
-            logoAssetName: "team-doosan",
-            mascotAssetName: "doosan_mascot_bear",
+            homeHeroWatermarkLabel: "Bears",
             themeID: .doosan,
             theme: TeamTheme(
                 id: .doosan,
@@ -106,8 +103,7 @@ struct TeamIdentity: Sendable {
             displayName: "한화 이글스",
             shortLabel: "한화",
             monogram: "HAN",
-            logoAssetName: "team-hanwha",
-            mascotAssetName: "hanwha_mascot_eagle",
+            homeHeroWatermarkLabel: "Eagles",
             themeID: .hanwha,
             theme: TeamTheme(
                 id: .hanwha,
@@ -127,8 +123,7 @@ struct TeamIdentity: Sendable {
             displayName: "KIA 타이거즈",
             shortLabel: "기아",
             monogram: "KIA",
-            logoAssetName: "team-kia",
-            mascotAssetName: "kia_mascot_tiger",
+            homeHeroWatermarkLabel: "Tigers",
             themeID: .kia,
             theme: TeamTheme(
                 id: .kia,
@@ -148,8 +143,7 @@ struct TeamIdentity: Sendable {
             displayName: "키움 히어로즈",
             shortLabel: "키움",
             monogram: "KIW",
-            logoAssetName: "team-kiwoom",
-            mascotAssetName: "kiwoom_mascot_hero",
+            homeHeroWatermarkLabel: "Heroes",
             themeID: .kiwoom,
             theme: TeamTheme(
                 id: .kiwoom,
@@ -169,8 +163,7 @@ struct TeamIdentity: Sendable {
             displayName: "KT 위즈",
             shortLabel: "KT",
             monogram: "KT",
-            logoAssetName: "team-kt",
-            mascotAssetName: "kt_mascot_wizard",
+            homeHeroWatermarkLabel: "Wiz",
             themeID: .kt,
             theme: TeamTheme(
                 id: .kt,
@@ -190,8 +183,7 @@ struct TeamIdentity: Sendable {
             displayName: "LG 트윈스",
             shortLabel: "LG",
             monogram: "LG",
-            logoAssetName: "team-lg",
-            mascotAssetName: "lg_mascot_twins",
+            homeHeroWatermarkLabel: "Twins",
             themeID: .lg,
             theme: TeamTheme(
                 id: .lg,
@@ -211,8 +203,7 @@ struct TeamIdentity: Sendable {
             displayName: "롯데 자이언츠",
             shortLabel: "롯데",
             monogram: "LOT",
-            logoAssetName: "team-lotte",
-            mascotAssetName: "lotte_mascot_seagull",
+            homeHeroWatermarkLabel: "Giants",
             themeID: .lotte,
             theme: TeamTheme(
                 id: .lotte,
@@ -232,8 +223,7 @@ struct TeamIdentity: Sendable {
             displayName: "NC 다이노스",
             shortLabel: "NC",
             monogram: "NC",
-            logoAssetName: "team-nc",
-            mascotAssetName: "nc_mascot_dino",
+            homeHeroWatermarkLabel: "Dinos",
             themeID: .nc,
             theme: TeamTheme(
                 id: .nc,
@@ -253,8 +243,7 @@ struct TeamIdentity: Sendable {
             displayName: "삼성 라이온즈",
             shortLabel: "삼성",
             monogram: "SAM",
-            logoAssetName: "team-samsung",
-            mascotAssetName: "samsung_mascot_lion",
+            homeHeroWatermarkLabel: "Lions",
             themeID: .samsung,
             theme: TeamTheme(
                 id: .samsung,
@@ -274,8 +263,7 @@ struct TeamIdentity: Sendable {
             displayName: "SSG 랜더스",
             shortLabel: "SSG",
             monogram: "SSG",
-            logoAssetName: "team-ssg",
-            mascotAssetName: "ssg_mascot_dog",
+            homeHeroWatermarkLabel: "Landers",
             themeID: .ssg,
             theme: TeamTheme(
                 id: .ssg,
@@ -293,44 +281,6 @@ struct TeamIdentity: Sendable {
     ]
 }
 
-enum TeamLogoAssetResolver {
-    static func mascotAssetName(for teamIdentifier: String?) -> String? {
-        guard let canonicalTeamID = Team.canonicalID(for: teamIdentifier) else { return nil }
-        return TeamIdentity.catalog[canonicalTeamID]?.mascotAssetName
-    }
-
-    static func preferredAssetName(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
-        switch style {
-        case .officialLogoPreferred:
-            return identity.logoAssetName
-        case .mascotPreferred:
-            if let mascotAssetName = identity.mascotAssetName,
-               UIImage(named: mascotAssetName) != nil {
-                return mascotAssetName
-            }
-            return identity.logoAssetName
-        }
-    }
-
-    static func hasPreferredAsset(for identity: TeamIdentity, style: TeamImageAssetStyle) -> Bool {
-        UIImage(named: preferredAssetName(for: identity, style: style)) != nil
-    }
-
-    static func accessibilityLabel(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
-        if style == .mascotPreferred,
-           let mascotAssetName = identity.mascotAssetName,
-           UIImage(named: mascotAssetName) != nil {
-            return "\(identity.displayName) mascot"
-        }
-
-        if UIImage(named: identity.logoAssetName) != nil {
-            return "\(identity.displayName) logo"
-        }
-
-        return identity.displayName
-    }
-}
-
 extension Team {
     var identity: TeamIdentity {
         TeamIdentity.catalog[id] ?? TeamIdentity(
@@ -338,8 +288,7 @@ extension Team {
             displayName: name,
             shortLabel: shortName,
             monogram: markText,
-            logoAssetName: "team-\(id)",
-            mascotAssetName: nil,
+            homeHeroWatermarkLabel: shortName,
             themeID: .neutral,
             theme: .neutral
         )
@@ -347,6 +296,7 @@ extension Team {
 }
 
 private extension Color {
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(hex: UInt32, alpha: Double = 1) {
         self.init(
             .sRGB,

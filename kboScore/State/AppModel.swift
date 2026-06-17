@@ -1,6 +1,10 @@
 //
 //  AppModel.swift
 //  kboScore
+//  기능 설명: 앱 전역 상태, 데이터 새로고침, 알림, 위젯, 라이브 액티비티 동기화를 관리합니다.
+//  여러 화면과 시스템 기능이 같은 경기 데이터를 보도록 앱 전역 상태와 부수 효과를 한곳에서 조정합니다.
+//  비동기 새로고침, 캐시, 알림, 위젯 갱신이 동시에 발생할 수 있어 중복 실행과 오래된 응답을 방어합니다.
+//  TODO : 상태 전이를 더 작은 도메인 서비스로 나누고 관찰 가능한 부수 효과를 테스트로 고정합니다.
 //
 //  Created by Codex on 3/25/26.
 //
@@ -16,17 +20,20 @@ import WidgetKit
 typealias GameCancellationNotificationScheduler = (UNNotificationRequest) async throws -> Void
 typealias CurrentDateProvider = () -> Date
 
+// RefreshScope 열거형는 RefreshScope 타입의 역할과 값을 정의합니다.
 enum RefreshScope: Hashable, Sendable {
     case home
     case myTeam
     case notifications
 }
 
+// RefreshDataSet 열거형는 RefreshDataSet 타입의 역할과 값을 정의합니다.
 private enum RefreshDataSet: Hashable {
     case games
     case notifications
 }
 
+// ScheduleGameMergeSource 열거형는 ScheduleGameMergeSource 타입의 역할과 값을 정의합니다.
 private enum ScheduleGameMergeSource: String {
     case unspecified
     case scheduleMonthLoad
@@ -38,6 +45,7 @@ private enum ScheduleGameMergeSource: String {
     case startupSync
 }
 
+// HomeGameFilter 열거형는 HomeGameFilter 타입의 역할과 값을 정의합니다.
 enum HomeGameFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case live = "라이브"
@@ -48,6 +56,7 @@ enum HomeGameFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// NotificationListFilter 열거형는 NotificationListFilter 타입의 역할과 값을 정의합니다.
 enum NotificationListFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case myTeam = "마이팀"
@@ -58,6 +67,7 @@ enum NotificationListFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// ScheduleFilter 열거형는 ScheduleFilter 타입의 역할과 값을 정의합니다.
 enum ScheduleFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case myTeam = "마이팀"
@@ -65,6 +75,7 @@ enum ScheduleFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// AppTab 열거형는 AppTab 타입의 역할과 값을 정의합니다.
 enum AppTab: Hashable, Sendable {
     case home
     case standings
@@ -73,17 +84,20 @@ enum AppTab: Hashable, Sendable {
     case settings
 }
 
+// HomeFavoriteGameRefreshKey 구조체는 HomeFavoriteGameRefreshKey 타입의 역할과 값을 정의합니다.
 private struct HomeFavoriteGameRefreshKey: Hashable {
     let dayKey: String
     let favoriteTeamID: String
 }
 
+// RawSupabaseGameDetailIdentity 구조체는 RawSupabaseGameDetailIdentity 타입의 역할과 값을 정의합니다.
 private struct RawSupabaseGameDetailIdentity: Sendable {
     let supabaseGameID: UUID
     let providerGameID: String?
     let publicGameID: String?
 }
 
+// GameDetailRefreshResult 구조체는 GameDetailRefreshResult 타입의 역할과 값을 정의합니다.
 struct GameDetailRefreshResult: Sendable {
     let game: GameDetail
     let rawSupabaseGameID: UUID?
@@ -224,6 +238,7 @@ final class AppModel {
     private var inFlightStandingsTasks: [Int: Task<Void, Never>] = [:]
     private let isRunningTests: Bool
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         repository: any KBORepository = MockKBORepository(),
         repositoryRuntimeState: RepositoryRuntimeState? = nil,
@@ -306,6 +321,7 @@ final class AppModel {
         }
     }
 
+    // loadIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadIfNeeded() async {
         guard !hasLoaded, !isLoading else {
             logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "loadIfNeededAlreadyLoaded")
@@ -336,6 +352,7 @@ final class AppModel {
         isLoading = false
     }
 
+    // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func apply(_ bootstrap: KBOBootstrapData) {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
@@ -348,6 +365,7 @@ final class AppModel {
         logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "bootstrap")
     }
 
+    // normalizeFavoriteTeamSelectionIfNeeded 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizeFavoriteTeamSelectionIfNeeded() {
         guard let favoriteTeamID = Self.canonicalTeamIdentifier(settings.favoriteTeamID) else {
             if settings.favoriteTeamID != nil {
@@ -370,6 +388,7 @@ final class AppModel {
         settings.favoriteTeamID = nil
     }
 
+    // catalogTeams 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func catalogTeams() -> [Team] {
         TeamIdentity.catalog.values
             .map { identity in
@@ -384,12 +403,14 @@ final class AppModel {
             .sorted { $0.displayName < $1.displayName }
     }
 
+    // ensureCatalogTeamsLoadedIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func ensureCatalogTeamsLoadedIfNeeded() {
         guard teams.isEmpty else { return }
         teams = Self.catalogTeams()
         normalizeFavoriteTeamSelectionIfNeeded()
     }
 
+    // refreshFavoriteTeamGameForHome 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshFavoriteTeamGameForHome(
         reason: String,
         bypassingCache: Bool
@@ -442,6 +463,7 @@ final class AppModel {
         inFlightHomeFavoriteGameTasks[refreshKey] = nil
     }
 
+    // performFavoriteTeamGameRefreshForHome 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performFavoriteTeamGameRefreshForHome(
         reason: String,
         favoriteTeamID: Team.ID,
@@ -486,15 +508,18 @@ final class AppModel {
         }
     }
 
+    // refreshHome 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshHome() async {
         await refreshFavoriteTeamGameForHome(reason: "homeRefresh", bypassingCache: true)
         await loadHomeFallbackStandingsSourceIfNeeded(reason: "homeRefresh")
     }
 
+    // refreshTodayOnForeground 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshTodayOnForeground() async {
         await refreshTodayForLiveActivity(reason: "foreground", includeHomeFallback: true)
     }
 
+    // refreshTodayForBackgroundLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     func refreshTodayForBackgroundLiveActivity(reason: String) async -> Bool {
         #if DEBUG
@@ -523,6 +548,7 @@ final class AppModel {
         return didAttemptRefresh
     }
 
+    // refreshTodayForLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     private func refreshTodayForLiveActivity(reason: String, includeHomeFallback: Bool) async -> Bool {
         guard hasLoaded else {
@@ -546,10 +572,12 @@ final class AppModel {
         return true
     }
 
+    // refreshMyTeam 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshMyTeam() async {
         await refreshGames(for: [.myTeam, .home])
     }
 
+    // loadStandingsIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadStandingsIfNeeded() async {
         let season = currentStandingsSeason()
         if standingsSnapshots.isEmpty == false {
@@ -571,16 +599,19 @@ final class AppModel {
         await bootstrapStandingsRankIfNeeded(season: season)
     }
 
+    // refreshStandings 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshStandings() async {
         let season = currentStandingsSeason()
         await refreshStandings(season: season, logsBootstrapJoin: false)
     }
 
+    // prefetchStandingsSourceIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func prefetchStandingsSourceIfNeeded(season requestedSeason: Int? = nil) async {
         let season = requestedSeason ?? currentStandingsSeason()
         logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "prefetch:\(season)")
     }
 
+    // bootstrapStandingsRankIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func bootstrapStandingsRankIfNeeded(season: Int) async {
         if let task = inFlightStandingsTasks[season] {
             #if DEBUG
@@ -596,6 +627,7 @@ final class AppModel {
         await refreshStandings(season: season, logsBootstrapJoin: true)
     }
 
+    // refreshStandings 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshStandings(season: Int, logsBootstrapJoin: Bool) async {
         if let task = inFlightStandingsTasks[season] {
             #if DEBUG
@@ -617,6 +649,7 @@ final class AppModel {
         inFlightStandingsTasks[season] = nil
     }
 
+    // performRefreshStandings 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshStandings(season: Int) async {
         ensureCatalogTeamsLoadedIfNeeded()
         if await refreshTeamRanksFromRemote(season: season) {
@@ -626,6 +659,7 @@ final class AppModel {
         await refreshStandingsFromGamesFallback(season: season, reason: "rankFetchUnavailable")
     }
 
+    // loadLocalTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadLocalTeamRanks(season: Int) async -> Int {
         guard let localRankCache = repository as? any KBOLocalTeamRankCacheDataSource else {
             #if DEBUG
@@ -651,6 +685,7 @@ final class AppModel {
         return rows.count
     }
 
+    // refreshTeamRanksFromRemote 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshTeamRanksFromRemote(season: Int) async -> Bool {
         guard let teamRankSource = repository as? any KBOTeamRankDataSource else {
             #if DEBUG
@@ -714,6 +749,7 @@ final class AppModel {
         }
     }
 
+    // refreshStandingsFromGamesFallback 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshStandingsFromGamesFallback(season: Int, reason: String) async {
         do {
             #if DEBUG
@@ -740,6 +776,7 @@ final class AppModel {
         }
     }
 
+    // loadHomeFallbackStandingsSourceIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadHomeFallbackStandingsSourceIfNeeded(reason: String) async {
         let season = currentStandingsSeason()
         if standingsSourceGamesBySeason[season]?.isEmpty == false ||
@@ -772,6 +809,7 @@ final class AppModel {
         }
     }
 
+    // fetchStandingsSourceGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchStandingsSourceGames(season: Int) async throws -> [GameDetail] {
         if let standingsGameSource = repository as? any KBOStandingsGameDataSource {
             return try await standingsGameSource.fetchStandingsSource(season: season)
@@ -781,6 +819,7 @@ final class AppModel {
             .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
     }
 
+    // fetchNormalizedStandingsSourceGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchNormalizedStandingsSourceGames(season: Int) async throws -> [GameDetail] {
         let sourceGames = try await fetchStandingsSourceGames(season: season)
         let snapshot = await repositoryRuntimeState?.snapshot()
@@ -790,6 +829,7 @@ final class AppModel {
         )
     }
 
+    // storeStandingsSourceGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeStandingsSourceGames(_ games: [GameDetail], season: Int) {
         standingsSourceGamesBySeason[season] = games
         #if DEBUG
@@ -797,20 +837,24 @@ final class AppModel {
         #endif
     }
 
+    // currentStandingsSeason 메서드는 이 타입의 주요 동작을 수행합니다.
     private func currentStandingsSeason() -> Int {
         var calendar = calendar
         calendar.timeZone = scheduleTimeZone
         return calendar.component(.year, from: currentDateProvider())
     }
 
+    // refreshNotifications 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshNotifications() async {
         await refreshNotifications(for: [.notifications])
     }
 
+    // isRefreshing 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isRefreshing(_ scope: RefreshScope) -> Bool {
         activeRefreshScopes.contains(scope)
     }
 
+    // statusMessage 메서드는 이 타입의 주요 동작을 수행합니다.
     func statusMessage(for scope: RefreshScope) -> String? {
         switch scope {
         case .home, .myTeam:
@@ -870,6 +914,7 @@ final class AppModel {
         hasCompletedOnboarding == false
     }
 
+    // completeFavoriteTeamOnboarding 메서드는 이 타입의 주요 동작을 수행합니다.
     func completeFavoriteTeamOnboarding(with teamID: String) {
         #if DEBUG
         print("[FavoriteTeamOnboarding] selected favoriteTeamID=\(teamID)")
@@ -975,6 +1020,7 @@ final class AppModel {
             .first { $0.status.isLiveLike && $0.involves(teamID: settings.favoriteTeamID) }
     }
 
+    // makeHomeSummary 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeHomeSummary(from game: GameDetail) -> GameSummary {
         HomeGameSummaryBuilder.makeSummary(
             game: game,
@@ -1077,6 +1123,7 @@ final class AppModel {
         standingsCalculationGames.filter(\.isRegularSeason)
     }
 
+    // refreshPublishedStandingsRowsWithCurrentSource 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshPublishedStandingsRowsWithCurrentSource(season: Int, reason: String) {
         let snapshots = makeStandingsSnapshotsForCurrentState(season: season)
         standingsSnapshots = snapshots
@@ -1090,16 +1137,19 @@ final class AppModel {
 #endif
     }
 
+    // logStandingsLocalCalculationSkipped 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logStandingsLocalCalculationSkipped(reason: String, source: String) {
 #if DEBUG
         print("[StandingsRank] standings local calculation skipped reason=\(reason) source=\(source)")
 #endif
     }
 
+    // durationMilliseconds 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func durationMilliseconds(since start: Date) -> Int {
         Int(Date().timeIntervalSince(start) * 1_000)
     }
 
+    // makeStandingsSnapshotsForCurrentState 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshotsForCurrentState(season: Int) -> [TeamStandingsSnapshot] {
         if standingsSourceGamesBySeason[season]?.isEmpty == false {
             let preGameRanks = preGameRankByTeamID(for: season)
@@ -1121,6 +1171,7 @@ final class AppModel {
         return gameCalculatedStandingsSnapshots(season: season, preGameRanks: preGameRanks)
     }
 
+    // gameCalculatedStandingsSnapshots 메서드는 이 타입의 주요 동작을 수행합니다.
     private func gameCalculatedStandingsSnapshots(
         season: Int,
         preGameRanks: [String: Int]
@@ -1163,6 +1214,7 @@ final class AppModel {
         return standingsSourceGamesBySeason[season] ?? games
     }
 
+    // preGameRankByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     private func preGameRankByTeamID(for season: Int) -> [String: Int] {
         StandingsRankMovementResolver.preGameRanks(
             teams: teams,
@@ -1171,6 +1223,7 @@ final class AppModel {
         )
     }
 
+    // logStandingsRankMovementDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logStandingsRankMovementDiagnostics(
         _ snapshots: [TeamStandingsSnapshot],
         season: Int,
@@ -1249,6 +1302,7 @@ final class AppModel {
     }
 #endif
 
+    // scheduleGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleGames(on date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let selectedDayKey = scheduleDayKey(for: date)
         let dayGames = groupedScheduleGamesByDay(for: date, filter: filter)[selectedDayKey] ?? []
@@ -1256,10 +1310,12 @@ final class AppModel {
         return ScheduleGameSelector.sortSelectedGames(dayGames, favoriteTeamID: settings.favoriteTeamID)
     }
 
+    // myTeamGames 메서드는 이 타입의 주요 동작을 수행합니다.
     func myTeamGames(on date: Date) -> [GameDetail] {
         scheduleGames(on: date, filter: .myTeam)
     }
 
+    // nearestScheduleMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func nearestScheduleMonth(to date: Date, filter: ScheduleFilter) -> Date? {
         let months = availableScheduleMonths(filter: filter)
         guard months.isEmpty == false else { return nil }
@@ -1271,6 +1327,7 @@ final class AppModel {
         return months.last
     }
 
+    // shiftedScheduleMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func shiftedScheduleMonth(from date: Date, by offset: Int, filter: ScheduleFilter) -> Date? {
         let months = availableScheduleMonths(filter: filter)
         guard months.isEmpty == false else { return nil }
@@ -1285,6 +1342,7 @@ final class AppModel {
         return months[targetIndex]
     }
 
+    // scheduleCalendarDays 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleCalendarDays(for month: Date, filter: ScheduleFilter) -> [MyTeamCalendarDay] {
         let cacheKey = makeScheduleCalendarCacheKey(for: month, filter: filter)
         if let cached = scheduleCalendarDaysCache[cacheKey] {
@@ -1307,19 +1365,23 @@ final class AppModel {
         return days
     }
 
+    // myTeamCalendarDays 메서드는 이 타입의 주요 동작을 수행합니다.
     func myTeamCalendarDays(for month: Date) -> [MyTeamCalendarDay] {
         scheduleCalendarDays(for: month, filter: .myTeam)
     }
 
+    // startOfMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOfMonth(for date: Date) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
     }
 
+    // shiftedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func shiftedMonth(from date: Date, by offset: Int) -> Date {
         calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
     }
 
+    // calendarMonthTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func calendarMonthTitle(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
@@ -1328,16 +1390,19 @@ final class AppModel {
         return formatter.string(from: startOfMonth(for: date))
     }
 
+    // loadScheduleIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadScheduleIfNeeded(for month: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadMyTeamSchedule(for: month, forceRefresh: false)
     }
 
+    // refreshSchedule 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshSchedule(for month: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadMyTeamSchedule(for: month, forceRefresh: true)
     }
 
+    // fetchIsolatedScheduleMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchIsolatedScheduleMonth(
         for key: KBOMonthScheduleKey,
         bypassingCache: Bool
@@ -1352,6 +1417,7 @@ final class AppModel {
         return normalized.sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchScheduleTabMonth(
         for key: KBOMonthScheduleKey,
         bypassingCache: Bool,
@@ -1382,6 +1448,7 @@ final class AppModel {
         return sorted
     }
 
+    // refreshTodayScheduleGamesForScheduleCache 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshTodayScheduleGamesForScheduleCache(
         selectedDate: Date,
         reason: String
@@ -1393,29 +1460,35 @@ final class AppModel {
         )
     }
 
+    // currentScheduleMonthSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     func currentScheduleMonthSnapshot(for key: KBOMonthScheduleKey) -> [GameDetail] {
         mergeMonthlyScheduleGames(fallbackMonthSchedule(for: key), for: key)
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // loadScheduleDayIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadScheduleDayIfNeeded(for date: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadScheduleDay(for: date, forceRefresh: false)
     }
 
+    // refreshScheduleDay 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshScheduleDay(for date: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadScheduleDay(for: date, forceRefresh: true)
     }
 
+    // currentScheduleRefreshDate 메서드는 이 타입의 주요 동작을 수행합니다.
     func currentScheduleRefreshDate() -> Date {
         currentDateProvider()
     }
 
+    // isScheduleStaleReconciliationInFlight 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isScheduleStaleReconciliationInFlight() -> Bool {
         inFlightScheduleStaleReconciliationTask != nil
     }
 
+    // preflightRefreshStaleScheduleDates 메서드는 이 타입의 주요 동작을 수행합니다.
     func preflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         let task = Task { @MainActor in
@@ -1424,6 +1497,7 @@ final class AppModel {
         return await task.value
     }
 
+    // reconcileStaleScheduleGameDates 메서드는 이 타입의 주요 동작을 수행합니다.
     func reconcileStaleScheduleGameDates(_ dates: [String]) async throws -> [String] {
         pruneExpiredRecentlyReconciledScheduleDates()
         let uniqueDates = Array(Set(dates)).sorted(by: >)
@@ -1456,6 +1530,7 @@ final class AppModel {
         return reconciliableDates
     }
 
+    // startPostReconciliationForceRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startPostReconciliationForceRefresh(_ dateKeys: [String]) {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         let refreshDateKeys = uniqueDateKeys.filter { inFlightSchedulePostReconciliationRefreshDates.contains($0) == false }
@@ -1472,12 +1547,14 @@ final class AppModel {
         }
     }
 
+    // waitForSchedulePostReconciliationRefreshIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForSchedulePostReconciliationRefreshIfNeeded() async {
         while inFlightSchedulePostReconciliationRefreshDates.isEmpty == false {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
+    // performPostReconciliationForceRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performPostReconciliationForceRefresh(_ dateKeys: [String]) async {
         do {
             _ = try await forceRefreshScheduleDatesAfterReconciliation(dateKeys)
@@ -1493,6 +1570,7 @@ final class AppModel {
         inFlightSchedulePostReconciliationRefreshDates.subtract(dateKeys)
     }
 
+    // performPreflightRefreshStaleScheduleDates 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performPreflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
         guard dateKeys.isEmpty == false else {
             return ScheduleStalePreflightRefreshResult(
@@ -1577,6 +1655,7 @@ final class AppModel {
         )
     }
 
+    // forceRefreshScheduleDatesAfterReconciliation 메서드는 이 타입의 주요 동작을 수행합니다.
     private func forceRefreshScheduleDatesAfterReconciliation(_ dateKeys: [String]) async throws -> SchedulePostReconciliationRefreshResult {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         guard uniqueDateKeys.isEmpty == false else {
@@ -1633,6 +1712,7 @@ final class AppModel {
         return SchedulePostReconciliationRefreshResult(dateResults: dateResults)
     }
 
+    // loadScheduleDay 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadScheduleDay(for date: Date, forceRefresh: Bool) async {
         let dayKey = scheduleDayKey(for: date)
         let todayKey = scheduleDayKey(for: currentDateProvider())
@@ -1690,14 +1770,17 @@ final class AppModel {
         _ = await refreshTodayGamesFromSupabase(for: date, monthKey: monthKey, reason: reason)
     }
 
+    // loadMyTeamScheduleIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadMyTeamScheduleIfNeeded(for month: Date) async {
         await loadScheduleIfNeeded(for: month)
     }
 
+    // isLoadingSchedule 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLoadingSchedule(for month: Date) -> Bool {
         loadingScheduleMonths.contains(KBOMonthScheduleKey(date: month, calendar: calendar))
     }
 
+    // scheduleStatusMessage 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleStatusMessage(for month: Date) -> String? {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         if let snapshot = monthlyScheduleDebugSnapshots[key] {
@@ -1721,6 +1804,7 @@ final class AppModel {
         return "월간 일정을 불러오지 못했습니다."
     }
 
+    // scheduleDebugSummary 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleDebugSummary(for month: Date) -> String? {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         guard let snapshot = monthlyScheduleDebugSnapshots[key] else { return nil }
@@ -1761,18 +1845,22 @@ final class AppModel {
         }
     }
 
+    // game 메서드는 이 타입의 주요 동작을 수행합니다.
     func game(withID gameID: UUID) -> GameDetail? {
         game(withIdentity: gameID.uuidString)
     }
 
+    // initialGameSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     func initialGameSnapshot(for gameIdentity: String) -> GameDetail? {
         game(withIdentity: gameIdentity)
     }
 
+    // game 메서드는 이 타입의 주요 동작을 수행합니다.
     func game(withIdentity gameIdentity: String) -> GameDetail? {
         selectedGameMatch(for: gameIdentity)?.game
     }
 
+    // resolveGameDetailSelection 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     func resolveGameDetailSelection(
         for gameIdentity: String,
         initialGame: GameDetail? = nil
@@ -1794,6 +1882,7 @@ final class AppModel {
         return await fetchSelectedGameFromRepository(for: gameIdentity)
     }
 
+    // fetchIsolatedGameDetailSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchIsolatedGameDetailSnapshot(
         for game: GameDetail,
         identity: String
@@ -1817,6 +1906,7 @@ final class AppModel {
         }
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchGameDetailDatabaseReview(for game: GameDetail) async -> GameCenterReview? {
         guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDataSource else {
             #if DEBUG
@@ -1836,6 +1926,7 @@ final class AppModel {
         }
     }
 
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async -> GameDetailDatabaseReviewFetchResult? {
         if let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
             let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
@@ -1905,6 +1996,7 @@ final class AppModel {
         }
     }
 
+    // fetchGameDetailDatabaseReviewResultDeduped 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchGameDetailDatabaseReviewResultDeduped(
         rawSupabaseGameID: UUID?,
         providerGameID: String?,
@@ -1970,6 +2062,7 @@ final class AppModel {
         return result
     }
 
+    // gameDetailDatabaseRecordRequestKey 메서드는 이 타입의 주요 동작을 수행합니다.
     private func gameDetailDatabaseRecordRequestKey(
         rawSupabaseGameID: UUID?,
         providerGameID: String?,
@@ -1986,6 +2079,7 @@ final class AppModel {
         ].joined(separator: "|")
     }
 
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchGameDetailDatabaseReviewResult(
         rawSupabaseGameID: UUID,
         providerGameID: String?,
@@ -2013,11 +2107,13 @@ final class AppModel {
         }
     }
 
+    // refreshGameDetail 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
         await refreshGameDetailResult(for: gameIdentity, forceRefresh: forceRefresh)?.game
     }
 
+    // refreshGameDetailResult 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     func refreshGameDetailResult(
         for gameIdentity: String,
@@ -2077,6 +2173,7 @@ final class AppModel {
         return result
     }
 
+    // fetchSelectedGameFromRepository 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchSelectedGameFromRepository(for gameIdentity: String) async -> GameDetail? {
         #if DEBUG
         debugLogLocalCandidateMiss(gameIdentity)
@@ -2120,6 +2217,7 @@ final class AppModel {
         }
     }
 
+    // performRefreshGameDetail 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshGameDetail(
         selectedGame: GameDetail,
         gameIdentity: String,
@@ -2257,6 +2355,7 @@ final class AppModel {
         }
     }
 
+    // recordRawSupabaseGameDetailIdentity 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func recordRawSupabaseGameDetailIdentity(
         _ result: GameDetailSnapshotFetchResult,
         selectedGame: GameDetail,
@@ -2294,6 +2393,7 @@ final class AppModel {
         #endif
     }
 
+    // rawSupabaseGameDetailIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     private func rawSupabaseGameDetailIdentity(for game: GameDetail) -> RawSupabaseGameDetailIdentity? {
         let keys = [
             game.id.uuidString,
@@ -2310,14 +2410,17 @@ final class AppModel {
         return nil
     }
 
+    // gameNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameNavigationIdentity(for game: GameDetail) -> String {
         game.canonicalGameIdentityValue
     }
 
+    // gameNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameNavigationIdentity(for summary: GameSummary) -> String {
         game(withID: summary.id)?.canonicalGameIdentityValue ?? summary.id.uuidString
     }
 
+    // shouldShowLiveActivityAction 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func shouldShowLiveActivityAction(for game: GameDetail) -> Bool {
         LiveActivityActionPresentation.shouldShow(
             game: game,
@@ -2325,6 +2428,7 @@ final class AppModel {
         )
     }
 
+    // shouldAutoStartLiveActivity 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func shouldAutoStartLiveActivity(for game: GameDetail) -> Bool {
         game.involves(teamID: settings.favoriteTeamID) &&
             LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
@@ -2333,10 +2437,12 @@ final class AppModel {
             )
     }
 
+    // isLiveActivityOn 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLiveActivityOn(for gameID: UUID) -> Bool {
         activeLiveActivityGameID == gameID
     }
 
+    // isLiveActivityActionEnabled 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLiveActivityActionEnabled(for game: GameDetail) -> Bool {
         LiveActivityActionPresentation.isEnabled(
             game: game,
@@ -2346,6 +2452,7 @@ final class AppModel {
         )
     }
 
+    // liveActivityButtonTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func liveActivityButtonTitle(for game: GameDetail) -> String {
         LiveActivityActionPresentation.buttonTitle(
             game: game,
@@ -2356,10 +2463,12 @@ final class AppModel {
         )
     }
 
+    // liveActivityButtonSystemImage 메서드는 이 타입의 주요 동작을 수행합니다.
     func liveActivityButtonSystemImage(for game: GameDetail) -> String {
         LiveActivityActionPresentation.buttonSystemImage(isActive: isLiveActivityOn(for: game.id))
     }
 
+    // toggleLiveActivity 메서드는 이 타입의 주요 동작을 수행합니다.
     func toggleLiveActivity(for game: GameDetail) async {
         guard shouldShowLiveActivityAction(for: game) else { return }
 
@@ -2382,6 +2491,7 @@ final class AppModel {
         }
     }
 
+    // startOrUpdateLiveActivityIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdateLiveActivityIfNeeded(for game: GameDetail) async {
         liveActivitySupported = liveActivityController.isSupported
         let resolvedGame = self.game(withIdentity: game.canonicalGameIdentityValue) ??
@@ -2433,19 +2543,23 @@ final class AppModel {
     }
 
     #if DEBUG
+    // logLiveActivityAutoStartSkipped 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logLiveActivityAutoStartSkipped(reason: String, game: GameDetail) {
         print("[LiveActivityAutoStart] skipped reason=\(reason) gameID=\(game.id.uuidString) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
     }
     #endif
 
+    // isGameAlertEnabled 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isGameAlertEnabled(for gameID: UUID) -> Bool {
         gameAlertOverrides[gameID, default: true]
     }
 
+    // setGameAlert 메서드는 이 타입의 주요 동작을 수행합니다.
     func setGameAlert(_ isEnabled: Bool, for gameID: UUID) {
         gameAlertOverrides[gameID] = isEnabled
     }
 
+    // isGameAttended 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isGameAttended(_ game: GameDetail) -> Bool {
         AttendanceKeyResolver.isAttended(
             game: game,
@@ -2454,6 +2568,7 @@ final class AppModel {
         )
     }
 
+    // toggleGameAttendance 메서드는 이 타입의 주요 동작을 수행합니다.
     func toggleGameAttendance(for game: GameDetail) {
         let equivalentGames = equivalentGames(to: game)
         let equivalentKeys = AttendanceKeyResolver.equivalentKeys(for: game, equivalentGames: equivalentGames)
@@ -2471,12 +2586,14 @@ final class AppModel {
         invalidateScheduleDerivedCaches()
     }
 
+    // markNotificationRead 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func markNotificationRead(_ notificationID: UUID) {
         guard let index = notifications.firstIndex(where: { $0.id == notificationID }) else { return }
         notifications[index].isRead = true
         persistNotificationHistory()
     }
 
+    // notificationGameDetailNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func notificationGameDetailNavigationIdentity(for item: NotificationItem) -> String? {
         let selectedIdentity = item.preferredGameNavigationIdentity
         #if DEBUG
@@ -2510,6 +2627,7 @@ final class AppModel {
         return selectedIdentity
     }
 
+    // connectNotificationDelegate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func connectNotificationDelegate(_ delegate: AppNotificationDelegate) {
         guard !hasConnectedNotificationDelegate else { return }
         hasConnectedNotificationDelegate = true
@@ -2524,6 +2642,7 @@ final class AppModel {
         )
     }
 
+    // refreshNotificationAuthorizationStatus 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshNotificationAuthorizationStatus() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         notificationAuthorizationStatus = AppNotificationAuthorizationStatus(settings.authorizationStatus)
@@ -2533,6 +2652,7 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
+    // syncNotificationRegistrationState 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func syncNotificationRegistrationState() async {
         guard shouldShowFavoriteTeamOnboarding == false,
               settings.favoriteTeamID != nil else {
@@ -2551,6 +2671,7 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
+    // requestNotificationAuthorization 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func requestNotificationAuthorization() async {
         do {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
@@ -2572,6 +2693,7 @@ final class AppModel {
         }
     }
 
+    // scheduleDebugNotification 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleDebugNotification() async {
         #if DEBUG
         let targetGame = myTeamTodayGame ?? todayGames.first ?? games.first
@@ -2613,22 +2735,27 @@ final class AppModel {
         #endif
     }
 
+    // dismissPresentedGameDetail 메서드는 이 타입의 주요 동작을 수행합니다.
     func dismissPresentedGameDetail() {
         presentedGameIdentity = nil
     }
 
+    // presentNotifications 메서드는 이 타입의 주요 동작을 수행합니다.
     func presentNotifications() {
         isNotificationsPresented = true
     }
 
+    // dismissNotifications 메서드는 이 타입의 주요 동작을 수행합니다.
     func dismissNotifications() {
         isNotificationsPresented = false
     }
 
+    // previewModel 메서드는 이 타입의 주요 동작을 수행합니다.
     static func previewModel() -> AppModel {
         AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
     }
 
+    // loadMyTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         if let existingTask = inFlightScheduleMonthTasks[key] {
@@ -2654,6 +2781,7 @@ final class AppModel {
         inFlightScheduleMonthTasks[key] = nil
     }
 
+    // performLoadMyTeamSchedule 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performLoadMyTeamSchedule(
         for month: Date,
         key: KBOMonthScheduleKey,
@@ -2682,6 +2810,7 @@ final class AppModel {
         await loadScheduleMonthFromRepository(for: key, reason: localReason, loadID: loadID, bypassingCache: forceRefresh)
     }
 
+    // loadScheduleMonthFromRepository 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadScheduleMonthFromRepository(
         for key: KBOMonthScheduleKey,
         reason: String,
@@ -2712,6 +2841,7 @@ final class AppModel {
         }
     }
 
+    // hydrateScheduleMonthFromLocalStore 메서드는 이 타입의 주요 동작을 수행합니다.
     private func hydrateScheduleMonthFromLocalStore(
         for key: KBOMonthScheduleKey,
         reason: String,
@@ -2746,6 +2876,7 @@ final class AppModel {
         #endif
     }
 
+    // runStartupScheduleCountCheckIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func runStartupScheduleCountCheckIfNeeded() async {
         switch scheduleStartupSyncState {
         case .completed:
@@ -2787,6 +2918,7 @@ final class AppModel {
         await task.value
     }
 
+    // performStartupScheduleCountCheck 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performStartupScheduleCountCheck(
         repository scheduleSyncRepository: any KBOScheduleRemoteSyncDataSource
     ) async {
@@ -2833,6 +2965,7 @@ final class AppModel {
         }
     }
 
+    // refreshTodayGamesFromSupabase 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshTodayGamesFromSupabase(
         for date: Date,
         monthKey: KBOMonthScheduleKey,
@@ -2884,6 +3017,7 @@ final class AppModel {
         return refreshedGames
     }
 
+    // performRefreshTodayGamesFromSupabase 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshTodayGamesFromSupabase(
         for date: Date,
         monthKey: KBOMonthScheduleKey,
@@ -2927,6 +3061,7 @@ final class AppModel {
         }
     }
 
+    // upsertScheduleGamesIntoRepositoryCache 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func upsertScheduleGamesIntoRepositoryCache(_ incomingGames: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
         guard let localStore = repository as? any KBOLocalGameCacheUpserting else {
             return (0, 0, incomingGames.count)
@@ -2934,6 +3069,7 @@ final class AppModel {
         return await localStore.upsertLocalGames(incomingGames)
     }
 
+    // upsertScheduleGamesIntoLocalStore 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func upsertScheduleGamesIntoLocalStore(
         _ incomingGames: [GameDetail],
         source: ScheduleGameMergeSource = .unspecified
@@ -2995,6 +3131,7 @@ final class AppModel {
         return (inserted, updated, skippedExisting)
     }
 
+    // shouldRepublishStandingsAfterGameMerge 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldRepublishStandingsAfterGameMerge(
         source: ScheduleGameMergeSource,
         standingsRelevantChange: Bool
@@ -3011,6 +3148,7 @@ final class AppModel {
         return true
     }
 
+    // hasStandingsRelevantGameChange 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func hasStandingsRelevantGameChange(existing: GameDetail?, selected: GameDetail) -> Bool {
         guard selected.isRegularSeason || existing?.isRegularSeason == true else { return false }
         guard let existing else {
@@ -3024,6 +3162,7 @@ final class AppModel {
             existing.homeScore != selected.homeScore
     }
 
+    // overlayScheduleGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func overlayScheduleGames(
         _ incomingGames: [GameDetail],
         intoMonth monthKey: KBOMonthScheduleKey
@@ -3066,6 +3205,7 @@ final class AppModel {
     }
 
 #if DEBUG
+    // logPitcherMerge 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logPitcherMerge(existing: GameDetail, incoming: GameDetail, merged: GameDetail) {
         if existing.awayStartingPitcherName != merged.awayStartingPitcherName ||
             incoming.awayStartingPitcherName != merged.awayStartingPitcherName {
@@ -3078,6 +3218,7 @@ final class AppModel {
     }
 #endif
 
+    // refreshLoadedScheduleMonthsFromLocalStore 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshLoadedScheduleMonthsFromLocalStore(including key: KBOMonthScheduleKey? = nil) {
         var keys = Set(monthlyScheduleGames.keys)
         if let key {
@@ -3091,12 +3232,14 @@ final class AppModel {
         invalidateScheduleDerivedCaches()
     }
 
+    // scheduleMonthKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleMonthKey(for date: Date) -> KBOMonthScheduleKey {
         var scheduleCalendar = calendar
         scheduleCalendar.timeZone = scheduleTimeZone
         return KBOMonthScheduleKey(date: date, calendar: scheduleCalendar)
     }
 
+    // refreshMonthlyScheduleDebugInfo 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshMonthlyScheduleDebugInfo(for key: KBOMonthScheduleKey) async -> RepositoryDebugSnapshot? {
         guard let repositoryRuntimeState else { return nil }
         let snapshot = await repositoryRuntimeState.snapshot()
@@ -3106,6 +3249,7 @@ final class AppModel {
         return snapshot
     }
 
+    // refreshGames 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshGames(for scopes: Set<RefreshScope>) async {
         guard activeRefreshScopes.isDisjoint(with: scopes) else { return }
         activeRefreshScopes.formUnion(scopes)
@@ -3148,6 +3292,7 @@ final class AppModel {
         }
     }
 
+    // refreshNotifications 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshNotifications(for scopes: Set<RefreshScope>) async {
         guard activeRefreshScopes.isDisjoint(with: scopes) else { return }
         activeRefreshScopes.formUnion(scopes)
@@ -3174,6 +3319,7 @@ final class AppModel {
         }
     }
 
+    // refreshRepositoryDebugInfo 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshRepositoryDebugInfo(dataSets: Set<RefreshDataSet>) async {
         guard let repositoryRuntimeState else { return }
         let snapshot = await repositoryRuntimeState.snapshot()
@@ -3193,6 +3339,7 @@ final class AppModel {
 
     }
 
+    // applyRepositoryDebugSnapshot 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func applyRepositoryDebugSnapshot(_ snapshot: RepositoryDebugSnapshot) {
         debugActiveDataSource = snapshot.activeSource.rawValue
         debugDeliverySource = snapshot.deliverySource.rawValue
@@ -3209,6 +3356,7 @@ final class AppModel {
     }
 
 #if DEBUG
+    // debugGameIdentifier 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugGameIdentifier(for game: GameDetail) -> String {
         game.publicGameID ??
             game.officialGameCenterID ??
@@ -3221,6 +3369,7 @@ final class AppModel {
         return reasons.first
     }
 
+    // logGameDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logGameDiagnostics(context: String) {
         let sourceGames = standingsCalculationGames
         let completedGames = sourceGames.filter(\.hasCompleteFinalScore)
@@ -3245,6 +3394,7 @@ final class AppModel {
     }
 #endif
 
+    // shouldReloadBootstrapForLocalData 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldReloadBootstrapForLocalData() async -> Bool {
         if repository is BundledJSONKBORepository {
             return true
@@ -3256,6 +3406,7 @@ final class AppModel {
             (snapshot.activeSource == .mock && snapshot.baseURL == nil)
     }
 
+    // reloadBootstrapFromRepository 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reloadBootstrapFromRepository() async throws {
         let bootstrap = try await repository.fetchBootstrapData()
         if hasLoaded,
@@ -3275,6 +3426,7 @@ final class AppModel {
         invalidateMonthlyScheduleCache()
     }
 
+    // invalidateMonthlyScheduleCache 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func invalidateMonthlyScheduleCache() {
         monthlyScheduleGames = [:]
         monthlyScheduleDebugSnapshots = [:]
@@ -3294,6 +3446,7 @@ final class AppModel {
         isDataSetStale(.notifications)
     }
 
+    // isDataSetStale 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isDataSetStale(_ dataSet: RefreshDataSet) -> Bool {
         if refreshFailures.contains(dataSet) {
             return true
@@ -3306,6 +3459,7 @@ final class AppModel {
         return Date().timeIntervalSince(lastRefreshAt) > Self.staleThreshold
     }
 
+    // markRefreshSuccess 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markRefreshSuccess(for dataSet: RefreshDataSet, at date: Date, isStale: Bool) {
         lastSuccessfulRefresh[dataSet] = date
         if isStale {
@@ -3318,6 +3472,7 @@ final class AppModel {
         isShowingStaleData = isGamesStale || isNotificationsStale
     }
 
+    // markRefreshFailure 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markRefreshFailure(for dataSet: RefreshDataSet, hasUsableData: Bool) {
         refreshFailures.insert(dataSet)
         isShowingStaleData = isGamesStale || isNotificationsStale
@@ -3332,12 +3487,14 @@ final class AppModel {
         }
     }
 
+    // localBootstrapDocumentsPath 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func localBootstrapDocumentsPath() -> String? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("LocalBootstrapData.json", isDirectory: false)
             .path
     }
 
+    // staleStatusMessage 메서드는 이 타입의 주요 동작을 수행합니다.
     private func staleStatusMessage(lastRefreshAt: Date?) -> String {
         guard let lastRefreshAt else {
             return "업데이트가 지연되고 있습니다."
@@ -3345,6 +3502,7 @@ final class AppModel {
         return "업데이트 지연 · 마지막 갱신 \(lastRefreshAt.formatted(date: .omitted, time: .shortened))"
     }
 
+    // canonicalTeamIdentifier 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func canonicalTeamIdentifier(_ value: String?) -> String? {
         guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.isEmpty == false else {
@@ -3354,6 +3512,7 @@ final class AppModel {
         return Team.canonicalID(for: raw) ?? raw.lowercased()
     }
 
+    // syncFavoriteTeamWidgetSnapshot 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func syncFavoriteTeamWidgetSnapshot(includePrefetch: Bool, reason: String = "unspecified") async {
         guard settings.favoriteTeamID != nil else {
             guard lastFavoriteTeamWidgetSemanticKey != "nil" else {
@@ -3388,6 +3547,7 @@ final class AppModel {
         reloadFavoriteTeamWidgetTimelines()
     }
 
+    // shouldSyncFavoriteTeamWidget 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldSyncFavoriteTeamWidget(afterGameUpdate game: GameDetail) -> Bool {
         guard let favoriteTeamID = settings.favoriteTeamID else { return true }
         if game.involves(teamID: favoriteTeamID) {
@@ -3396,6 +3556,7 @@ final class AppModel {
         return scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
     }
 
+    // prepareFavoriteTeamWidgetScheduleIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
         guard settings.favoriteTeamID != nil else { return }
 
@@ -3411,6 +3572,7 @@ final class AppModel {
         }
     }
 
+    // makeFavoriteTeamWidgetSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeFavoriteTeamWidgetSnapshot(referenceDate: Date = Date()) -> FavoriteTeamScheduleWidgetSnapshot? {
         guard let favoriteTeam = favoriteTeamWidgetMetadata() else { return nil }
 
@@ -3436,6 +3598,7 @@ final class AppModel {
         )
     }
 
+    // favoriteTeamWidgetMetadata 메서드는 이 타입의 주요 동작을 수행합니다.
     private func favoriteTeamWidgetMetadata() -> (id: String, name: String, shortName: String)? {
         guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
 
@@ -3450,12 +3613,14 @@ final class AppModel {
         return (favoriteTeamID, favoriteTeamID.uppercased(), favoriteTeamID.uppercased())
     }
 
+    // widgetScheduleCalendar 메서드는 이 타입의 주요 동작을 수행합니다.
     private func widgetScheduleCalendar() -> Calendar {
         var scheduleCalendar = calendar
         scheduleCalendar.timeZone = scheduleTimeZone
         return scheduleCalendar
     }
 
+    // reloadFavoriteTeamWidgetTimelines 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reloadFavoriteTeamWidgetTimelines() {
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: FavoriteTeamScheduleWidgetShared.widgetKind)
@@ -3463,6 +3628,7 @@ final class AppModel {
         #endif
     }
 
+    // persistSettings 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistSettings() {
         FavoriteTeamScheduleWidgetShared.saveState(
             favoriteTeamID: settings.favoriteTeamID,
@@ -3472,6 +3638,7 @@ final class AppModel {
         AppModelPersistenceStore.saveSettings(settings)
     }
 
+    // updateAPNsDeviceToken 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func updateAPNsDeviceToken(_ token: String) {
         #if DEBUG
         print("[NotificationPipeline] APNs token stored prefix=\(token.prefix(12)) length=\(token.count)")
@@ -3488,11 +3655,13 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: true)
     }
 
+    // persistNotificationHistory 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistNotificationHistory() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveNotificationHistory(notifications)
     }
 
+    // mergedNotifications 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergedNotifications(with incoming: [NotificationItem]) -> [NotificationItem] {
         var byID: [UUID: NotificationItem] = [:]
         for item in notifications {
@@ -3504,27 +3673,32 @@ final class AppModel {
         return byID.values.sorted { $0.sentAt > $1.sentAt }
     }
 
+    // persistAttendedGameKeys 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistAttendedGameKeys() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveAttendedGameKeys(attendedGameKeys)
     }
 
+    // persistCancellationNotificationKeys 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistCancellationNotificationKeys() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveCancellationNotificationKeys(notifiedCancellationKeys)
     }
 
+    // persistOnboardingCompletion 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistOnboardingCompletion() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveOnboardingCompletion(hasCompletedOnboarding)
     }
 
+    // handleNotificationUserInfo 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
         guard let payload = ScoreNotificationPayloadExtractor.payload(from: userInfo) else { return }
         recordReceivedNotification(payload)
         routeNotification(payload)
     }
 
+    // recordReceivedNotification 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func recordReceivedNotification(_ payload: ScoreNotificationPayload) {
         let receivedAt = currentDateProvider()
         let item = NotificationHistoryBuilder.makeItem(from: payload, receivedAt: receivedAt)
@@ -3533,6 +3707,7 @@ final class AppModel {
         persistNotificationHistory()
     }
 
+    // routeNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     private func routeNotification(_ payload: ScoreNotificationPayload) {
         switch ScoreNotificationPayloadExtractor.route(from: payload) {
         case .gameDetail(let gameIdentity):
@@ -3557,6 +3732,7 @@ final class AppModel {
         )
     }
 
+    // scheduleNotificationRegistrationSyncIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleNotificationRegistrationSyncIfNeeded(oldSettings: AppSettings) {
         guard oldSettings.favoriteTeamID != settings.favoriteTeamID ||
                 oldSettings.notificationPreferences != settings.notificationPreferences ||
@@ -3567,6 +3743,7 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
+    // scheduleNotificationRegistrationSync 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleNotificationRegistrationSync(force: Bool) {
         guard let payload = currentNotificationRegistrationPayload else {
             notificationRegistrationSyncStatus = .waitingForToken
@@ -3632,6 +3809,7 @@ final class AppModel {
         }
     }
 
+    // performNotificationRegistrationSync 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performNotificationRegistrationSync(
         _ payload: NotificationRegistrationPayload,
         key: NotificationRegistrationKey,
@@ -3686,6 +3864,7 @@ final class AppModel {
         }
     }
 
+    // refreshActiveLiveActivityGameDetailIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshActiveLiveActivityGameDetailIfNeeded(reason: String) async {
         guard let activeLiveActivityGameID,
               let activeGame = game(withID: activeLiveActivityGameID) else {
@@ -3701,6 +3880,7 @@ final class AppModel {
         )
     }
 
+    // syncFavoriteTeamLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func syncFavoriteTeamLiveActivity() async {
         liveActivitySupported = liveActivityController.isSupported
 
@@ -3732,6 +3912,7 @@ final class AppModel {
         }
     }
 
+    // resolvedRawGameID 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func resolvedRawGameID(for game: GameDetail) -> String {
         if let officialGame = self.game(withIdentity: game.canonicalGameIdentityValue) {
             return officialGame.canonicalGameIdentityValue
@@ -3739,18 +3920,22 @@ final class AppModel {
         return game.canonicalGameIdentityValue
     }
 
+    // matchesHomeFilter 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func matchesHomeFilter(_ summary: GameSummary) -> Bool {
         HomeGameSelector.matches(summary, filter: homeFilter)
     }
 
+    // homeSummaryComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func homeSummaryComparator(_ lhs: GameSummary, _ rhs: GameSummary) -> Bool {
         HomeGameSelector.compare(lhs, rhs)
     }
 
+    // todayGameComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func todayGameComparator(_ lhs: GameDetail, _ rhs: GameDetail) -> Bool {
         HomeGameSelector.compareTodayGames(lhs, rhs, favoriteTeamID: settings.favoriteTeamID)
     }
 
+    // calendarFavoriteTeamResult 메서드는 이 타입의 주요 동작을 수행합니다.
     private func calendarFavoriteTeamResult(for games: [GameDetail]) -> TeamGameResult? {
         for game in games {
             if let result = game.finalResult(for: settings.favoriteTeamID) {
@@ -3760,6 +3945,7 @@ final class AppModel {
         return nil
     }
 
+    // makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshot(
         for team: Team,
         probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
@@ -3776,6 +3962,7 @@ final class AppModel {
         )
     }
 
+    // makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshot(
         for team: Team,
         completedGames: [GameDetail],
@@ -3791,6 +3978,7 @@ final class AppModel {
         )
     }
 
+    // refreshLocalStandingsProbabilitySignalsSynchronously 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshLocalStandingsProbabilitySignalsSynchronously() {
         localStandingsProbabilityRefreshTask?.cancel()
         localStandingsProbabilitySignalsByTeamID = localPostseasonQualificationCalculator.makeSignals(
@@ -3799,6 +3987,7 @@ final class AppModel {
         )
     }
 
+    // refreshLocalStandingsProbabilitySignals 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshLocalStandingsProbabilitySignals(for sourceGames: [GameDetail]) {
         localStandingsProbabilityRefreshTask?.cancel()
         localStandingsProbabilityGeneration += 1
@@ -3808,6 +3997,7 @@ final class AppModel {
         )
     }
 
+    // scheduleLocalStandingsProbabilityRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleLocalStandingsProbabilityRefresh() {
         guard standingsSourceGamesBySeason[currentStandingsSeason()] == nil else { return }
         localStandingsProbabilityRefreshTask?.cancel()
@@ -3838,10 +4028,12 @@ final class AppModel {
         }
     }
 
+    // standingsComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func standingsComparator(_ lhs: TeamStandingsSnapshot, _ rhs: TeamStandingsSnapshot) -> Bool {
         StandingsSorter.compare(lhs, rhs, previousRankProvider: previousRegularSeasonRank)
     }
 
+    // previousRegularSeasonRank 메서드는 이 타입의 주요 동작을 수행합니다.
     private func previousRegularSeasonRank(for team: Team) -> Int? {
         if let previousRegularSeasonRank = team.previousRegularSeasonRank {
             return previousRegularSeasonRank
@@ -3852,6 +4044,7 @@ final class AppModel {
         return Self.previousRegularSeasonRankByTeamID[teamID]
     }
 
+    // notifyGameContentTransitions 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func notifyGameContentTransitions(
         previousGames: [GameDetail],
         updatedGames: [GameDetail]
@@ -3880,6 +4073,7 @@ final class AppModel {
         }
     }
 
+    // notifyCancellationTransitions 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func notifyCancellationTransitions(
         previousGames: [GameDetail],
         updatedGames: [GameDetail]
@@ -3942,6 +4136,7 @@ final class AppModel {
         }
     }
 
+    // cancellationNotificationState 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func cancellationNotificationState(for game: GameDetail) -> GameCancellationNotificationState? {
         switch game.status {
         case .cancelled:
@@ -3956,6 +4151,7 @@ final class AppModel {
         }
     }
 
+    // cancellationNotificationFingerprint 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func cancellationNotificationFingerprint(
         for game: GameDetail,
         state: GameCancellationNotificationState
@@ -3968,14 +4164,17 @@ final class AppModel {
         ].joined(separator: "|")
     }
 
+    // equivalentGame 메서드는 이 타입의 주요 동작을 수행합니다.
     private func equivalentGame(to game: GameDetail, in candidates: [GameDetail]) -> GameDetail? {
         GameMergeResolver.equivalentGame(to: game, in: candidates)
     }
 
+    // isTodayInKorea 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isTodayInKorea(_ game: GameDetail) -> Bool {
         scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
     }
 
+    // isWeatherRelatedCancellation 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isWeatherRelatedCancellation(_ game: GameDetail) -> Bool {
         let text = ([game.note, game.highlightText, game.inningText].compactMap { $0 } + game.events.map(\.headline))
             .joined(separator: " ")
@@ -3984,6 +4183,7 @@ final class AppModel {
         return weatherTokens.contains { text.contains($0) }
     }
 
+    // availableScheduleMonths 메서드는 이 타입의 주요 동작을 수행합니다.
     private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {
         let monthStarts = knownScheduleGames(filter: filter)
             .map { startOfMonth(for: $0.scheduledStart) }
@@ -3991,6 +4191,7 @@ final class AppModel {
         return Array(Set(monthStarts)).sorted()
     }
 
+    // knownScheduleGames 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func knownScheduleGames(filter: ScheduleFilter) -> [GameDetail] {
         let mergedGames = mergeEquivalentGames(games + monthlyScheduleGames.values.flatMap { $0 })
         switch filter {
@@ -4002,6 +4203,7 @@ final class AppModel {
         }
     }
 
+    // mergeMonthlyScheduleGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergeMonthlyScheduleGames(_ monthGames: [GameDetail], for key: KBOMonthScheduleKey) -> [GameDetail] {
         let stateGamesInMonth = games.filter {
             let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
@@ -4010,19 +4212,23 @@ final class AppModel {
         return mergeEquivalentGames(monthGames + stateGamesInMonth)
     }
 
+    // mergeEquivalentGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergeEquivalentGames(_ sourceGames: [GameDetail]) -> [GameDetail] {
         GameMergeResolver.mergeEquivalentGames(sourceGames)
     }
 
+    // scoreDebugText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func scoreDebugText(_ game: GameDetail) -> String {
         "\(game.awayScore.map(String.init) ?? "-"):\(game.homeScore.map(String.init) ?? "-")"
     }
 
+    // selectedGameMatch 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func selectedGameMatch(for gameIdentity: String) -> SelectedGameResolution? {
         SelectedGameResolver.match(for: gameIdentity, in: allKnownGames())
     }
 
     #if DEBUG
+    // debugLogLocalCandidateMiss 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogLocalCandidateMiss(_ gameIdentity: String) {
         let rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
         let candidates = allKnownGames()
@@ -4032,6 +4238,7 @@ final class AppModel {
         print("[GameDetailFetch] selectedGame localMiss selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) candidateCount=\(candidates.count) requestedTokens=[\(requestTokens)]")
     }
 
+    // debugLogMissingSelectedGame 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogMissingSelectedGame(_ gameIdentity: String) {
         let rawIdentifier: String
         rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
@@ -4054,18 +4261,22 @@ final class AppModel {
     }
     #endif
 
+    // equivalentGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func equivalentGames(to game: GameDetail) -> [GameDetail] {
         GameMergeResolver.equivalentGames(to: game, in: allKnownGames())
     }
 
+    // allKnownGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func allKnownGames() -> [GameDetail] {
         games + monthlyScheduleGames.values.flatMap { $0 }
     }
 
     #if DEBUG
+    // debugLogAttendanceToggle 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogAttendanceToggle(game: GameDetail, storedKey: String, equivalentKeys: Set<String>, isAttended: Bool) {
     }
 
+    // debugLogAttendanceSummaryCandidate 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogAttendanceSummaryCandidate(
         _ game: GameDetail,
         favoriteTeamID: String,
@@ -4075,6 +4286,7 @@ final class AppModel {
     }
     #endif
 
+    // makeScheduleCalendarCacheKey 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeScheduleCalendarCacheKey(for date: Date, filter: ScheduleFilter) -> ScheduleCalendarCacheKey {
         ScheduleCalendarCacheKey(
             month: KBOMonthScheduleKey(date: date, calendar: calendar),
@@ -4083,6 +4295,7 @@ final class AppModel {
         )
     }
 
+    // invalidateScheduleDerivedCaches 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func invalidateScheduleDerivedCaches(for month: KBOMonthScheduleKey? = nil) {
         guard let month else {
             scheduleCalendarDaysCache.removeAll()
@@ -4093,6 +4306,7 @@ final class AppModel {
         scheduleGamesByDayCache = scheduleGamesByDayCache.filter { $0.key.month != month }
     }
 
+    // groupedScheduleGamesByDay 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func groupedScheduleGamesByDay(for date: Date, filter: ScheduleFilter) -> [String: [GameDetail]] {
         let cacheKey = makeScheduleCalendarCacheKey(for: date, filter: filter)
         if let cached = scheduleGamesByDayCache[cacheKey] {
@@ -4106,11 +4320,13 @@ final class AppModel {
         return grouped
     }
 
+    // myTeamMonthScheduleSource 메서드는 이 타입의 주요 동작을 수행합니다.
     private func myTeamMonthScheduleSource(for date: Date) -> [GameDetail] {
         let key = KBOMonthScheduleKey(date: date, calendar: calendar)
         return monthlyScheduleGames[key] ?? fallbackMonthSchedule(for: key)
     }
 
+    // filteredScheduleGames 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func filteredScheduleGames(for date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let monthGames = myTeamMonthScheduleSource(for: date)
         switch filter {
@@ -4122,6 +4338,7 @@ final class AppModel {
         }
     }
 
+    // fallbackMonthSchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     private func fallbackMonthSchedule(for key: KBOMonthScheduleKey) -> [GameDetail] {
         games
             .filter {
@@ -4131,6 +4348,7 @@ final class AppModel {
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // reconcileOfficialScheduleStartTimesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reconcileOfficialScheduleStartTimesIfNeeded(
         in games: [GameDetail],
         snapshot: RepositoryDebugSnapshot?
@@ -4142,6 +4360,7 @@ final class AppModel {
         return await officialGameCenterClient.reconcileScheduledStartTimes(in: games)
     }
 
+    // reconcileOfficialScheduleStartTimesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reconcileOfficialScheduleStartTimesIfNeeded(
         in bootstrap: KBOBootstrapData,
         snapshot: RepositoryDebugSnapshot?
@@ -4158,6 +4377,7 @@ final class AppModel {
         )
     }
 
+    // shouldReconcileOfficialScheduleStartTimes 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldReconcileOfficialScheduleStartTimes(
         snapshot: RepositoryDebugSnapshot?,
         games: [GameDetail]
@@ -4175,10 +4395,12 @@ final class AppModel {
         return snapshot.deliverySource != .live
     }
 
+    // scheduleDayKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDayKey(for date: Date) -> String {
         ScheduleDateKeyFormatter.dayKey(for: date)
     }
 
+    // scheduleDate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDate(fromDayKey dayKey: String) throws -> Date {
         let parts = dayKey.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else {
@@ -4199,6 +4421,7 @@ final class AppModel {
         return date
     }
 
+    // markScheduleDatesRecentlyReconciled 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markScheduleDatesRecentlyReconciled(_ dateKeys: [String]) {
         let now = Date()
         for dateKey in dateKeys {
@@ -4209,6 +4432,7 @@ final class AppModel {
         #endif
     }
 
+    // clearRecentlyReconciledScheduleDates 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func clearRecentlyReconciledScheduleDates(_ dateKeys: [String]) {
         for dateKey in dateKeys {
             recentlyReconciledScheduleDates.removeValue(forKey: dateKey)
@@ -4218,6 +4442,7 @@ final class AppModel {
         #endif
     }
 
+    // pruneExpiredRecentlyReconciledScheduleDates 메서드는 이 타입의 주요 동작을 수행합니다.
     private func pruneExpiredRecentlyReconciledScheduleDates() {
         let now = Date()
         let expiredDateKeys = recentlyReconciledScheduleDates.compactMap { dateKey, markedAt in
@@ -4228,6 +4453,7 @@ final class AppModel {
     }
 }
 
+// ScheduleStalePreflightRefreshResult 구조체는 ScheduleStalePreflightRefreshResult 타입의 역할과 값을 정의합니다.
 struct ScheduleStalePreflightRefreshResult: Sendable {
     let requestedDateKeys: [String]
     let remainingStaleDateKeys: [String]
@@ -4235,6 +4461,7 @@ struct ScheduleStalePreflightRefreshResult: Sendable {
     let failedDateKeys: [String]
 }
 
+// SchedulePostReconciliationRefreshResult 구조체는 SchedulePostReconciliationRefreshResult 타입의 역할과 값을 정의합니다.
 struct SchedulePostReconciliationRefreshResult: Sendable {
     let dateResults: [SchedulePostReconciliationDateRefreshResult]
 
@@ -4243,6 +4470,7 @@ struct SchedulePostReconciliationRefreshResult: Sendable {
     }
 }
 
+// SchedulePostReconciliationDateRefreshResult 구조체는 SchedulePostReconciliationDateRefreshResult 타입의 역할과 값을 정의합니다.
 struct SchedulePostReconciliationDateRefreshResult: Sendable {
     let dateKey: String
     let games: [GameDetail]
@@ -4251,16 +4479,19 @@ struct SchedulePostReconciliationDateRefreshResult: Sendable {
     let skippedExisting: Int
 }
 
+// SchedulePostReconciliationRefreshError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 enum SchedulePostReconciliationRefreshError: Error, Sendable {
     case invalidDateKey(String)
 }
 
+// ScheduleCalendarCacheKey 구조체는 ScheduleCalendarCacheKey 타입의 역할과 값을 정의합니다.
 private struct ScheduleCalendarCacheKey: Hashable {
     let month: KBOMonthScheduleKey
     let filter: ScheduleFilter
     let favoriteTeamID: String?
 }
 
+// ScheduleStartupSyncState 열거형는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 private enum ScheduleStartupSyncState {
     case notStarted
     case inFlight(Task<Void, Never>)

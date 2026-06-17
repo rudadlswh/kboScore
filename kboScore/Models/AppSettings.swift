@@ -1,6 +1,10 @@
 //
 //  AppSettings.swift
 //  kboScore
+//  기능 설명: 앱 설정, 알림 옵션, 테마 선택 값을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/25/26.
 //
@@ -8,6 +12,7 @@
 import Foundation
 import SwiftUI
 
+// AppearanceOption 열거형는 AppearanceOption 타입의 역할과 값을 정의합니다.
 enum AppearanceOption: String, CaseIterable, Identifiable, Codable, Sendable {
     case system = "시스템"
     case light = "라이트"
@@ -27,6 +32,7 @@ enum AppearanceOption: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
+// NotificationPreferences 구조체는 NotificationPreferences 타입의 역할과 값을 정의합니다.
 struct NotificationPreferences: Hashable, Codable, Sendable {
     var gameStartEnabled: Bool = true
     var scoreChangeEnabled: Bool = true
@@ -38,6 +44,7 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
     var muteWhenLosingEnabled: Bool = false
     var rainDelay: Bool = true
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         gameStart: Bool = true,
         scoreChange: Bool = true,
@@ -80,6 +87,7 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
         set { gameEndEnabled = newValue }
     }
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case gameStartEnabled
         case scoreChangeEnabled
@@ -92,6 +100,7 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
         case rainDelay
     }
 
+// LegacyCodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum LegacyCodingKeys: String, CodingKey {
         case gameStart
         case scoreChange
@@ -99,6 +108,7 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
         case gameEnd
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
@@ -122,6 +132,7 @@ struct NotificationPreferences: Hashable, Codable, Sendable {
     }
 }
 
+// QuietHours 구조체는 QuietHours 타입의 역할과 값을 정의합니다.
 struct QuietHours: Hashable, Codable, Sendable {
     var isEnabled: Bool
     var startHour: Int
@@ -133,6 +144,7 @@ struct QuietHours: Hashable, Codable, Sendable {
     }
 }
 
+// AppSettings 구조체는 AppSettings 타입의 역할과 값을 정의합니다.
 struct AppSettings: Hashable, Codable, Sendable {
     var favoriteTeamID: String?
     var notificationPreferences: NotificationPreferences
@@ -150,6 +162,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         teamThemeMode: .favoriteTeam
     )
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         favoriteTeamID: String?,
         notificationPreferences: NotificationPreferences,
@@ -166,6 +179,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         self.teamThemeMode = teamThemeMode
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         favoriteTeamID = try container.decodeIfPresent(String.self, forKey: .favoriteTeamID)

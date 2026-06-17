@@ -1,34 +1,38 @@
 //
 //  GameCardView.swift
 //  kboScore
+//  기능 설명: 경기 요약 정보를 카드 형태로 렌더링합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// GameCardLiveColorStyle 열거형는 GameCardLiveColorStyle 타입의 역할과 값을 정의합니다.
 enum GameCardLiveColorStyle {
     case standard
     case white
 }
 
+// GameCardView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct GameCardView: View {
     @Environment(AppModel.self) private var appModel
     let summary: GameSummary
     let showsHomeTeamBadge: Bool
     let liveColorStyle: GameCardLiveColorStyle
-    let teamMarkAssetStyle: TeamImageAssetStyle
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         summary: GameSummary,
         showsHomeTeamBadge: Bool = false,
-        liveColorStyle: GameCardLiveColorStyle = .standard,
-        teamMarkAssetStyle: TeamImageAssetStyle = .officialLogoPreferred
+        liveColorStyle: GameCardLiveColorStyle = .standard
     ) {
         self.summary = summary
         self.showsHomeTeamBadge = showsHomeTeamBadge
         self.liveColorStyle = liveColorStyle
-        self.teamMarkAssetStyle = teamMarkAssetStyle
     }
 
     var body: some View {
@@ -73,15 +77,13 @@ struct GameCardView: View {
                     TeamRowDefault(
                         team: summary.awayTeam,
                         score: summary.awayScore,
-                        status: summary.status,
-                        assetStyle: teamMarkAssetStyle
+                        status: summary.status
                     )
                     TeamRowDefault(
                         team: summary.homeTeam,
                         score: summary.homeScore,
                         status: summary.status,
-                        showsHomeBadge: showsHomeTeamBadge,
-                        assetStyle: teamMarkAssetStyle
+                        showsHomeBadge: showsHomeTeamBadge
                     )
                 }
 
@@ -135,6 +137,7 @@ struct GameCardView: View {
         }
     }
 
+    // stadiumBody 메서드는 이 타입의 주요 동작을 수행합니다.
     private func stadiumBody(_ palette: StadiumPalette) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -170,8 +173,7 @@ struct GameCardView: View {
                         score: summary.awayScore,
                         status: summary.status,
                         palette: palette,
-                        isWinningRow: awayTeamIsWinning,
-                        assetStyle: teamMarkAssetStyle
+                        isWinningRow: awayTeamIsWinning
                     )
                     TeamRowDoosan(
                         team: summary.homeTeam,
@@ -179,8 +181,7 @@ struct GameCardView: View {
                         status: summary.status,
                         palette: palette,
                         isWinningRow: homeTeamIsWinning,
-                        showsHomeBadge: showsHomeTeamBadge,
-                        assetStyle: teamMarkAssetStyle
+                        showsHomeBadge: showsHomeTeamBadge
                     )
                 }
 
@@ -273,6 +274,7 @@ struct GameCardView: View {
         isWinningScore(away: summary.awayScore, home: summary.homeScore, checksAway: false)
     }
 
+    // isWinningScore 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isWinningScore(away: Int?, home: Int?, checksAway: Bool) -> Bool {
         guard let away, let home, away != home, summary.status != .upcoming else {
             return false
@@ -281,16 +283,15 @@ struct GameCardView: View {
     }
 }
 
+// TeamRowDefault 구조체는 TeamRowDefault 타입의 역할과 값을 정의합니다.
 private struct TeamRowDefault: View {
     let team: Team
     let score: Int?
     let status: GameStatus
     var showsHomeBadge: Bool = false
-    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
 
     var body: some View {
         HStack(spacing: 8) {
-            TeamMarkView(team: team, size: 28, assetStyle: assetStyle)
             HStack(spacing: 4) {
                 Text(team.displayName)
                     .font(.subheadline.weight(.semibold))
@@ -311,6 +312,7 @@ private struct TeamRowDefault: View {
     }
 }
 
+// TeamRowDoosan 구조체는 TeamRowDoosan 타입의 역할과 값을 정의합니다.
 private struct TeamRowDoosan: View {
     let team: Team
     let score: Int?
@@ -318,14 +320,12 @@ private struct TeamRowDoosan: View {
     let palette: StadiumPalette
     var isWinningRow: Bool = false
     var showsHomeBadge: Bool = false
-    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
 
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 1, style: .continuous)
                 .fill(isWinningRow ? palette.secondary : Color.clear)
                 .frame(width: 2, height: 24)
-            TeamMarkView(team: team, size: 28, assetStyle: assetStyle)
             HStack(spacing: 4) {
                 Text(team.displayName)
                     .font(.subheadline.weight(.semibold))
@@ -348,6 +348,7 @@ private struct TeamRowDoosan: View {
     }
 }
 
+// HomeTeamBadge 구조체는 HomeTeamBadge 타입의 역할과 값을 정의합니다.
 private struct HomeTeamBadge: View {
     @Environment(AppModel.self) private var appModel
 
