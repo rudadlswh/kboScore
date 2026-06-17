@@ -684,7 +684,7 @@ private struct ScoreColumn: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-	
+
         }
         .frame(maxWidth: .infinity)
     }
