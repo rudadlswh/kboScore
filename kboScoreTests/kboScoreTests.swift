@@ -5869,6 +5869,32 @@ struct kboScoreTests {
         #expect(payload.alertTypes.contains(.scoreChange))
     }
 
+    @Test func notificationRegistrationEnvironmentNormalizesConfiguredValues() async throws {
+        #expect(NotificationRegistrationEnvironment.normalize("sandbox") == "sandbox")
+        #expect(NotificationRegistrationEnvironment.normalize(" Sandbox ") == "sandbox")
+        #expect(NotificationRegistrationEnvironment.normalize("development") == "sandbox")
+        #expect(NotificationRegistrationEnvironment.normalize("production") == "production")
+        #expect(NotificationRegistrationEnvironment.normalize(" Production ") == "production")
+        #expect(NotificationRegistrationEnvironment.normalize("prod") == "production")
+        #expect(NotificationRegistrationEnvironment.normalize("invalid") == nil)
+        #expect(NotificationRegistrationEnvironment.normalize(nil) == nil)
+    }
+
+    @Test func notificationRegistrationEnvironmentFallsBackWhenConfiguredValueIsInvalid() async throws {
+        #if DEBUG
+        let expectedFallback = "sandbox"
+        #else
+        let expectedFallback = "production"
+        #endif
+
+        #expect(NotificationRegistrationEnvironment.resolved(from: nil) == expectedFallback)
+        #expect(NotificationRegistrationEnvironment.resolved(from: "invalid") == expectedFallback)
+    }
+
+    @Test func notificationRegistrationEnvironmentCurrentUsesInfoPlistConfiguration() async throws {
+        #expect(NotificationRegistrationEnvironment.current == "sandbox")
+    }
+
     // notificationPreferencesDefaultDetailedValuesMatchBackendDefaults 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func notificationPreferencesDefaultDetailedValuesMatchBackendDefaults() async throws {
         let preferences = NotificationPreferences()

@@ -10,6 +10,7 @@
 SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
 APS_ENVIRONMENT = production
+KBO_APNS_ENVIRONMENT = production
 
 // Set this to the production Spring backend origin, for example:
 // KBO_PRODUCTION_BACKEND_BASE_URL = https:/$()/api.example.com

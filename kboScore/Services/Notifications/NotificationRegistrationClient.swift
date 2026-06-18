@@ -107,10 +107,8 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
             throw RemoteNotificationRegistrationClientError.localhostUnavailableOnDevice(urlText)
         }
 
-        #if DEBUG
         print("[NotificationPipeline] registration URL=\(endpointURL.absoluteString)")
-        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
-        #endif
+        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
 
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"

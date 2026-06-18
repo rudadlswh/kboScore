@@ -342,11 +342,46 @@ nonisolated enum NotificationInstallationID {
 
 // NotificationRegistrationEnvironment 열거형는 NotificationRegistrationEnvironment 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationRegistrationEnvironment {
+    private static let infoPlistKey = "KBO_APNS_ENVIRONMENT"
+
+    nonisolated static var current: String {
+        let configuredValue = (Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return resolved(from: configuredValue)
+    }
+
+    nonisolated static func resolved(from configuredValue: String?) -> String {
+        normalize(configuredValue) ?? fallbackEnvironment
+    }
+
+    nonisolated static func normalize(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch value {
+        case "sandbox", "development", "dev":
+            return "sandbox"
+        case "production", "prod":
+            return "production"
+        default:
+            return nil
+        }
+    }
+
+    private static var fallbackEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+}
+
+nonisolated enum AppBuildConfiguration {
     nonisolated static var current: String {
         #if DEBUG
-        "sandbox"
+        return "Debug"
         #else
-        "production"
+        return "Release"
         #endif
     }
 }

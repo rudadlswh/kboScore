@@ -64,12 +64,13 @@ settings=$(xcodebuild \
     "KBO_APPSTORE_EXTENSION_PROVISIONING_PROFILE_SPECIFIER=$EXTENSION_PROFILE" \
     -showBuildSettings)
 
-printf '%s\n' "$settings" | grep -E "TARGET_NAME|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|KBO_BACKEND_BASE_URL|KBO_NOTIFICATION_REGISTRATION_URL|APS_ENVIRONMENT|PRODUCT_BUNDLE_IDENTIFIER"
+printf '%s\n' "$settings" | grep -E "TARGET_NAME|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY|PROVISIONING_PROFILE_SPECIFIER|KBO_BACKEND_BASE_URL|KBO_NOTIFICATION_REGISTRATION_URL|APS_ENVIRONMENT|KBO_APNS_ENVIRONMENT|PRODUCT_BUNDLE_IDENTIFIER"
 
 printf '%s\n' "$settings" | grep -q "CODE_SIGN_STYLE = Manual" || warn "Manual signing was not found in build settings output."
 printf '%s\n' "$settings" | grep -q "CODE_SIGN_IDENTITY = Apple Distribution" || fail "Release build is not using Apple Distribution."
 printf '%s\n' "$settings" | grep -q "KBO_BACKEND_BASE_URL = https://" || fail "Release backend URL did not resolve to HTTPS."
 printf '%s\n' "$settings" | grep -q "KBO_NOTIFICATION_REGISTRATION_URL = .*/devices/register" || fail "Release registration URL did not resolve to /devices/register."
 printf '%s\n' "$settings" | grep -q "APS_ENVIRONMENT = production" || fail "Release APS environment is not production."
+printf '%s\n' "$settings" | grep -q "KBO_APNS_ENVIRONMENT = production" || fail "Release APNs registration payload environment is not production."
 
 echo "App Store Release preflight passed."

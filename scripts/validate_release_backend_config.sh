@@ -35,6 +35,8 @@ require_https_url() {
 require_https_url "KBO_BACKEND_BASE_URL" "${KBO_BACKEND_BASE_URL:-}"
 require_https_url "KBO_NOTIFICATION_REGISTRATION_URL" "${KBO_NOTIFICATION_REGISTRATION_URL:-}"
 
+[ "${KBO_APNS_ENVIRONMENT:-}" = "production" ] || fail "KBO_APNS_ENVIRONMENT must be production for Release builds."
+
 case "${KBO_NOTIFICATION_REGISTRATION_URL:-}" in
     */devices/register) ;;
     *) fail "KBO_NOTIFICATION_REGISTRATION_URL must end with /devices/register." ;;

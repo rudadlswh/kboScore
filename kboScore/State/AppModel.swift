@@ -3640,9 +3640,7 @@ final class AppModel {
 
     // updateAPNsDeviceToken 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func updateAPNsDeviceToken(_ token: String) {
-        #if DEBUG
-        print("[NotificationPipeline] APNs token stored prefix=\(token.prefix(12)) length=\(token.count)")
-        #endif
+        print("[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(12)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         guard apnsDeviceToken != token else {
             scheduleNotificationRegistrationSync(force: false)
             return
@@ -3820,9 +3818,7 @@ final class AppModel {
 
         do {
             try Task.checkCancellation()
-            #if DEBUG
-            print("[NotificationPipeline] registration request start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") \(payload.debugBooleanDescription)")
-            #endif
+            print("[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             guard generation == notificationRegistrationSyncGeneration else {
                 notificationRegistrationDeduplicationState.fail(key)
