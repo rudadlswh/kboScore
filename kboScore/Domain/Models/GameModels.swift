@@ -182,7 +182,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         }
 
         let stateText = inningText ?? status.title
-        return "KBO LIVE\n\(scoreText)\n\(stateText)\n\(venue)"
+        return "\(scoreText)\n\(stateText)\n\(venue)"
     }
 
     nonisolated var hasCompleteFinalScore: Bool {

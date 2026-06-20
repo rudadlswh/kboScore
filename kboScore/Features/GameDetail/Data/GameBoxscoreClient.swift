@@ -305,6 +305,8 @@ private extension GameBatterRecord {
             walks: walks.map(String.init),
             strikeouts: strikeouts.map(String.init),
             stolenBases: stolenBases.map(String.init),
+            groundedIntoDoublePlay: groundedIntoDoublePlay.map(String.init),
+            errors: errors.map(String.init),
             average: battingAverage,
             plateAppearanceHomeRuns: nil,
             plateAppearanceWalks: nil,

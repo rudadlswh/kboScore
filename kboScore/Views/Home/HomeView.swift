@@ -37,7 +37,7 @@ struct HomeView: View {
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
-            .navigationTitle("KBO LIVE")
+//            .navigationTitle("KBO LIVE")
             .navigationBarTitleDisplayMode(.inline)
             .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
             .notificationsToolbarButton()

@@ -52,6 +52,7 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
     // makeEntry 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeEntry(date: Date) -> FavoriteTeamScheduleWidgetV2Entry {
         let loadState = FavoriteTeamScheduleWidgetShared.loadState()
+        logLoadedState(loadState)
 
         guard let favoriteTeamID = loadState.favoriteTeamID, favoriteTeamID.isEmpty == false else {
             return FavoriteTeamScheduleWidgetV2Entry(
@@ -75,6 +76,31 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
             refreshAfter: max(snapshot.refreshAfter, date.addingTimeInterval(60 * 15)),
             content: .content(snapshot)
         )
+    }
+
+    // logLoadedState 메서드는 위젯이 공유 저장소에서 읽은 일정 상태를 기록합니다.
+    private func logLoadedState(_ loadState: FavoriteTeamScheduleWidgetSharedLoadState) {
+        let snapshot = loadState.snapshot
+        let monthKey = snapshot.map { Self.widgetMonthKey(for: $0.displayedMonth) } ?? "nil"
+        let loadedCount = snapshot?.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        } ?? 0
+        print(
+            "[WidgetSchedule] load month=\(monthKey) " +
+            "favoriteTeam=\(loadState.favoriteTeamID ?? "nil") " +
+            "snapshotTeam=\(snapshot?.teamID ?? "nil") " +
+            "loadedCount=\(loadedCount)"
+        )
+    }
+
+    // widgetMonthKey 메서드는 KST 기준 yyyyMM 월 키를 만듭니다.
+    private static func widgetMonthKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "yyyyMM"
+        return formatter.string(from: date)
     }
 }
 

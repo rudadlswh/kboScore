@@ -283,6 +283,8 @@ private extension GameCenterBattingLine {
             walks: walks,
             strikeouts: strikeouts,
             stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
             average: average,
             plateAppearanceHomeRuns: plateAppearanceHomeRuns,
             plateAppearanceWalks: plateAppearanceWalks,

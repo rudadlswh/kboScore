@@ -9530,6 +9530,46 @@ struct kboScoreTests {
         #expect(stats.home.strikeouts == 2)
     }
 
+    // gameCenterKeyStatsUsesLineScoreAndBatterLinePrecedence 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func gameCenterKeyStatsUsesLineScoreAndBatterLinePrecedence() throws {
+        let review = makeKeyStatsReview(
+            summaryItems: [
+                GameCenterSummaryItem(title: "홈런", value: "unused", values: ["0", "0"]),
+                GameCenterSummaryItem(title: "도루", value: "unused", values: ["0", "0"]),
+                GameCenterSummaryItem(title: "병살타", value: "unused", values: ["0", "0"]),
+                GameCenterSummaryItem(title: "실책", value: "unused", values: ["9", "0"])
+            ],
+            awayLines: [
+                makeKeyStatsBattingLine(name: "강백호", hits: "2", homeRuns: "3", stolenBases: "2", groundedIntoDoublePlay: "1", errors: "4"),
+                makeKeyStatsBattingLine(name: "박병호", hits: "1", homeRuns: "1", stolenBases: "0", groundedIntoDoublePlay: "0", errors: "0")
+            ],
+            homeLines: [
+                makeKeyStatsBattingLine(name: "홍창기", hits: "1", homeRuns: "2", stolenBases: "3", groundedIntoDoublePlay: "2", errors: "5"),
+                makeKeyStatsBattingLine(name: "오지환", hits: "0", homeRuns: "0", stolenBases: "0", groundedIntoDoublePlay: "1", errors: "0")
+            ]
+        )
+        let lineScore = GameCenterLineScore(
+            inningLabels: [],
+            awayInnings: [],
+            homeInnings: [],
+            awayTotals: GameCenterTeamLineTotals(runs: "8", hits: "9", errors: "1", walks: nil),
+            homeTotals: GameCenterTeamLineTotals(runs: "3", hits: nil, errors: nil, walks: nil)
+        )
+
+        let stats = review.keyStats(awayTeam: keyStatsAwayTeam, homeTeam: keyStatsHomeTeam, lineScore: lineScore)
+
+        #expect(stats.away.hits == 9)
+        #expect(stats.home.hits == 1)
+        #expect(stats.away.homeRuns == 4)
+        #expect(stats.home.homeRuns == 2)
+        #expect(stats.away.stolenBases == 2)
+        #expect(stats.home.stolenBases == 3)
+        #expect(stats.away.doublePlays == 1)
+        #expect(stats.home.doublePlays == 3)
+        #expect(stats.away.errors == 1)
+        #expect(stats.home.errors == 5)
+    }
+
     // gameCenterKeyStatsParsesStolenBasesAndDoublePlaysFromTableEtc 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func gameCenterKeyStatsParsesStolenBasesAndDoublePlaysFromTableEtc() throws {
         let review = makeKeyStatsReview(
@@ -9567,7 +9607,7 @@ struct kboScoreTests {
                 makeKeyStatsBattingLine(name: "강백호", homeRuns: "3")
             ],
             homeLines: [
-                makeKeyStatsBattingLine(name: "홍창기", homeRuns: "0")
+                makeKeyStatsBattingLine(name: "홍창기")
             ]
         )
 
@@ -9647,7 +9687,10 @@ struct kboScoreTests {
         name: String,
         hits: String? = nil,
         homeRuns: String? = nil,
-        strikeouts: String? = nil
+        stolenBases: String? = nil,
+        strikeouts: String? = nil,
+        groundedIntoDoublePlay: String? = nil,
+        errors: String? = nil
     ) -> GameCenterBattingLine {
         GameCenterBattingLine(
             battingOrder: "1",
@@ -9660,6 +9703,9 @@ struct kboScoreTests {
             homeRuns: homeRuns,
             walks: nil,
             strikeouts: strikeouts,
+            stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
             average: nil
         )
     }
@@ -13028,6 +13074,43 @@ struct kboScoreTests {
         #expect(model.myTeamCalendarDays(for: referenceDate).contains {
             Calendar(identifier: .gregorian).isDate($0.date, inSameDayAs: referenceDate) && $0.gameCount == 1
         })
+    }
+
+    // favoriteTeamScheduleWidgetSnapshotUsesFullLoadedMonth 메서드는 월간 캐시 기반 위젯 경기 수를 검증합니다.
+    @Test func favoriteTeamScheduleWidgetSnapshotUsesFullLoadedMonth() async throws {
+        let referenceDate = isoDate("2026-06-20T09:00:00+09:00")
+        let schedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let repository = StubRepository(fetchMonthlySchedule: { _ in schedule })
+        let model = AppModel(
+            repository: repository,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let lotte = try #require(model.teams.first(where: { $0.id == "lotte" }))
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.loadMyTeamScheduleIfNeeded(for: referenceDate)
+
+        let days = model.myTeamCalendarDays(for: referenceDate)
+        let expectedCount = schedule.filter { $0.involves(teamID: "lotte") }.count
+        let snapshot = FavoriteTeamWidgetSnapshotBuilder.makeSnapshot(
+            teamID: lotte.id,
+            teamName: lotte.displayName,
+            teamShortName: lotte.displayName,
+            displayedMonth: model.startOfMonth(for: referenceDate),
+            monthTitle: model.calendarMonthTitle(for: referenceDate),
+            days: days,
+            referenceDate: referenceDate,
+            calendar: scheduleTestCalendar()
+        )
+        let snapshotCount = snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(expectedCount > 1)
+        #expect(snapshotCount == expectedCount)
+        #expect(snapshot.monthSummaryText == "이달 경기 \(expectedCount)")
     }
 
     // scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.

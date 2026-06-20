@@ -22,7 +22,7 @@ struct ContentView: View {
             if appModel.shouldShowFavoriteTeamOnboarding {
                 FavoriteTeamOnboardingView()
             } else if appModel.isLoading && appModel.games.isEmpty {
-                ProgressView("KBO LIVE 불러오는 중")
+                ProgressView("불러오는 중")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(appModel.favoriteStadiumPalette?.background ?? KBOLivePalette.background)
             } else if let loadErrorMessage = appModel.loadErrorMessage, appModel.games.isEmpty {

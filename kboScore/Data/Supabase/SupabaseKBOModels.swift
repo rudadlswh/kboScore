@@ -585,6 +585,8 @@ nonisolated enum SupabaseKBOMapper {
             walks: row.walks.map(String.init),
             strikeouts: row.strikeouts.map(String.init),
             stolenBases: row.stolenBases.map(String.init),
+            groundedIntoDoublePlay: row.groundedIntoDoublePlay.map(String.init),
+            errors: row.errors.map(String.init),
             average: nil
         )
     }

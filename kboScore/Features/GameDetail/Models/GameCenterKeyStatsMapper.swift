@@ -35,12 +35,12 @@ struct GameCenterKeyStatsMapper {
     private func stats(for side: Side) -> GameCenterTeamKeyStats {
         let batting = battingSection(for: side)
         return GameCenterTeamKeyStats(
-            hits: lineScoreHits(for: side) ?? batting.totalHits ?? 0,
-            homeRuns: extraRecordValue(for: side, aliases: homeRunAliases) ?? batting.totalHomeRuns ?? 0,
-            stolenBases: extraRecordValue(for: side, aliases: stolenBaseAliases) ?? 0,
+            hits: lineScoreHits(for: side) ?? batting.totals?.hits?.gameCenterStatInt ?? totalInt(for: side, keyPath: \.hits) ?? 0,
+            homeRuns: batting.totals?.homeRuns?.gameCenterStatInt ?? totalInt(for: side, keyPath: \.homeRuns) ?? extraRecordValue(for: side, aliases: homeRunAliases) ?? 0,
+            stolenBases: totalInt(for: side, keyPath: \.stolenBases) ?? extraRecordValue(for: side, aliases: stolenBaseAliases) ?? 0,
             strikeouts: batting.totalStrikeouts ?? extraRecordValue(for: side, aliases: strikeoutAliases) ?? 0,
-            doublePlays: extraRecordValue(for: side, aliases: doublePlayAliases) ?? 0,
-            errors: lineScoreErrors(for: side) ?? extraRecordValue(for: side, aliases: errorAliases) ?? 0
+            doublePlays: totalInt(for: side, keyPath: \.groundedIntoDoublePlay) ?? extraRecordValue(for: side, aliases: doublePlayAliases) ?? 0,
+            errors: lineScoreErrors(for: side) ?? totalInt(for: side, keyPath: \.errors) ?? extraRecordValue(for: side, aliases: errorAliases) ?? 0
         )
     }
 
@@ -72,6 +72,17 @@ struct GameCenterKeyStatsMapper {
         case .home:
             review.homeBatting
         }
+    }
+
+    // battingLines 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func battingLines(for side: Side) -> [GameCenterBattingLine] {
+        battingSection(for: side).lines
+    }
+
+    // totalInt 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func totalInt(for side: Side, keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
+        let values = battingLines(for: side).compactMap { $0[keyPath: keyPath]?.gameCenterStatInt }
+        return values.isEmpty ? nil : values.reduce(0, +)
     }
 
     // team 메서드는 이 타입의 주요 동작을 수행합니다.

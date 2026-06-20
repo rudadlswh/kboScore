@@ -173,6 +173,8 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
     let walks: String?
     let strikeouts: String?
     let stolenBases: String?
+    let groundedIntoDoublePlay: String?
+    let errors: String?
     let average: String?
     let plateAppearanceHomeRuns: String?
     let plateAppearanceWalks: String?
@@ -191,6 +193,8 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
         walks: String?,
         strikeouts: String?,
         stolenBases: String? = nil,
+        groundedIntoDoublePlay: String? = nil,
+        errors: String? = nil,
         average: String?,
         plateAppearanceHomeRuns: String? = nil,
         plateAppearanceWalks: String? = nil,
@@ -207,6 +211,8 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
         self.walks = walks
         self.strikeouts = strikeouts
         self.stolenBases = stolenBases
+        self.groundedIntoDoublePlay = groundedIntoDoublePlay
+        self.errors = errors
         self.average = average
         self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
         self.plateAppearanceWalks = plateAppearanceWalks
