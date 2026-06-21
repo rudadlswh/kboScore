@@ -59,6 +59,7 @@ struct ScheduleGameDetailRoute: Hashable {
 // ScheduleView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct ScheduleView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = ScheduleViewModel()
 
     var body: some View {
@@ -99,6 +100,16 @@ struct ScheduleView: View {
             }
             .task(id: scheduleTaskID) {
                 await viewModel.loadDisplayedMonth(appModel: appModel)
+                await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+            }
+            .task(id: livePollingTaskID) {
+                await runLiveScorePollingLoop()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task {
+                    await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+                }
             }
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
@@ -111,6 +122,23 @@ struct ScheduleView: View {
 
     private var scheduleTaskID: String {
         "\(viewModel.scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(viewModel.displayedMonthKey.yearMonthText)-\(appModel.schedulePostReconciliationRefreshGeneration)"
+    }
+
+    private var livePollingTaskID: String {
+        "\(scenePhase)-\(viewModel.scheduleFilter.rawValue)-\(viewModel.selectedDate.timeIntervalSince1970)-\(viewModel.displayedMonthKey.yearMonthText)-\(appModel.settings.favoriteTeamID ?? "none")"
+    }
+
+    private func runLiveScorePollingLoop() async {
+        guard scenePhase == .active else { return }
+        await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+        while !Task.isCancelled, viewModel.shouldPollLiveScores(appModel: appModel) {
+            do {
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            } catch {
+                return
+            }
+            await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+        }
     }
 }
 
@@ -648,6 +676,12 @@ private struct ScheduleGameRow: View {
                     .font(.caption)
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
 
+                if let liveScoreText {
+                    Text(liveScoreText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
+                }
+
                 if let finalResultText {
                     Text(finalResultText)
                         .font(.caption.weight(.semibold))
@@ -713,6 +747,19 @@ private struct ScheduleGameRow: View {
             return nil
         }
         return "\(winningTeam.displayName) 승 · \(scoreLine)"
+    }
+
+    private var liveScoreText: String? {
+        guard game.status.isLiveLike else { return nil }
+        guard let awayScore = game.awayScore,
+              let homeScore = game.homeScore else {
+            return nil
+        }
+        let scoreText = "\(game.awayTeam.displayName) \(awayScore) : \(homeScore) \(game.homeTeam.displayName)"
+        guard let inningText = KBOInningFormatter.korean(game.inningText) ?? game.inningText else {
+            return scoreText
+        }
+        return "\(inningText) · \(scoreText)"
     }
 
     private var homeAwayLabel: String {

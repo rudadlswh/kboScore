@@ -308,6 +308,31 @@ struct kboScoreTests {
         #expect(Team.canonicalID(for: "SAM") == "samsung")
     }
 
+    @Test func koreanTeamDisplayFieldsNormalizeFromEnglishInputs() throws {
+        let cases = [
+            ("samsung", "Samsung Lions", "SAM", "삼성 라이온즈", "삼성"),
+            ("doosan", "Doosan Bears", "DOO", "두산 베어스", "두산"),
+            ("hanwha", "Hanwha Eagles", "HAN", "한화 이글스", "한화"),
+            ("lotte", "Lotte Giants", "LOT", "롯데 자이언츠", "롯데"),
+            ("kiwoom", "Kiwoom Heroes", "KIW", "키움 히어로즈", "키움")
+        ]
+
+        for (id, name, shortName, expectedName, expectedShortName) in cases {
+            let team = Team(
+                id: id,
+                name: name,
+                shortName: shortName,
+                englishName: name,
+                markText: shortName
+            )
+
+            #expect(team.name == expectedName)
+            #expect(team.shortName == expectedShortName)
+            #expect(team.displayName == expectedShortName)
+            #expect(team.markText == expectedShortName)
+        }
+    }
+
     // homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeFavoriteGameRefreshPolicyPreservesRecentRefreshThrottle() throws {
         let now = isoDate("2026-06-09T12:00:00+09:00")
@@ -5880,6 +5905,11 @@ struct kboScoreTests {
         #expect(NotificationRegistrationEnvironment.normalize(nil) == nil)
     }
 
+    @Test func notificationRegistrationEnvironmentResolvesExplicitValuesBeforeFallback() async throws {
+        #expect(NotificationRegistrationEnvironment.resolved(from: "sandbox") == "sandbox")
+        #expect(NotificationRegistrationEnvironment.resolved(from: "production") == "production")
+    }
+
     @Test func notificationRegistrationEnvironmentFallsBackWhenConfiguredValueIsInvalid() async throws {
         #if DEBUG
         let expectedFallback = "sandbox"
@@ -5892,7 +5922,62 @@ struct kboScoreTests {
     }
 
     @Test func notificationRegistrationEnvironmentCurrentUsesInfoPlistConfiguration() async throws {
+        #if DEBUG
         #expect(NotificationRegistrationEnvironment.current == "sandbox")
+        #else
+        #expect(NotificationRegistrationEnvironment.current == "production")
+        #endif
+    }
+
+    @Test func liveActivityRegistrationURLPrefersExplicitURLAndDerivesDeviceEndpoint() async throws {
+        let notificationURL = try #require(URL(string: "https://kboscore-back.onrender.com/devices/register"))
+        let explicitURL = try #require(LiveActivityTokenRegistrationClientFactory.configuredLiveActivityRegistrationURL(
+            processValue: nil,
+            explicitBundleValue: "https://kboscore-back.onrender.com/live-activities/register",
+            notificationURL: notificationURL
+        ))
+        let derivedURL = try #require(LiveActivityTokenRegistrationClientFactory.configuredLiveActivityRegistrationURL(
+            processValue: nil,
+            explicitBundleValue: nil,
+            notificationURL: notificationURL
+        ))
+
+        #expect(explicitURL.absoluteString == "https://kboscore-back.onrender.com/live-activities/register")
+        #expect(derivedURL.absoluteString == "https://kboscore-back.onrender.com/devices/live-activities/register")
+    }
+
+    @Test func liveActivityPushToStartRegistrationURLDerivesDeviceEndpoint() async throws {
+        let notificationURL = try #require(URL(string: "https://kboscore-back.onrender.com/devices/register"))
+        let derivedURL = try #require(LiveActivityPushToStartTokenRegistrationClientFactory.configuredPushToStartRegistrationURL(
+            processValue: nil,
+            explicitBundleValue: nil,
+            notificationURL: notificationURL
+        ))
+
+        #expect(derivedURL.absoluteString == "https://kboscore-back.onrender.com/devices/live-activities/push-to-start/register")
+    }
+
+    @Test func liveActivityPushToStartPayloadCarriesAutoStartPreferences() async throws {
+        let payload = LiveActivityPushToStartTokenRegistrationPayload(
+            pushToStartToken: "start-token",
+            settings: AppSettings(
+                favoriteTeamID: "lg",
+                notificationPreferences: NotificationPreferences(gameStart: true, favoriteTeamOnlyEnabled: true),
+                quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
+                liveActivitiesEnabled: true,
+                liveActivityAutoStartEnabled: false,
+                appearance: .system,
+                teamThemeMode: .favoriteTeam
+            ),
+            authorizationStatus: .authorized
+        )
+        let encoded = try JSONEncoder().encode(payload)
+        let json = try #require(String(data: encoded, encoding: .utf8))
+
+        #expect(json.contains("\"pushToStartToken\":\"start-token\""))
+        #expect(json.contains("\"favoriteTeamID\":\"lg\""))
+        #expect(json.contains("\"liveActivityAutoStartEnabled\":false"))
+        #expect(json.contains("\"favoriteTeamOnlyEnabled\":true"))
     }
 
     // notificationPreferencesDefaultDetailedValuesMatchBackendDefaults 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -13076,7 +13161,6 @@ struct kboScoreTests {
         })
     }
 
-    // favoriteTeamScheduleWidgetSnapshotUsesFullLoadedMonth 메서드는 월간 캐시 기반 위젯 경기 수를 검증합니다.
     @Test func favoriteTeamScheduleWidgetSnapshotUsesFullLoadedMonth() async throws {
         let referenceDate = isoDate("2026-06-20T09:00:00+09:00")
         let schedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
@@ -13111,6 +13195,96 @@ struct kboScoreTests {
         #expect(expectedCount > 1)
         #expect(snapshotCount == expectedCount)
         #expect(snapshot.monthSummaryText == "이달 경기 \(expectedCount)")
+    }
+
+    @Test func scheduleTabMonthLoadPublishesFullMonthToFavoriteTeamWidget() async throws {
+        let referenceDate = isoDate("2026-06-20T09:00:00+09:00")
+        let monthKey = KBOMonthScheduleKey(date: referenceDate)
+        let schedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let emptyBootstrap = KBOBootstrapData(
+            teams: bootstrap.teams,
+            games: [],
+            notifications: [],
+            settings: bootstrap.settings
+        )
+        let repository = StubRepository(fetchMonthlySchedule: { _ in schedule })
+        let model = AppModel(
+            repository: repository,
+            bootstrap: emptyBootstrap,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        model.settings.favoriteTeamID = "lotte"
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let snapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let expectedCount = schedule.filter { $0.involves(teamID: "lotte") }.count
+        let snapshotCount = snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(model.currentScheduleMonthSnapshot(for: monthKey).isEmpty)
+        #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: monthKey) == schedule.count)
+        #expect(expectedCount > 1)
+        #expect(snapshot.teamID == "lotte")
+        #expect(snapshotCount == expectedCount)
+        #expect(snapshot.monthSummaryText == "이달 경기 \(expectedCount)")
+    }
+
+    @Test func todayRefreshDoesNotOverwriteFullMonthFavoriteTeamWidgetSnapshot() async throws {
+        let referenceDate = isoDate("2026-06-20T09:00:00+09:00")
+        let monthKey = KBOMonthScheduleKey(date: referenceDate)
+        let schedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let todayGames = schedule.filter {
+            ScheduleDateKeyFormatter.dayKey(for: $0.scheduledStart) == "2026-06-20"
+        }
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let emptyBootstrap = KBOBootstrapData(
+            teams: bootstrap.teams,
+            games: [],
+            notifications: [],
+            settings: bootstrap.settings
+        )
+        let repository = StubRepository(
+            fetchMonthlySchedule: { _ in schedule },
+            fetchScheduleBypassingCache: { _, _ in todayGames }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: emptyBootstrap,
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        model.settings.favoriteTeamID = "lotte"
+        await viewModel.loadDisplayedMonth(appModel: model)
+        let fullSnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let fullSnapshotCount = fullSnapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        _ = await model.refreshTodayScheduleGamesForScheduleCache(
+            selectedDate: referenceDate,
+            reason: "scheduleTodayLiveRefresh"
+        )
+
+        let afterTodaySnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let afterTodaySnapshotCount = afterTodaySnapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(todayGames.count < schedule.count)
+        #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: monthKey) == schedule.count)
+        #expect(afterTodaySnapshotCount == fullSnapshotCount)
+        #expect(afterTodaySnapshot.monthSummaryText == fullSnapshot.monthSummaryText)
     }
 
     // scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.

@@ -431,9 +431,6 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         pushTokenObservationTask = Task { [tokenRegistrationClient] in
             for await tokenData in activity.pushTokenUpdates {
                 let token = tokenData.map { String(format: "%02x", $0) }.joined()
-                #if DEBUG
-                print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(12))")
-                #endif
                 let payload = LiveActivityTokenRegistrationPayload(
                     activityId: activity.id,
                     activityToken: token,
@@ -443,6 +440,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                     databaseID: snapshot.databaseID,
                     stableDetailIdentity: snapshot.stableDetailIdentity
                 )
+                print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
                 let key = LiveActivityTokenRegistrationKey(payload: payload, endpointDescription: tokenRegistrationClient.debugEndpointDescription)
                 await MainActor.run {
                     guard self.registeredTokenKeys.insert(key).inserted else {
@@ -454,13 +452,9 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                 }
                 do {
                     _ = try await tokenRegistrationClient.register(payload)
-                    #if DEBUG
-                    print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
-                    #endif
+                    print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
                 } catch {
-                    #if DEBUG
-                    print("[LiveActivity] token registration failure activityID=\(activity.id) error=\(error)")
-                    #endif
+                    print("[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
                 }
             }
         }

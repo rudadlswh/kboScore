@@ -52,13 +52,18 @@ final class ScheduleRefreshCoordinator {
         reason: String
     ) async {
         let startedAt = Date()
-        if forceRefresh == false, cachedMonths[key] != nil {
+        if forceRefresh == false, let cachedEntry = cachedMonths[key] {
             logLocalMonth(
                 key,
                 callSite: callSite,
                 reason: reason,
                 cacheHit: true,
                 durationMs: Self.durationMilliseconds(since: startedAt)
+            )
+            await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
+                fromScheduleTabMonthGames: cachedEntry.games,
+                monthKey: key,
+                reason: "scheduleTabMonth"
             )
             return
         }
@@ -79,8 +84,14 @@ final class ScheduleRefreshCoordinator {
                 skippedDueToInFlight: true
             )
             do {
-                cachedMonths[key] = try await task.value
+                let entry = try await task.value
+                cachedMonths[key] = entry
                 failedMonths.remove(key)
+                await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
+                    fromScheduleTabMonthGames: entry.games,
+                    monthKey: key,
+                    reason: "scheduleTabMonth"
+                )
             } catch {
                 failedMonths.insert(key)
             }
@@ -104,6 +115,11 @@ final class ScheduleRefreshCoordinator {
             let entry = try await task.value
             cachedMonths[key] = entry
             failedMonths.remove(key)
+            await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
+                fromScheduleTabMonthGames: entry.games,
+                monthKey: key,
+                reason: "scheduleTabMonth"
+            )
             #if DEBUG
             print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(monthKey) source=repository gameCount=\(entry.games.count) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
             #endif
@@ -148,6 +164,7 @@ final class ScheduleRefreshCoordinator {
         await syncStartersIntoMonthCache(
             refreshedGames,
             monthKey: displayedMonthKey,
+            appModel: appModel,
             callSite: callSite,
             reason: "todayLiveRefresh"
         )
@@ -164,6 +181,7 @@ final class ScheduleRefreshCoordinator {
     private func syncStartersIntoMonthCache(
         _ refreshedGames: [GameDetail],
         monthKey: KBOMonthScheduleKey,
+        appModel: AppModel,
         callSite: String,
         reason: String
     ) async {
@@ -207,7 +225,13 @@ final class ScheduleRefreshCoordinator {
         }
 
         if didUpdate {
-            cachedMonths[monthKey] = await ScheduleMonthCacheEntry.build(key: monthKey, games: updatedGames)
+            let updatedEntry = await ScheduleMonthCacheEntry.build(key: monthKey, games: updatedGames)
+            cachedMonths[monthKey] = updatedEntry
+            await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
+                fromScheduleTabMonthGames: updatedEntry.games,
+                monthKey: monthKey,
+                reason: "scheduleTabMonth"
+            )
         }
         logStarterSync(
             callSite: callSite,

@@ -104,11 +104,13 @@ struct kboScoreApp: App {
     private static func makeAppModel() -> AppModel {
         let bundle = KBORepositoryFactory.makeAppRepositoryBundle()
         let notificationRegistrationClient = NotificationRegistrationClientFactory.makeAppClient()
+        let liveActivityPushToStartTokenRegistrationClient = LiveActivityPushToStartTokenRegistrationClientFactory.makeAppClient()
         let scheduleStaleGameReconciliationClient = ScheduleStaleGameReconciliationClientFactory.makeAppClient()
         return AppModel(
             repository: bundle.repository,
             repositoryRuntimeState: bundle.runtimeState,
             notificationRegistrationClient: notificationRegistrationClient,
+            liveActivityPushToStartTokenRegistrationClient: liveActivityPushToStartTokenRegistrationClient,
             scheduleStaleGameReconciliationClient: scheduleStaleGameReconciliationClient
         )
     }
@@ -120,6 +122,7 @@ struct kboScoreApp: App {
                 .preferredColorScheme(appModel.settings.appearance.colorScheme)
                 .task {
                     appModel.connectNotificationDelegate(notificationDelegate)
+                    appModel.startLiveActivityPushToStartTokenObservation()
                     await appModel.syncNotificationRegistrationState()
                 }
                 .onChange(of: scenePhase) { _, newPhase in

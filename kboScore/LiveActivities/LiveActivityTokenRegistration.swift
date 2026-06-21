@@ -17,6 +17,11 @@ protocol LiveActivityTokenRegistrationClient: Sendable {
     nonisolated func register(_ payload: LiveActivityTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus
 }
 
+protocol LiveActivityPushToStartTokenRegistrationClient: Sendable {
+    nonisolated var debugEndpointDescription: String? { get }
+    nonisolated func register(_ payload: LiveActivityPushToStartTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus
+}
+
 // LiveActivityTokenRegistrationStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 enum LiveActivityTokenRegistrationStatus: Sendable {
     case synced
@@ -59,6 +64,113 @@ nonisolated struct LiveActivityTokenRegistrationPayload: Codable, Equatable, Sen
         self.providerGameID = providerGameID
         self.databaseID = databaseID
         self.stableDetailIdentity = stableDetailIdentity
+    }
+}
+
+nonisolated struct LiveActivityPushToStartTokenRegistrationPayload: Codable, Equatable, Sendable {
+    let platform: String
+    let environment: String
+    let pushToStartToken: String
+    let installationId: String
+    let favoriteTeamID: String?
+    let notificationsAuthorized: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
+    let gameStartEnabled: Bool
+    let favoriteTeamOnlyEnabled: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case platform
+        case environment
+        case pushToStartToken
+        case installationId
+        case favoriteTeamID
+        case notificationsAuthorized
+        case liveActivitiesEnabled
+        case liveActivityAutoStartEnabled
+        case gameStartEnabled
+        case favoriteTeamOnlyEnabled
+    }
+
+    nonisolated init(
+        platform: String = "ios",
+        environment: String = NotificationRegistrationEnvironment.current,
+        pushToStartToken: String,
+        installationId: String = NotificationInstallationID.current,
+        favoriteTeamID: String?,
+        notificationsAuthorized: Bool,
+        liveActivitiesEnabled: Bool,
+        liveActivityAutoStartEnabled: Bool,
+        gameStartEnabled: Bool,
+        favoriteTeamOnlyEnabled: Bool
+    ) {
+        self.platform = platform
+        self.environment = environment
+        self.pushToStartToken = pushToStartToken
+        self.installationId = installationId
+        self.favoriteTeamID = favoriteTeamID
+        self.notificationsAuthorized = notificationsAuthorized
+        self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
+        self.gameStartEnabled = gameStartEnabled
+        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+    }
+
+    nonisolated init(
+        pushToStartToken: String,
+        settings: AppSettings,
+        authorizationStatus: AppNotificationAuthorizationStatus
+    ) {
+        self.init(
+            pushToStartToken: pushToStartToken,
+            favoriteTeamID: settings.favoriteTeamID,
+            notificationsAuthorized: authorizationStatus.allowsNotifications,
+            liveActivitiesEnabled: settings.liveActivitiesEnabled,
+            liveActivityAutoStartEnabled: settings.liveActivityAutoStartEnabled,
+            gameStartEnabled: settings.notificationPreferences.gameStartEnabled,
+            favoriteTeamOnlyEnabled: settings.notificationPreferences.favoriteTeamOnlyEnabled
+        )
+    }
+}
+
+nonisolated struct LiveActivityPushToStartTokenRegistrationKey: Hashable, Sendable, CustomStringConvertible {
+    let tokenPrefix: String
+    let environment: String
+    let installationId: String
+    let favoriteTeamID: String?
+    let notificationsAuthorized: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
+    let gameStartEnabled: Bool
+    let favoriteTeamOnlyEnabled: Bool
+    let endpointDescription: String?
+
+    nonisolated init(payload: LiveActivityPushToStartTokenRegistrationPayload, endpointDescription: String?) {
+        self.tokenPrefix = String(payload.pushToStartToken.prefix(16))
+        self.environment = payload.environment
+        self.installationId = payload.installationId
+        self.favoriteTeamID = payload.favoriteTeamID
+        self.notificationsAuthorized = payload.notificationsAuthorized
+        self.liveActivitiesEnabled = payload.liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = payload.liveActivityAutoStartEnabled
+        self.gameStartEnabled = payload.gameStartEnabled
+        self.favoriteTeamOnlyEnabled = payload.favoriteTeamOnlyEnabled
+        self.endpointDescription = endpointDescription
+    }
+
+    nonisolated var description: String {
+        [
+            "tokenPrefix=\(tokenPrefix)",
+            "environment=\(environment)",
+            "installationId=\(installationId)",
+            "favoriteTeamID=\(favoriteTeamID ?? "none")",
+            "notificationsAuthorized=\(notificationsAuthorized)",
+            "liveActivitiesEnabled=\(liveActivitiesEnabled)",
+            "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)",
+            "gameStartEnabled=\(gameStartEnabled)",
+            "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
+            "endpoint=\(endpointDescription ?? "missing")"
+        ].joined(separator: " ")
     }
 }
 
@@ -108,11 +220,11 @@ enum LiveActivityTokenRegistrationClientFactory {
         let explicitBundleValue = (Bundle.main.object(forInfoDictionaryKey: "LiveActivityRegistrationURL") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let notificationURL = NotificationRegistrationClientFactory.configuredNotificationRegistrationURL()
-        let derivedURL = notificationURL.flatMap { Self.derivedLiveActivityURL(from: $0) }
-        let endpointText = [processValue, explicitBundleValue]
-            .compactMap { $0 }
-            .first(where: { $0.isEmpty == false && $0.hasPrefix("$(") == false })
-        let endpointURL = endpointText.flatMap(URL.init(string:)) ?? derivedURL
+        let endpointURL = configuredLiveActivityRegistrationURL(
+            processValue: processValue,
+            explicitBundleValue: explicitBundleValue,
+            notificationURL: notificationURL
+        )
         guard let endpointURL else {
             #if DEBUG
             print("[LiveActivity] token registration skipped: registration URL missing")
@@ -122,8 +234,20 @@ enum LiveActivityTokenRegistrationClientFactory {
         return RemoteLiveActivityTokenRegistrationClient(endpointURL: endpointURL)
     }
 
+    // configuredLiveActivityRegistrationURL 메서드는 명시 URL을 우선하고 없으면 알림 등록 URL에서 파생합니다.
+    static func configuredLiveActivityRegistrationURL(
+        processValue: String?,
+        explicitBundleValue: String?,
+        notificationURL: URL?
+    ) -> URL? {
+        let endpointText = [processValue, explicitBundleValue]
+            .compactMap { $0 }
+            .first(where: { $0.isEmpty == false && $0.hasPrefix("$(") == false })
+        return endpointText.flatMap(URL.init(string:)) ?? notificationURL.flatMap { derivedLiveActivityURL(from: $0) }
+    }
+
     // derivedLiveActivityURL 메서드는 이 타입의 주요 동작을 수행합니다.
-    private static func derivedLiveActivityURL(from notificationURL: URL) -> URL? {
+    static func derivedLiveActivityURL(from notificationURL: URL) -> URL? {
         var url = notificationURL
         if url.lastPathComponent == "register" {
             url.deleteLastPathComponent()
@@ -138,6 +262,54 @@ enum LiveActivityTokenRegistrationClientFactory {
     }
 }
 
+enum LiveActivityPushToStartTokenRegistrationClientFactory {
+    static func makeAppClient() -> any LiveActivityPushToStartTokenRegistrationClient {
+        let processValue = ProcessInfo.processInfo.environment["KBO_LIVE_ACTIVITY_PUSH_TO_START_REGISTRATION_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let explicitBundleValue = (Bundle.main.object(forInfoDictionaryKey: "LiveActivityPushToStartRegistrationURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let notificationURL = NotificationRegistrationClientFactory.configuredNotificationRegistrationURL()
+        let endpointURL = configuredPushToStartRegistrationURL(
+            processValue: processValue,
+            explicitBundleValue: explicitBundleValue,
+            notificationURL: notificationURL
+        )
+        guard let endpointURL else {
+            #if DEBUG
+            print("[LiveActivity] push-to-start registration skipped: registration URL missing")
+            #endif
+            return NoOpLiveActivityPushToStartTokenRegistrationClient()
+        }
+        return RemoteLiveActivityPushToStartTokenRegistrationClient(endpointURL: endpointURL)
+    }
+
+    static func configuredPushToStartRegistrationURL(
+        processValue: String?,
+        explicitBundleValue: String?,
+        notificationURL: URL?
+    ) -> URL? {
+        let endpointText = [processValue, explicitBundleValue]
+            .compactMap { $0 }
+            .first(where: { $0.isEmpty == false && $0.hasPrefix("$(") == false })
+        return endpointText.flatMap(URL.init(string:)) ?? notificationURL.flatMap { derivedPushToStartRegistrationURL(from: $0) }
+    }
+
+    static func derivedPushToStartRegistrationURL(from notificationURL: URL) -> URL? {
+        var url = notificationURL
+        if url.lastPathComponent == "register" {
+            url.deleteLastPathComponent()
+        }
+        if url.lastPathComponent != "devices" {
+            url.deleteLastPathComponent()
+            url.appendPathComponent("devices")
+        }
+        url.appendPathComponent("live-activities")
+        url.appendPathComponent("push-to-start")
+        url.appendPathComponent("register")
+        return url
+    }
+}
+
 // NoOpLiveActivityTokenRegistrationClient 구조체는 외부 서비스나 시스템 기능 호출을 캡슐화합니다.
 struct NoOpLiveActivityTokenRegistrationClient: LiveActivityTokenRegistrationClient {
     nonisolated var debugEndpointDescription: String? { nil }
@@ -146,6 +318,17 @@ struct NoOpLiveActivityTokenRegistrationClient: LiveActivityTokenRegistrationCli
     nonisolated func register(_ payload: LiveActivityTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus {
         #if DEBUG
         print("[LiveActivity] token registration skipped: registration URL missing")
+        #endif
+        return .skipped
+    }
+}
+
+struct NoOpLiveActivityPushToStartTokenRegistrationClient: LiveActivityPushToStartTokenRegistrationClient {
+    nonisolated var debugEndpointDescription: String? { nil }
+
+    nonisolated func register(_ payload: LiveActivityPushToStartTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus {
+        #if DEBUG
+        print("[LiveActivity] push-to-start registration skipped: registration URL missing")
         #endif
         return .skipped
     }
@@ -175,13 +358,45 @@ struct RemoteLiveActivityTokenRegistrationClient: LiveActivityTokenRegistrationC
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
+            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            #if DEBUG
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
-            print("[LiveActivity] token registration failure status=\(httpResponse.statusCode) body=\(body)")
-            #endif
+            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
+            throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
+        }
+        return .synced
+    }
+}
+
+struct RemoteLiveActivityPushToStartTokenRegistrationClient: LiveActivityPushToStartTokenRegistrationClient {
+    let endpointURL: URL
+    let session: URLSession
+
+    nonisolated init(endpointURL: URL, session: URLSession = .shared) {
+        self.endpointURL = endpointURL
+        self.session = session
+    }
+
+    nonisolated var debugEndpointDescription: String? {
+        endpointURL.absoluteString
+    }
+
+    nonisolated func register(_ payload: LiveActivityPushToStartTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus {
+        var request = URLRequest(url: endpointURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
+            throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
+            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
         }
         return .synced

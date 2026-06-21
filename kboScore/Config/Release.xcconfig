@@ -18,6 +18,7 @@ KBO_APNS_ENVIRONMENT = production
 KBO_PRODUCTION_BACKEND_BASE_URL = https:/$()/kboscore-back.onrender.com
 KBO_BACKEND_BASE_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)
 KBO_NOTIFICATION_REGISTRATION_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)/devices/register
+KBO_LIVE_ACTIVITY_REGISTRATION_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)/devices/live-activities/register
 
 // Fill these with App Store provisioning profile names before archiving.
 KBO_APPSTORE_APP_PROVISIONING_PROFILE_SPECIFIER = KBO Score App Store 5F034

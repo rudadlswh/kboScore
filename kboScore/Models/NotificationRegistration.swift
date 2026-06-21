@@ -50,6 +50,8 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
     let inningChangeEnabled: Bool
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
 
 // CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
@@ -69,6 +71,8 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         case inningChangeEnabled
         case favoriteTeamOnlyEnabled
         case muteWhenLosingEnabled
+        case liveActivitiesEnabled
+        case liveActivityAutoStartEnabled
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -88,7 +92,9 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         onBaseEnabled: Bool = false,
         inningChangeEnabled: Bool = false,
         favoriteTeamOnlyEnabled: Bool = false,
-        muteWhenLosingEnabled: Bool = false
+        muteWhenLosingEnabled: Bool = false,
+        liveActivitiesEnabled: Bool = true,
+        liveActivityAutoStartEnabled: Bool = true
     ) {
         self.platform = platform
         self.environment = environment
@@ -106,6 +112,8 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         self.inningChangeEnabled = inningChangeEnabled
         self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
+        self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -134,7 +142,9 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
             onBaseEnabled: settings.notificationPreferences.onBaseEnabled,
             inningChangeEnabled: settings.notificationPreferences.inningChangeEnabled,
             favoriteTeamOnlyEnabled: settings.notificationPreferences.favoriteTeamOnlyEnabled,
-            muteWhenLosingEnabled: settings.notificationPreferences.muteWhenLosingEnabled
+            muteWhenLosingEnabled: settings.notificationPreferences.muteWhenLosingEnabled,
+            liveActivitiesEnabled: settings.liveActivitiesEnabled,
+            liveActivityAutoStartEnabled: settings.liveActivityAutoStartEnabled
         )
     }
 
@@ -157,6 +167,8 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         inningChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .inningChangeEnabled) ?? false
         favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled) ?? false
         muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
+        liveActivitiesEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivitiesEnabled) ?? true
+        liveActivityAutoStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivityAutoStartEnabled) ?? liveActivitiesEnabled
     }
 
     // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
@@ -178,6 +190,8 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         try container.encode(inningChangeEnabled, forKey: .inningChangeEnabled)
         try container.encode(favoriteTeamOnlyEnabled, forKey: .favoriteTeamOnlyEnabled)
         try container.encode(muteWhenLosingEnabled, forKey: .muteWhenLosingEnabled)
+        try container.encode(liveActivitiesEnabled, forKey: .liveActivitiesEnabled)
+        try container.encode(liveActivityAutoStartEnabled, forKey: .liveActivityAutoStartEnabled)
     }
 }
 
@@ -191,7 +205,9 @@ extension NotificationRegistrationPayload {
             "onBaseEnabled=\(onBaseEnabled)",
             "inningChangeEnabled=\(inningChangeEnabled)",
             "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
-            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)",
+            "liveActivitiesEnabled=\(liveActivitiesEnabled)",
+            "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)"
         ].joined(separator: " ")
     }
 }
@@ -211,6 +227,8 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
     let inningChangeEnabled: Bool
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
@@ -226,7 +244,9 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
         onBaseEnabled: Bool = false,
         inningChangeEnabled: Bool = false,
         favoriteTeamOnlyEnabled: Bool = false,
-        muteWhenLosingEnabled: Bool = false
+        muteWhenLosingEnabled: Bool = false,
+        liveActivitiesEnabled: Bool = true,
+        liveActivityAutoStartEnabled: Bool = true
     ) {
         self.deviceToken = deviceToken
         self.environment = environment
@@ -241,6 +261,8 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
         self.inningChangeEnabled = inningChangeEnabled
         self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
+        self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -261,7 +283,9 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
             onBaseEnabled: payload.onBaseEnabled,
             inningChangeEnabled: payload.inningChangeEnabled,
             favoriteTeamOnlyEnabled: payload.favoriteTeamOnlyEnabled,
-            muteWhenLosingEnabled: payload.muteWhenLosingEnabled
+            muteWhenLosingEnabled: payload.muteWhenLosingEnabled,
+            liveActivitiesEnabled: payload.liveActivitiesEnabled,
+            liveActivityAutoStartEnabled: payload.liveActivityAutoStartEnabled
         )
     }
 
@@ -279,7 +303,9 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
             "onBaseEnabled=\(onBaseEnabled)",
             "inningChangeEnabled=\(inningChangeEnabled)",
             "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
-            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)",
+            "liveActivitiesEnabled=\(liveActivitiesEnabled)",
+            "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)"
         ].joined(separator: " ")
     }
 }

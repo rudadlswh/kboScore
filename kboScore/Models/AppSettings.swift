@@ -150,6 +150,7 @@ struct AppSettings: Hashable, Codable, Sendable {
     var notificationPreferences: NotificationPreferences
     var quietHours: QuietHours
     var liveActivitiesEnabled: Bool
+    var liveActivityAutoStartEnabled: Bool
     var appearance: AppearanceOption
     var teamThemeMode: TeamThemeMode
 
@@ -158,6 +159,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         notificationPreferences: NotificationPreferences(),
         quietHours: QuietHours(isEnabled: false, startHour: 23, endHour: 7),
         liveActivitiesEnabled: true,
+        liveActivityAutoStartEnabled: true,
         appearance: .system,
         teamThemeMode: .favoriteTeam
     )
@@ -168,6 +170,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         notificationPreferences: NotificationPreferences,
         quietHours: QuietHours,
         liveActivitiesEnabled: Bool,
+        liveActivityAutoStartEnabled: Bool = true,
         appearance: AppearanceOption,
         teamThemeMode: TeamThemeMode
     ) {
@@ -175,6 +178,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         self.notificationPreferences = notificationPreferences
         self.quietHours = quietHours
         self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
         self.appearance = appearance
         self.teamThemeMode = teamThemeMode
     }
@@ -186,6 +190,7 @@ struct AppSettings: Hashable, Codable, Sendable {
         notificationPreferences = try container.decodeIfPresent(NotificationPreferences.self, forKey: .notificationPreferences) ?? NotificationPreferences()
         quietHours = try container.decodeIfPresent(QuietHours.self, forKey: .quietHours) ?? QuietHours(isEnabled: false, startHour: 23, endHour: 7)
         liveActivitiesEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivitiesEnabled) ?? true
+        liveActivityAutoStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivityAutoStartEnabled) ?? liveActivitiesEnabled
         appearance = try container.decodeIfPresent(AppearanceOption.self, forKey: .appearance) ?? .system
         teamThemeMode = try container.decodeIfPresent(TeamThemeMode.self, forKey: .teamThemeMode) ?? .favoriteTeam
     }

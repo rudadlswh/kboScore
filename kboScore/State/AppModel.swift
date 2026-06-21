@@ -13,6 +13,9 @@ import Foundation
 import Observation
 import UIKit
 import UserNotifications
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -43,6 +46,36 @@ private enum ScheduleGameMergeSource: String {
     case staleReconciliation
     case homeFavoriteRefresh
     case startupSync
+}
+
+private enum FavoriteTeamScheduleWidgetSnapshotSource: Int {
+    case unspecified = 0
+    case homeFavoriteRefresh = 100
+    case todayLiveRefresh = 150
+    case appModelMonthly = 300
+    case scheduleTabMonth = 400
+
+    var logName: String {
+        switch self {
+        case .unspecified:
+            "unspecified"
+        case .homeFavoriteRefresh:
+            "homeFavoriteRefresh"
+        case .todayLiveRefresh:
+            "todayLiveRefresh"
+        case .appModelMonthly:
+            "appModelMonthly"
+        case .scheduleTabMonth:
+            "scheduleTabMonth"
+        }
+    }
+}
+
+private struct FavoriteTeamScheduleWidgetMonthSource {
+    let monthKey: KBOMonthScheduleKey
+    let games: [GameDetail]
+    let source: FavoriteTeamScheduleWidgetSnapshotSource
+    let updatedAt: Date
 }
 
 // HomeGameFilter 열거형는 HomeGameFilter 타입의 역할과 값을 정의합니다.
@@ -126,6 +159,7 @@ final class AppModel {
     private let repository: any KBORepository
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
+    private let liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient
     private let scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
     private let cancellationNotificationScheduler: GameCancellationNotificationScheduler
@@ -144,8 +178,13 @@ final class AppModel {
     private var notificationRegistrationSyncTask: Task<Void, Never>?
     private var notificationRegistrationSyncTaskKey: NotificationRegistrationKey?
     private var notificationRegistrationSyncGeneration = 0
+    private var liveActivityPushToStartTokenObservationTask: Task<Void, Never>?
+    private var registeredPushToStartTokenKeys: Set<LiveActivityPushToStartTokenRegistrationKey> = []
+    private var lastLiveActivityPushToStartToken: String?
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
     private var lastFavoriteTeamWidgetSemanticKey: String?
+    private var lastFavoriteTeamWidgetSnapshot: FavoriteTeamScheduleWidgetSnapshot?
+    private var favoriteTeamWidgetMonthSources: [KBOMonthScheduleKey: FavoriteTeamScheduleWidgetMonthSource] = [:]
     private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
 
     var isLoading = false
@@ -190,8 +229,10 @@ final class AppModel {
                 invalidateScheduleDerivedCaches()
             }
             if oldValue.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
+                oldValue.liveActivityAutoStartEnabled != settings.liveActivityAutoStartEnabled ||
                 oldValue.favoriteTeamID != settings.favoriteTeamID {
                 Task { [weak self] in
+                    await self?.registerLastKnownPushToStartTokenIfNeeded(reason: "settingsChanged")
                     await self?.syncFavoriteTeamLiveActivity()
                     await self?.syncFavoriteTeamWidgetSnapshot(
                         includePrefetch: true,
@@ -246,6 +287,7 @@ final class AppModel {
         repository: any KBORepository = MockKBORepository(),
         repositoryRuntimeState: RepositoryRuntimeState? = nil,
         notificationRegistrationClient: any NotificationRegistrationClient = NoOpNotificationRegistrationClient(),
+        liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient = NoOpLiveActivityPushToStartTokenRegistrationClient(),
         scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient = NoOpScheduleStaleGameReconciliationClient(),
         liveActivityController: (any FavoriteTeamLiveActivityControlling)? = nil,
         bootstrap: KBOBootstrapData? = nil,
@@ -258,6 +300,7 @@ final class AppModel {
         self.repository = repository
         self.repositoryRuntimeState = repositoryRuntimeState
         self.notificationRegistrationClient = notificationRegistrationClient
+        self.liveActivityPushToStartTokenRegistrationClient = liveActivityPushToStartTokenRegistrationClient
         self.scheduleStaleGameReconciliationClient = scheduleStaleGameReconciliationClient
         self.cancellationNotificationScheduler = cancellationNotificationScheduler
         self.currentDateProvider = currentDateProvider
@@ -494,7 +537,11 @@ final class AppModel {
             }
             await syncFavoriteTeamLiveActivity()
             if didChange {
-                await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+                await syncFavoriteTeamWidgetSnapshot(
+                    includePrefetch: false,
+                    reason: "homeFavoriteRefresh",
+                    monthKey: scheduleMonthKey(for: currentDateProvider())
+                )
             }
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
             lastHomeFavoriteGameRefreshAt[refreshKey] = Date()
@@ -571,7 +618,11 @@ final class AppModel {
             await loadHomeFallbackStandingsSourceIfNeeded(reason: reason)
         }
         await syncFavoriteTeamLiveActivity()
-        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: "liveActivity",
+            monthKey: scheduleMonthKey(for: currentDateProvider())
+        )
         return true
     }
 
@@ -1385,6 +1436,11 @@ final class AppModel {
         return sourceCalendar.date(from: components) ?? date
     }
 
+    // monthStart 메서드는 월 키를 KST 캘린더의 월 시작일로 변환합니다.
+    private func monthStart(for key: KBOMonthScheduleKey, calendar sourceCalendar: Calendar) -> Date {
+        sourceCalendar.date(from: DateComponents(year: key.year, month: key.month, day: 1)) ?? currentDateProvider()
+    }
+
     // shiftedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func shiftedMonth(from date: Date, by offset: Int) -> Date {
         calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
@@ -1473,6 +1529,40 @@ final class AppModel {
     func currentScheduleMonthSnapshot(for key: KBOMonthScheduleKey) -> [GameDetail] {
         mergeMonthlyScheduleGames(fallbackMonthSchedule(for: key), for: key)
             .sorted { $0.scheduledStart < $1.scheduledStart }
+    }
+
+    func updateFavoriteTeamScheduleWidgetSnapshot(
+        fromScheduleTabMonthGames games: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        reason: String
+    ) async {
+        let sortedGames = mergeEquivalentGames(games)
+            .filter { scheduleMonthKey(for: $0.scheduledStart) == monthKey }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
+            monthKey: monthKey,
+            games: sortedGames,
+            source: .scheduleTabMonth,
+            updatedAt: currentDateProvider()
+        )
+        #if DEBUG
+        print("[WidgetScheduleBridge] month=\(monthKey.yearMonthText) source=scheduleTabMonth count=\(sortedGames.count) favoriteTeam=\(settings.favoriteTeamID ?? "nil")")
+        #endif
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: reason,
+            monthKey: monthKey,
+            preferredMonthGames: sortedGames,
+            incomingSource: .scheduleTabMonth
+        )
+    }
+
+    func favoriteTeamScheduleWidgetSnapshotForTesting() -> FavoriteTeamScheduleWidgetSnapshot? {
+        lastFavoriteTeamWidgetSnapshot
+    }
+
+    func favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: KBOMonthScheduleKey) -> Int? {
+        favoriteTeamWidgetMonthSources[monthKey]?.games.count
     }
 
     // loadScheduleDayIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -3088,7 +3178,11 @@ final class AppModel {
             await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: fetched)
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: fetched)
             await syncFavoriteTeamLiveActivity()
-            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+            await syncFavoriteTeamWidgetSnapshot(
+                includePrefetch: false,
+                reason: "todayLiveRefresh",
+                monthKey: monthKey
+            )
             return fetched
         } catch is CancellationError {
             #if DEBUG
@@ -3572,7 +3666,9 @@ final class AppModel {
     private func syncFavoriteTeamWidgetSnapshot(
         includePrefetch: Bool,
         reason: String = "unspecified",
-        monthKey: KBOMonthScheduleKey? = nil
+        monthKey: KBOMonthScheduleKey? = nil,
+        preferredMonthGames: [GameDetail]? = nil,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource? = nil
     ) async {
         guard settings.favoriteTeamID != nil else {
             guard lastFavoriteTeamWidgetSemanticKey != "nil" else {
@@ -3583,6 +3679,7 @@ final class AppModel {
             }
             FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
             lastFavoriteTeamWidgetSemanticKey = "nil"
+            lastFavoriteTeamWidgetSnapshot = nil
             reloadFavoriteTeamWidgetTimelines()
             return
         }
@@ -3591,7 +3688,20 @@ final class AppModel {
             await prepareFavoriteTeamWidgetScheduleIfNeeded()
         }
 
-        let snapshot = makeFavoriteTeamWidgetSnapshot(referenceDate: currentDateProvider())
+        let resolvedIncomingSource = incomingSource ?? favoriteTeamWidgetSnapshotSource(for: reason)
+        if shouldPreserveFullMonthWidgetSnapshot(
+            monthKey: monthKey,
+            incomingSource: resolvedIncomingSource,
+            incomingMonthGames: preferredMonthGames
+        ) {
+            return
+        }
+
+        let snapshot = makeFavoriteTeamWidgetSnapshot(
+            referenceDate: currentDateProvider(),
+            preferredMonthKey: monthKey,
+            preferredMonthGames: preferredMonthGames
+        )
         let semanticKey = FavoriteTeamWidgetSnapshotBuilder.semanticKey(
             favoriteTeamID: settings.favoriteTeamID,
             snapshot: snapshot
@@ -3602,9 +3712,15 @@ final class AppModel {
             #endif
             return
         }
-        logFavoriteTeamScheduleWidgetStoreSave(reason: reason, monthKey: monthKey, snapshot: snapshot)
+        logFavoriteTeamScheduleWidgetStoreSave(
+            reason: reason,
+            monthKey: monthKey,
+            snapshot: snapshot,
+            sourceMonthlyGames: preferredMonthGames
+        )
         FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: settings.favoriteTeamID, snapshot: snapshot)
         lastFavoriteTeamWidgetSemanticKey = semanticKey
+        lastFavoriteTeamWidgetSnapshot = snapshot
         reloadFavoriteTeamWidgetTimelines()
     }
 
@@ -3615,6 +3731,41 @@ final class AppModel {
             return true
         }
         return scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
+    }
+
+    private func favoriteTeamWidgetSnapshotSource(for reason: String) -> FavoriteTeamScheduleWidgetSnapshotSource {
+        if reason.contains("scheduleTabMonth") {
+            return .scheduleTabMonth
+        }
+        if reason.contains("scheduleMonth") {
+            return .appModelMonthly
+        }
+        if reason.contains("today") || reason.contains("Today") || reason.contains("liveActivity") {
+            return .todayLiveRefresh
+        }
+        if reason.contains("homeFavorite") || reason.contains("home") {
+            return .homeFavoriteRefresh
+        }
+        return .unspecified
+    }
+
+    // shouldPreserveFullMonthWidgetSnapshot 메서드는 작은 오늘 데이터가 월간 스냅샷을 덮지 않게 방어합니다.
+    private func shouldPreserveFullMonthWidgetSnapshot(
+        monthKey: KBOMonthScheduleKey?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource,
+        incomingMonthGames: [GameDetail]?
+    ) -> Bool {
+        guard let monthKey,
+              let existingSource = favoriteTeamWidgetMonthSources[monthKey],
+              existingSource.source.rawValue > incomingSource.rawValue else {
+            return false
+        }
+        let incomingCount = incomingMonthGames?.count ?? widgetSourceMonthlyGames(for: monthKey).count
+        guard incomingCount < existingSource.games.count else { return false }
+        #if DEBUG
+        print("[WidgetSnapshot] skipped reason=preserveFullMonthSnapshot incomingSource=\(incomingSource.logName) incomingCount=\(incomingCount) existingCount=\(existingSource.games.count) month=\(monthKey.yearMonthText)")
+        #endif
+        return true
     }
 
     // prepareFavoriteTeamWidgetScheduleIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -3634,16 +3785,33 @@ final class AppModel {
     }
 
     // makeFavoriteTeamWidgetSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
-    private func makeFavoriteTeamWidgetSnapshot(referenceDate: Date = Date()) -> FavoriteTeamScheduleWidgetSnapshot? {
+    private func makeFavoriteTeamWidgetSnapshot(
+        referenceDate: Date = Date(),
+        preferredMonthKey: KBOMonthScheduleKey? = nil,
+        preferredMonthGames: [GameDetail]? = nil
+    ) -> FavoriteTeamScheduleWidgetSnapshot? {
         guard let favoriteTeam = favoriteTeamWidgetMetadata() else { return nil }
 
         let scheduleCalendar = widgetScheduleCalendar()
         let requestedMonth = startOfMonth(for: referenceDate, calendar: scheduleCalendar)
         let hasAnyMyTeamGames = knownScheduleGames(filter: .myTeam).isEmpty == false
         let displayedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam) ?? requestedMonth
-        let calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
+        let displayedMonthKey = preferredMonthKey ?? KBOMonthScheduleKey(date: displayedMonth, calendar: scheduleCalendar)
+        let displayedMonthSourceGames = preferredMonthGames ??
+            favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+        let calendarDays: [MyTeamCalendarDay]
+        if let displayedMonthSourceGames {
+            calendarDays = favoriteTeamWidgetCalendarDays(
+                monthKey: displayedMonthKey,
+                monthGames: displayedMonthSourceGames,
+                favoriteTeamID: favoriteTeam.id,
+                calendar: scheduleCalendar
+            )
+        } else {
+            calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
+        }
 
-        if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty {
+        if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty && displayedMonthSourceGames == nil {
             return nil
         }
 
@@ -3651,19 +3819,43 @@ final class AppModel {
             teamID: favoriteTeam.id,
             teamName: favoriteTeam.name,
             teamShortName: favoriteTeam.shortName,
-            displayedMonth: displayedMonth,
-            monthTitle: calendarMonthTitle(for: displayedMonth),
+            displayedMonth: monthStart(for: displayedMonthKey, calendar: scheduleCalendar),
+            monthTitle: calendarMonthTitle(for: monthStart(for: displayedMonthKey, calendar: scheduleCalendar)),
             days: calendarDays,
             referenceDate: referenceDate,
             calendar: scheduleCalendar
         )
     }
 
-    // logFavoriteTeamScheduleWidgetStoreSave 메서드는 위젯 저장 입력을 디버그 로그로 남깁니다.
+    private func favoriteTeamWidgetCalendarDays(
+        monthKey: KBOMonthScheduleKey,
+        monthGames: [GameDetail],
+        favoriteTeamID: String,
+        calendar scheduleCalendar: Calendar
+    ) -> [MyTeamCalendarDay] {
+        let monthStart = monthStart(for: monthKey, calendar: scheduleCalendar)
+        let groupedGames = Dictionary(grouping: monthGames.filter { $0.involves(teamID: favoriteTeamID) }) { game in
+            scheduleDayKey(for: game.scheduledStart)
+        }
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        return ScheduleCalendarDayBuilder.makeDays(
+            monthStart: monthStart,
+            gamesByDate: groupedGames,
+            filter: .myTeam,
+            favoriteTeamID: favoriteTeamID,
+            calendar: scheduleCalendar,
+            dayKey: { [self] date in scheduleDayKey(for: date) },
+            isToday: { [self] _, cursorKey in cursorKey == todayKey },
+            hasAttendedGame: { [self] games in games.contains(where: isGameAttended) },
+            favoriteTeamResult: { [self] games, _ in calendarFavoriteTeamResult(for: games) }
+        )
+    }
+
     private func logFavoriteTeamScheduleWidgetStoreSave(
         reason: String,
         monthKey: KBOMonthScheduleKey?,
-        snapshot: FavoriteTeamScheduleWidgetSnapshot?
+        snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        sourceMonthlyGames: [GameDetail]? = nil
     ) {
         #if DEBUG
         guard let favoriteTeamID = settings.favoriteTeamID else { return }
@@ -3671,7 +3863,11 @@ final class AppModel {
             KBOMonthScheduleKey(date: $0.displayedMonth, calendar: widgetScheduleCalendar())
         }
         let sourceGames: [GameDetail]
-        if let resolvedMonthKey {
+        if let sourceMonthlyGames {
+            sourceGames = sourceMonthlyGames
+        } else if let resolvedMonthKey, let widgetMonthSource = favoriteTeamWidgetMonthSources[resolvedMonthKey] {
+            sourceGames = widgetMonthSource.games
+        } else if let resolvedMonthKey {
             sourceGames = monthlyScheduleGames[resolvedMonthKey] ?? fallbackMonthSchedule(for: resolvedMonthKey)
         } else {
             sourceGames = []
@@ -3690,6 +3886,10 @@ final class AppModel {
             "first=\(firstDate) last=\(lastDate)"
         )
         #endif
+    }
+
+    private func widgetSourceMonthlyGames(for monthKey: KBOMonthScheduleKey) -> [GameDetail] {
+        monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
     }
 
     // favoriteTeamWidgetMetadata 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -3824,11 +4024,80 @@ final class AppModel {
         )
     }
 
+    func startLiveActivityPushToStartTokenObservation() {
+        #if canImport(ActivityKit)
+        guard liveActivityPushToStartTokenObservationTask == nil else { return }
+        guard FavoriteTeamLiveActivitySupport.hasWidgetExtension() else {
+            #if DEBUG
+            print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+            #endif
+            return
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            #if DEBUG
+            print("[LiveActivity] push-to-start observation skipped reason=activities_disabled")
+            #endif
+            return
+        }
+        liveActivityPushToStartTokenObservationTask = Task { [weak self] in
+            if #available(iOS 17.2, *) {
+                for await tokenData in Activity<FavoriteTeamGameActivityAttributes>.pushToStartTokenUpdates {
+                    let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                    await self?.registerPushToStartToken(token, reason: "tokenUpdate")
+                }
+            } else {
+                #if DEBUG
+                print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+                #endif
+            }
+        }
+        #else
+        #if DEBUG
+        print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+        #endif
+        #endif
+    }
+
+    private func registerLastKnownPushToStartTokenIfNeeded(reason: String) async {
+        guard let lastLiveActivityPushToStartToken else { return }
+        await registerPushToStartToken(lastLiveActivityPushToStartToken, reason: reason)
+    }
+
+    private func registerPushToStartToken(_ token: String, reason: String) async {
+        guard token.isEmpty == false else { return }
+        lastLiveActivityPushToStartToken = token
+        let payload = LiveActivityPushToStartTokenRegistrationPayload(
+            pushToStartToken: token,
+            settings: settings,
+            authorizationStatus: notificationAuthorizationStatus
+        )
+        let key = LiveActivityPushToStartTokenRegistrationKey(
+            payload: payload,
+            endpointDescription: liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription
+        )
+        guard registeredPushToStartTokenKeys.insert(key).inserted else {
+            #if DEBUG
+            print("[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) \(key)")
+            #endif
+            return
+        }
+
+        print("[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
+        do {
+            _ = try await liveActivityPushToStartTokenRegistrationClient.register(payload)
+            print("[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment)")
+        } catch {
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(12)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+        }
+    }
+
     // scheduleNotificationRegistrationSyncIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleNotificationRegistrationSyncIfNeeded(oldSettings: AppSettings) {
         guard oldSettings.favoriteTeamID != settings.favoriteTeamID ||
                 oldSettings.notificationPreferences != settings.notificationPreferences ||
-                oldSettings.quietHours != settings.quietHours else {
+                oldSettings.quietHours != settings.quietHours ||
+                oldSettings.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
+                oldSettings.liveActivityAutoStartEnabled != settings.liveActivityAutoStartEnabled else {
             return
         }
 

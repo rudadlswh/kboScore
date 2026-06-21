@@ -97,6 +97,25 @@ final class ScheduleViewModel: ObservableObject {
         )
     }
 
+    func refreshLiveScoresIfNeeded(appModel: AppModel) async {
+        await refreshCoordinator.refreshTodayLiveIfNeeded(
+            selectedDate: selectedDate,
+            displayedMonthKey: displayedMonthKey,
+            appModel: appModel,
+            callSite: "ScheduleViewModel.refreshLiveScoresIfNeeded"
+        )
+        await rebuildPresentation(
+            favoriteTeamID: appModel.settings.favoriteTeamID,
+            attendedGameKeys: appModel.attendedGameKeys
+        )
+    }
+
+    func shouldPollLiveScores(appModel: AppModel) -> Bool {
+        let selectedDayKey = ScheduleDateKeyFormatter.dayKey(for: selectedDate)
+        let todayKey = ScheduleDateKeyFormatter.dayKey(for: appModel.currentScheduleRefreshDate())
+        return selectedDayKey == todayKey
+    }
+
     // changeDisplayedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func changeDisplayedMonth(
         to month: Date,

@@ -77,6 +77,7 @@ struct SettingsView: View {
             LabeledContent("조용한 시간", value: bindableAppModel.settings.quietHours.wrappedValue.description)
 
             Toggle("라이브 액티비티", isOn: bindableAppModel.settings.liveActivitiesEnabled)
+            Toggle("경기 시작 시 자동 시작", isOn: bindableAppModel.settings.liveActivityAutoStartEnabled)
         }
 
         Section("정보") {
@@ -144,6 +145,8 @@ struct SettingsView: View {
                 .settingsRowStyle(palette)
 
             Toggle("라이브 액티비티", isOn: bindableAppModel.settings.liveActivitiesEnabled)
+                .settingsRowStyle(palette)
+            Toggle("경기 시작 시 자동 시작", isOn: bindableAppModel.settings.liveActivityAutoStartEnabled)
                 .settingsRowStyle(palette)
         } header: {
             SettingsSectionHeader(

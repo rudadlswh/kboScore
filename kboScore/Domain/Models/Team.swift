@@ -30,10 +30,10 @@ nonisolated struct Team: Identifiable, Hashable, Codable, Sendable {
         previousRegularSeasonRank: Int? = nil
     ) {
         self.id = id
-        self.name = name
-        self.shortName = shortName
+        self.name = Self.fullDisplayName(forTeamID: id, fallback: name)
+        self.shortName = Self.displayName(forTeamID: id, fallback: shortName)
         self.englishName = englishName
-        self.markText = markText
+        self.markText = Self.displayName(forTeamID: id, fallback: markText)
         self.previousRegularSeasonRank = previousRegularSeasonRank
     }
 
@@ -80,6 +80,21 @@ nonisolated struct Team: Identifiable, Hashable, Codable, Sendable {
         return fallback
     }
 
+    nonisolated static func fullDisplayName(forTeamID teamID: String?, fallback: String) -> String {
+        let fallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let canonicalID = canonicalID(for: teamID),
+           let displayName = fullDisplayNamesByTeamID[canonicalID] {
+            return displayName
+        }
+
+        if let canonicalFallbackID = canonicalID(for: fallback),
+           let displayName = fullDisplayNamesByTeamID[canonicalFallbackID] {
+            return displayName
+        }
+
+        return fallback
+    }
+
     private nonisolated static let displayNamesByTeamID: [String: String] = [
         "lotte": "롯데",
         "kiwoom": "키움",
@@ -91,6 +106,19 @@ nonisolated struct Team: Identifiable, Hashable, Codable, Sendable {
         "lg": "LG",
         "nc": "NC",
         "ssg": "SSG"
+    ]
+
+    private nonisolated static let fullDisplayNamesByTeamID: [String: String] = [
+        "lotte": "롯데 자이언츠",
+        "kiwoom": "키움 히어로즈",
+        "hanwha": "한화 이글스",
+        "kia": "KIA 타이거즈",
+        "doosan": "두산 베어스",
+        "samsung": "삼성 라이온즈",
+        "kt": "KT 위즈",
+        "lg": "LG 트윈스",
+        "nc": "NC 다이노스",
+        "ssg": "SSG 랜더스"
     ]
 
     private nonisolated static let canonicalTeamIDsByAlias: [String: String] = [

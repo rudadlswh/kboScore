@@ -695,88 +695,192 @@ private struct LiveSituationRow: View {
     let presentation: GameDetailPresentation
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatusTile(title: "카운트") {
-                HStack(spacing: 8) {
-                    CountMetric(label: "B", value: KBOCountDisplay.balls(presentation.balls))
-                    CountMetric(label: "S", value: KBOCountDisplay.strikes(presentation.strikes))
-                    CountMetric(label: "O", value: KBOCountDisplay.outs(presentation.outs))
-                }
-            }
-
-            StatusTile(title: "주자 상황") {
-                HStack(alignment: .center, spacing: 12) {
-                    BasesDiamondView(bases: presentation.bases ?? .empty)
-
-                    if presentation.displayBaseRunners.isEmpty == false {
-                        BaseRunnerList(runners: presentation.displayBaseRunners)
+        VStack(spacing: 8) {
+            StatusTile(title: "주자 상황 · 카운트") {
+                LiveSituationSummaryContent(presentation: presentation)
+                    .onAppear {
+                        presentation.logRenderedBaseRunnersIfNeeded()
                     }
-                }
-                .onAppear {
-                    presentation.logRenderedBaseRunnersIfNeeded()
-                }
             }
-        }
-        if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
-            HStack(spacing: 8) {
-                StatusTile(title: "타자") {
-                    Text(presentation.currentBatterName ?? "-")
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                StatusTile(title: "투수") {
-                    Text(presentation.currentPitcherName ?? "-")
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+
+            if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
+                HStack(spacing: 8) {
+                    StatusTile(title: "타자") {
+                        Text(presentation.currentBatterName ?? "-")
+                            .font(.subheadline.weight(.bold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    StatusTile(title: "투수") {
+                        Text(presentation.currentPitcherName ?? "-")
+                            .font(.subheadline.weight(.bold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
     }
 }
 
-// BaseRunnerList 구조체는 BaseRunnerList 타입의 역할과 값을 정의합니다.
-private struct BaseRunnerList: View {
+// LiveSituationSummaryContent 구조체는 주자 상황과 카운트를 하나의 카드 안에 표시합니다.
+private struct LiveSituationSummaryContent: View {
     @Environment(AppModel.self) private var appModel
+    let presentation: GameDetailPresentation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 0) {
+                GameDetailBasesDiamondView(
+                    bases: presentation.bases ?? .empty,
+                    tint: appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent,
+                    borderTint: baseBorderTint
+                )
+
+                Spacer(minLength: 36)
+
+                CountDotsStack(
+                    balls: KBOCountDisplay.balls(presentation.balls),
+                    strikes: KBOCountDisplay.strikes(presentation.strikes),
+                    outs: KBOCountDisplay.outs(presentation.outs)
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+
+            BaseRunnerGrid(runners: presentation.displayBaseRunners)
+        }
+    }
+
+    private var baseBorderTint: Color {
+        switch appModel.settings.favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "kt", "lg":
+            .white
+        default:
+            appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent
+        }
+    }
+}
+
+// GameDetailBasesDiamondView 구조체는 경기상세 통합 카드에서 1루, 2루, 3루만 크게 표시합니다.
+private struct GameDetailBasesDiamondView: View {
+    let bases: RunnerState
+    let tint: Color
+    let borderTint: Color
+
+    var body: some View {
+        ZStack {
+            GameDetailBaseMarker(isFilled: bases.second, tint: tint, borderTint: borderTint)
+                .offset(y: -22)
+            GameDetailBaseMarker(isFilled: bases.first, tint: tint, borderTint: borderTint)
+                .offset(x: 25, y: 4)
+            GameDetailBaseMarker(isFilled: bases.third, tint: tint, borderTint: borderTint)
+                .offset(x: -25, y: 4)
+        }
+        .frame(width: 96, height: 74)
+    }
+}
+
+// GameDetailBaseMarker 구조체는 점유 여부에 따라 베이스 채움과 테두리 강조를 표시합니다.
+private struct GameDetailBaseMarker: View {
+    let isFilled: Bool
+    let tint: Color
+    let borderTint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(fillColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(borderColor, lineWidth: isFilled ? 2.5 : 1.6)
+            )
+            .frame(width: 22, height: 22)
+            .rotationEffect(.degrees(45))
+            .shadow(color: borderColor.opacity(isFilled ? 0.25 : 0.12), radius: 2, x: 0, y: 1)
+    }
+
+    private var fillColor: Color {
+        isFilled ? tint : Color(.systemBackground).opacity(0.82)
+    }
+
+    private var borderColor: Color {
+        isFilled ? borderTint : borderTint.opacity(0.78)
+    }
+}
+
+// BaseRunnerGrid 구조체는 1루, 2루, 3루 주자 이름을 같은 폭의 3열로 표시합니다.
+private struct BaseRunnerGrid: View {
     let runners: [BaseRunnerDisplayItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(runners) { runner in
-                HStack(spacing: 6) {
-                    Text(runner.base)
-                        .font(.caption.weight(.heavy))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
-                        .frame(width: 24, alignment: .leading)
-                    Text(runner.name)
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(baseColumns, id: \.id) { column in
+                VStack(spacing: 4) {
+                    Text(column.title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(runnerName(for: column.id))
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var baseColumns: [(id: String, title: String)] {
+        [("1B", "1루"), ("2B", "2루"), ("3B", "3루")]
+    }
+
+    private func runnerName(for base: String) -> String {
+        runners.first { $0.base == base }?.name ?? "-"
     }
 }
 
-// CountMetric 구조체는 CountMetric 타입의 역할과 값을 정의합니다.
-private struct CountMetric: View {
-    @Environment(AppModel.self) private var appModel
-    let label: String
-    let value: Int?
+// CountDotsStack 구조체는 B/S/O 카운트를 점 형태로 세로 표시합니다.
+private struct CountDotsStack: View {
+    var balls: Int?
+    var strikes: Int?
+    var outs: Int?
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(label)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-            Text(value.map(String.init) ?? "-")
-                .font(.headline.weight(.bold))
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            CountDotsRow(label: "B", tint: .green, value: balls, maxValue: 3)
+            CountDotsRow(label: "S", tint: .orange, value: strikes, maxValue: 2)
+            CountDotsRow(label: "O", tint: .red, value: outs, maxValue: 2)
         }
-        .frame(maxWidth: .infinity)
+    }
+}
+
+// CountDotsRow 구조체는 한 종류의 카운트를 채워진 점과 비어 있는 점으로 표시합니다.
+private struct CountDotsRow: View {
+    @Environment(AppModel.self) private var appModel
+    let label: String
+    let tint: Color
+    let value: Int?
+    let maxValue: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+                .frame(width: 12, alignment: .leading)
+
+            ForEach(0..<maxValue, id: \.self) { index in
+                Circle()
+                    .fill(index < normalizedValue ? tint : tint.opacity(0.18))
+                    .frame(width: 8, height: 8)
+            }
+        }
+    }
+
+    private var normalizedValue: Int {
+        min(max(value ?? 0, 0), maxValue)
     }
 }
 
