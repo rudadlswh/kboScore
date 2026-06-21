@@ -53,7 +53,7 @@ private enum FavoriteTeamScheduleWidgetSnapshotSource: Int {
     case homeFavoriteRefresh = 100
     case todayLiveRefresh = 150
     case appModelMonthly = 300
-    case scheduleTabMonth = 400
+    case scheduleTabCurrentMonth = 400
 
     var logName: String {
         switch self {
@@ -65,8 +65,8 @@ private enum FavoriteTeamScheduleWidgetSnapshotSource: Int {
             "todayLiveRefresh"
         case .appModelMonthly:
             "appModelMonthly"
-        case .scheduleTabMonth:
-            "scheduleTabMonth"
+        case .scheduleTabCurrentMonth:
+            "scheduleTabCurrentMonth"
         }
     }
 }
@@ -1536,13 +1536,21 @@ final class AppModel {
         monthKey: KBOMonthScheduleKey,
         reason: String
     ) async {
+        let currentMonthKey = currentWidgetMonthKey()
+        guard monthKey == currentMonthKey else {
+            #if DEBUG
+            print("[WidgetScheduleBridge] skipped reason=nonCurrentMonth displayedMonth=\(monthKey.yearMonthText) currentMonth=\(currentMonthKey.yearMonthText) source=scheduleTabMonth")
+            #endif
+            return
+        }
+
         let sortedGames = mergeEquivalentGames(games)
             .filter { scheduleMonthKey(for: $0.scheduledStart) == monthKey }
             .sorted { $0.scheduledStart < $1.scheduledStart }
         favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
             monthKey: monthKey,
             games: sortedGames,
-            source: .scheduleTabMonth,
+            source: .scheduleTabCurrentMonth,
             updatedAt: currentDateProvider()
         )
         #if DEBUG
@@ -1550,10 +1558,10 @@ final class AppModel {
         #endif
         await syncFavoriteTeamWidgetSnapshot(
             includePrefetch: false,
-            reason: reason,
+            reason: "scheduleTabCurrentMonth",
             monthKey: monthKey,
             preferredMonthGames: sortedGames,
-            incomingSource: .scheduleTabMonth
+            incomingSource: .scheduleTabCurrentMonth
         )
     }
 
@@ -3689,8 +3697,10 @@ final class AppModel {
         }
 
         let resolvedIncomingSource = incomingSource ?? favoriteTeamWidgetSnapshotSource(for: reason)
-        if shouldPreserveFullMonthWidgetSnapshot(
-            monthKey: monthKey,
+        let widgetMonthKey = currentWidgetMonthKey()
+        if reason.contains("favoriteTeamChanged") == false,
+           shouldPreserveFullMonthWidgetSnapshot(
+            monthKey: widgetMonthKey,
             incomingSource: resolvedIncomingSource,
             incomingMonthGames: preferredMonthGames
         ) {
@@ -3714,7 +3724,7 @@ final class AppModel {
         }
         logFavoriteTeamScheduleWidgetStoreSave(
             reason: reason,
-            monthKey: monthKey,
+            monthKey: widgetMonthKey,
             snapshot: snapshot,
             sourceMonthlyGames: preferredMonthGames
         )
@@ -3734,8 +3744,8 @@ final class AppModel {
     }
 
     private func favoriteTeamWidgetSnapshotSource(for reason: String) -> FavoriteTeamScheduleWidgetSnapshotSource {
-        if reason.contains("scheduleTabMonth") {
-            return .scheduleTabMonth
+        if reason.contains("scheduleTab") {
+            return .scheduleTabCurrentMonth
         }
         if reason.contains("scheduleMonth") {
             return .appModelMonthly
@@ -3793,12 +3803,16 @@ final class AppModel {
         guard let favoriteTeam = favoriteTeamWidgetMetadata() else { return nil }
 
         let scheduleCalendar = widgetScheduleCalendar()
-        let requestedMonth = startOfMonth(for: referenceDate, calendar: scheduleCalendar)
+        let currentMonthKey = currentWidgetMonthKey()
+        let requestedMonth = monthStart(for: currentMonthKey, calendar: scheduleCalendar)
         let hasAnyMyTeamGames = knownScheduleGames(filter: .myTeam).isEmpty == false
-        let displayedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam) ?? requestedMonth
-        let displayedMonthKey = preferredMonthKey ?? KBOMonthScheduleKey(date: displayedMonth, calendar: scheduleCalendar)
-        let displayedMonthSourceGames = preferredMonthGames ??
-            favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+        let displayedMonthKey = currentMonthKey
+        let displayedMonthSourceGames: [GameDetail]?
+        if preferredMonthKey == currentMonthKey {
+            displayedMonthSourceGames = preferredMonthGames ?? favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+        } else {
+            displayedMonthSourceGames = favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+        }
         let calendarDays: [MyTeamCalendarDay]
         if let displayedMonthSourceGames {
             calendarDays = favoriteTeamWidgetCalendarDays(
@@ -3808,7 +3822,7 @@ final class AppModel {
                 calendar: scheduleCalendar
             )
         } else {
-            calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
+            calendarDays = scheduleCalendarDays(for: requestedMonth, filter: .myTeam)
         }
 
         if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty && displayedMonthSourceGames == nil {
@@ -3890,6 +3904,11 @@ final class AppModel {
 
     private func widgetSourceMonthlyGames(for monthKey: KBOMonthScheduleKey) -> [GameDetail] {
         monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+    }
+
+    // currentWidgetMonthKey 메서드는 위젯이 항상 보여야 하는 KST 기준 현재 월을 반환합니다.
+    private func currentWidgetMonthKey() -> KBOMonthScheduleKey {
+        KBOMonthScheduleKey(date: currentDateProvider(), calendar: widgetScheduleCalendar())
     }
 
     // favoriteTeamWidgetMetadata 메서드는 이 타입의 주요 동작을 수행합니다.

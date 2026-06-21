@@ -71,6 +71,18 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
             )
         }
 
+        guard FavoriteTeamScheduleWidgetSnapshotMonthPolicy.isCurrentMonth(snapshot: snapshot, now: date) else {
+            print(
+                "[WidgetSchedule] staleSnapshot ignored snapshotMonth=\(Self.widgetMonthKey(for: snapshot.displayedMonth)) " +
+                "currentMonth=\(Self.widgetMonthKey(for: date)) favoriteTeam=\(favoriteTeamID)"
+            )
+            return FavoriteTeamScheduleWidgetV2Entry(
+                date: date,
+                refreshAfter: date.addingTimeInterval(60 * 30),
+                content: .unavailable("이번 달 일정 데이터를 불러올 수 없습니다")
+            )
+        }
+
         return FavoriteTeamScheduleWidgetV2Entry(
             date: date,
             refreshAfter: max(snapshot.refreshAfter, date.addingTimeInterval(60 * 15)),
@@ -95,12 +107,7 @@ private struct FavoriteTeamScheduleWidgetV2Provider: TimelineProvider {
 
     // widgetMonthKey 메서드는 KST 기준 yyyyMM 월 키를 만듭니다.
     private static func widgetMonthKey(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
-        formatter.dateFormat = "yyyyMM"
-        return formatter.string(from: date)
+        FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: date)
     }
 }
 

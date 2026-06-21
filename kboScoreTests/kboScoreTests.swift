@@ -13248,6 +13248,146 @@ struct kboScoreTests {
         #expect(snapshot.monthSummaryText == "이달 경기 \(expectedCount)")
     }
 
+    @Test func scheduleTabNonCurrentMonthDoesNotOverwriteFavoriteTeamWidgetSnapshot() async throws {
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let nonCurrentMonthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let juneSchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let maySchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 5)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let currentSnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: maySchedule,
+            monthKey: nonCurrentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let afterMaySnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+
+        #expect(KBOMonthScheduleKey(date: currentSnapshot.displayedMonth) == currentMonthKey)
+        #expect(KBOMonthScheduleKey(date: afterMaySnapshot.displayedMonth) == currentMonthKey)
+        #expect(afterMaySnapshot.monthSummaryText == currentSnapshot.monthSummaryText)
+        #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: nonCurrentMonthKey) == nil)
+    }
+
+    @Test func scheduleTabCurrentMonthUpdatesFavoriteTeamWidgetSnapshot() async throws {
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let juneSchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+
+        let snapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let expectedCount = juneSchedule.filter { $0.involves(teamID: "lotte") }.count
+        let snapshotCount = snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(KBOMonthScheduleKey(date: snapshot.displayedMonth) == currentMonthKey)
+        #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: currentMonthKey) == juneSchedule.count)
+        #expect(snapshotCount == expectedCount)
+        #expect(snapshot.monthSummaryText == "이달 경기 \(expectedCount)")
+    }
+
+    @Test func favoriteTeamChangeUsesCurrentMonthForWidgetSnapshot() async throws {
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let displayedMonthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let juneSchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let maySchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 5)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        model.settings.favoriteTeamID = "kt"
+
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: maySchedule,
+            monthKey: displayedMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+
+        let snapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let expectedCount = juneSchedule.filter { $0.involves(teamID: "kt") }.count
+        let snapshotCount = snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(snapshot.teamID == "kt")
+        #expect(KBOMonthScheduleKey(date: snapshot.displayedMonth) == currentMonthKey)
+        #expect(snapshotCount == expectedCount)
+    }
+
+    @Test func widgetProviderIgnoresStaleMonthSnapshot() async throws {
+        let currentDate = isoDate("2026-06-21T09:00:00+09:00")
+        let staleMonth = isoDate("2026-05-01T09:00:00+09:00")
+        let currentMonth = isoDate("2026-06-01T09:00:00+09:00")
+        let staleSnapshot = FavoriteTeamScheduleWidgetSnapshot(
+            generatedAt: staleMonth,
+            refreshAfter: staleMonth.addingTimeInterval(60 * 60),
+            teamID: "lotte",
+            teamName: "롯데",
+            teamShortName: "롯데",
+            displayedMonth: staleMonth,
+            monthTitle: "2026년 5월",
+            monthSummaryText: "이달 경기 1",
+            state: .ready,
+            days: []
+        )
+        let currentSnapshot = FavoriteTeamScheduleWidgetSnapshot(
+            generatedAt: currentDate,
+            refreshAfter: currentDate.addingTimeInterval(60 * 60),
+            teamID: "lotte",
+            teamName: "롯데",
+            teamShortName: "롯데",
+            displayedMonth: currentMonth,
+            monthTitle: "2026년 6월",
+            monthSummaryText: "이달 경기 20",
+            state: .ready,
+            days: []
+        )
+
+        #expect(FavoriteTeamScheduleWidgetSnapshotMonthPolicy.isCurrentMonth(snapshot: staleSnapshot, now: currentDate) == false)
+        #expect(FavoriteTeamScheduleWidgetSnapshotMonthPolicy.isCurrentMonth(snapshot: currentSnapshot, now: currentDate) == true)
+    }
+
     @Test func todayRefreshDoesNotOverwriteFullMonthFavoriteTeamWidgetSnapshot() async throws {
         let referenceDate = isoDate("2026-06-20T09:00:00+09:00")
         let monthKey = KBOMonthScheduleKey(date: referenceDate)

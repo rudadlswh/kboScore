@@ -176,6 +176,34 @@ enum FavoriteTeamScheduleWidgetSharedLoadIssue: String, Sendable {
     case fileDecodeFailed
 }
 
+enum FavoriteTeamScheduleWidgetSnapshotMonthPolicy {
+    nonisolated static func monthKey(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = widgetCalendar()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = widgetTimeZone()
+        formatter.dateFormat = "yyyyMM"
+        return formatter.string(from: date)
+    }
+
+    nonisolated static func isCurrentMonth(
+        snapshot: FavoriteTeamScheduleWidgetSnapshot,
+        now: Date
+    ) -> Bool {
+        monthKey(for: snapshot.displayedMonth) == monthKey(for: now)
+    }
+
+    private nonisolated static func widgetCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = widgetTimeZone()
+        return calendar
+    }
+
+    private nonisolated static func widgetTimeZone() -> TimeZone {
+        TimeZone(identifier: "Asia/Seoul") ?? .current
+    }
+}
+
 private extension FavoriteTeamScheduleWidgetShared {
     typealias LoadIssue = FavoriteTeamScheduleWidgetSharedLoadIssue
 
