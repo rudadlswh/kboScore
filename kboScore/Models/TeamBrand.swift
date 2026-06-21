@@ -82,7 +82,7 @@ struct TeamIdentity: Sendable {
             id: "doosan",
             displayName: "두산 베어스",
             shortLabel: "두산",
-            monogram: "OB",
+            monogram: "두산",
             homeHeroWatermarkLabel: "Bears",
             themeID: .doosan,
             theme: TeamTheme(
@@ -102,7 +102,7 @@ struct TeamIdentity: Sendable {
             id: "hanwha",
             displayName: "한화 이글스",
             shortLabel: "한화",
-            monogram: "HAN",
+            monogram: "한화",
             homeHeroWatermarkLabel: "Eagles",
             themeID: .hanwha,
             theme: TeamTheme(
@@ -142,7 +142,7 @@ struct TeamIdentity: Sendable {
             id: "kiwoom",
             displayName: "키움 히어로즈",
             shortLabel: "키움",
-            monogram: "KIW",
+            monogram: "키움",
             homeHeroWatermarkLabel: "Heroes",
             themeID: .kiwoom,
             theme: TeamTheme(
@@ -202,7 +202,7 @@ struct TeamIdentity: Sendable {
             id: "lotte",
             displayName: "롯데 자이언츠",
             shortLabel: "롯데",
-            monogram: "LOT",
+            monogram: "롯데",
             homeHeroWatermarkLabel: "Giants",
             themeID: .lotte,
             theme: TeamTheme(
@@ -242,7 +242,7 @@ struct TeamIdentity: Sendable {
             id: "samsung",
             displayName: "삼성 라이온즈",
             shortLabel: "삼성",
-            monogram: "SAM",
+            monogram: "삼성",
             homeHeroWatermarkLabel: "Lions",
             themeID: .samsung,
             theme: TeamTheme(

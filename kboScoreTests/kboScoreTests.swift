@@ -304,8 +304,11 @@ struct kboScoreTests {
         #expect(Team.canonicalID(for: "KIA 타이거즈") == "kia")
         #expect(Team.canonicalID(for: "두산 베어스") == "doosan")
         #expect(Team.canonicalID(for: "DOO") == "doosan")
+        #expect(Team.canonicalID(for: "OB") == "doosan")
         #expect(Team.canonicalID(for: "HAN") == "hanwha")
         #expect(Team.canonicalID(for: "SAM") == "samsung")
+        #expect(Team.canonicalID(for: "LOT") == "lotte")
+        #expect(Team.canonicalID(for: "KIW") == "kiwoom")
     }
 
     @Test func koreanTeamDisplayFieldsNormalizeFromEnglishInputs() throws {
@@ -6392,9 +6395,18 @@ struct kboScoreTests {
     @Test func teamIdentityCatalogKeepsTextAndThemeIdentity() async throws {
         let lgIdentity = TeamIdentity.catalog["lg"]
         let hanwhaIdentity = TeamIdentity.catalog["hanwha"]
+        let doosanIdentity = TeamIdentity.catalog["doosan"]
+        let kiwoomIdentity = TeamIdentity.catalog["kiwoom"]
+        let lotteIdentity = TeamIdentity.catalog["lotte"]
+        let samsungIdentity = TeamIdentity.catalog["samsung"]
 
         #expect(lgIdentity?.monogram == "LG")
         #expect(lgIdentity?.shortLabel == "LG")
+        #expect(doosanIdentity?.monogram == "두산")
+        #expect(hanwhaIdentity?.monogram == "한화")
+        #expect(kiwoomIdentity?.monogram == "키움")
+        #expect(lotteIdentity?.monogram == "롯데")
+        #expect(samsungIdentity?.monogram == "삼성")
         #expect(hanwhaIdentity?.displayName == "한화 이글스")
         #expect(hanwhaIdentity?.themeID == .hanwha)
     }
