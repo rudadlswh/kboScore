@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SafariServices
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
@@ -82,7 +83,7 @@ struct SettingsView: View {
 
         Section("정보") {
             InfoRow(title: "데이터 출처", value: "목 데이터 (실 API 연동 예정)")
-            InfoRow(title: "개인정보 처리방침", value: "준비 중")
+            PrivacyPolicyRow(url: privacyPolicyURL)
             InfoRow(title: "앱 버전", value: appVersion)
         }
 
@@ -158,7 +159,7 @@ struct SettingsView: View {
         Section {
             InfoRow(title: "데이터 출처", value: "https://www.koreabaseball.com/")
                 .settingsRowStyle(palette)
-            InfoRow(title: "개인정보 처리방침", value: "준비 중")
+            PrivacyPolicyRow(url: privacyPolicyURL)
                 .settingsRowStyle(palette)
             InfoRow(title: "앱 버전", value: appVersion)
                 .settingsRowStyle(palette)
@@ -175,6 +176,41 @@ struct SettingsView: View {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "\(shortVersion) (\(build))"
+    }
+
+    private var privacyPolicyURL: URL {
+        let candidates = [
+            ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"],
+            Bundle.main.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String
+        ]
+
+        for candidate in candidates {
+            guard let baseURL = normalizedBackendBaseURL(from: candidate),
+                  let url = URL(string: "privacy", relativeTo: baseURL)?.absoluteURL else {
+                continue
+            }
+            return url
+        }
+
+        return URL(string: "https://kboscore-back.onrender.com/privacy")!
+    }
+
+    private func normalizedBackendBaseURL(from rawValue: String?) -> URL? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawValue.isEmpty == false,
+              rawValue.contains("$(") == false,
+              var components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host?.isEmpty == false else {
+            return nil
+        }
+
+        let trimmedPath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = trimmedPath.isEmpty ? "/" : "/\(trimmedPath)/"
+        components.query = nil
+        components.fragment = nil
+        return components.url
     }
 
     private func currentFavoriteTeamDisplayName(appModel: AppModel) -> String {
@@ -346,6 +382,38 @@ private struct InfoRow: View {
                 .multilineTextAlignment(.trailing)
         }
     }
+}
+
+private struct PrivacyPolicyRow: View {
+    @Environment(AppModel.self) private var appModel
+    let url: URL
+
+    var body: some View {
+        NavigationLink {
+            PrivacyPolicySafariView(url: url)
+                .ignoresSafeArea()
+                .navigationTitle("개인정보 처리방침")
+                .navigationBarTitleDisplayMode(.inline)
+        } label: {
+            HStack {
+                Text("개인정보 처리방침")
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                Spacer()
+            }
+        }
+        .accessibilityLabel("개인정보 처리방침")
+        .accessibilityHint("개인정보 처리방침 페이지를 엽니다")
+    }
+}
+
+private struct PrivacyPolicySafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 private struct DebugRowsView: View {
