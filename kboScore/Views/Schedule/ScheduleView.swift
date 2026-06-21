@@ -238,7 +238,7 @@ private struct ScheduleCalendarCardView: View {
                             )
                         } label: {
                             VStack(spacing: 4) {
-                                Text(day.date.formatted(.dateTime.day()))
+                                Text(dayNumberText(for: day.date))
                                     .font(.caption.weight(isSelected(day) ? .bold : .medium))
                                     .foregroundStyle(dayNumberColor(for: day))
 
@@ -254,8 +254,16 @@ private struct ScheduleCalendarCardView: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(daySelectionBorderColor(for: day), lineWidth: isSelected(day) ? (appModel.isStadiumFavoriteSelected ? 1.4 : 2) : 0)
                             )
+                            .overlay(alignment: .topTrailing) {
+                                if day.hasAttendedGame {
+                                    ScheduleAttendanceAppIcon(size: 12)
+                                        .padding(3)
+                                        .accessibilityHidden(true)
+                                }
+                            }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(dayAccessibilityLabel(for: day))
                     }
                 }
 
@@ -587,6 +595,17 @@ private struct ScheduleCalendarCardView: View {
         }
         return isSelected(day) ? appModel.currentTheme.accent : .clear
     }
+
+    private func dayAccessibilityLabel(for day: MyTeamCalendarDay) -> String {
+        let dateText = day.date.formatted(.dateTime.month().day())
+        let gameText = day.gameCount > 0 ? "경기 \(day.gameCount)개" : "경기 없음"
+        return day.hasAttendedGame ? "\(dateText), \(gameText), 직관 경기 있음" : "\(dateText), \(gameText)"
+    }
+
+    private func dayNumberText(for date: Date) -> String {
+        let day = Calendar(identifier: .gregorian).component(.day, from: date)
+        return "\(day)"
+    }
 }
 
 // ScheduleLoadingPlaceholderView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
@@ -661,6 +680,8 @@ private struct ScheduleGameRow: View {
                     Text(titleText)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(homeAwayLabel)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
@@ -670,6 +691,10 @@ private struct ScheduleGameRow: View {
                             appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.chipBackground,
                             in: Capsule()
                         )
+
+                    if appModel.isGameAttended(game) {
+                        ScheduleAttendanceBadge()
+                    }
                 }
 
                 Text(subtitleText)
@@ -772,6 +797,46 @@ private struct ScheduleGameRow: View {
             }
         }
         return "리그"
+    }
+}
+
+// ScheduleAttendanceBadge 구조체는 직관 표시 배지를 렌더링합니다.
+private struct ScheduleAttendanceBadge: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ScheduleAttendanceAppIcon(size: 12)
+            Text("직관 경기")
+                .font(.caption2.weight(.bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+            in: Capsule()
+        )
+        .accessibilityLabel("직관 경기")
+    }
+}
+
+// ScheduleAttendanceAppIcon 구조체는 앱 아이콘을 작은 직관 마커로 표시합니다.
+private struct ScheduleAttendanceAppIcon: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image("AttendanceAppIcon")
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: max(2, size * 0.22), style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: max(2, size * 0.22), style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 0.75)
+            }
+            .shadow(color: .black.opacity(0.16), radius: 1, y: 0.5)
     }
 }
 
