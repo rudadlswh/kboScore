@@ -6378,6 +6378,7 @@ struct kboScoreTests {
 
         #expect(status == .synced)
         #expect(request.httpMethod == "POST")
+        #expect(request.timeoutInterval == 8)
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(decoded == payload)
         #expect(decoded.installationId == "install-1")
@@ -6389,6 +6390,106 @@ struct kboScoreTests {
         #expect(decoded.inningChangeEnabled == false)
         #expect(decoded.favoriteTeamOnlyEnabled == false)
         #expect(decoded.muteWhenLosingEnabled == false)
+    }
+
+    @Test func notificationInstallationIDMigratesLegacyUserDefaultsToKeychain() throws {
+        let suiteName = "NotificationInstallationIDTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let service = "com.chogm.kboScore.tests.notification-installation-id.\(UUID().uuidString)"
+        let account = "notification-installation-id"
+        let legacyValue = "legacy-installation-id"
+        defaults.set(legacyValue, forKey: NotificationInstallationID.legacyStorageKey)
+        _ = NotificationInstallationID.deleteSavedValue(service: service, account: account)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            _ = NotificationInstallationID.deleteSavedValue(service: service, account: account)
+        }
+
+        let migrated = NotificationInstallationID.loadOrCreate(
+            legacyDefaults: defaults,
+            service: service,
+            account: account
+        )
+        let reloaded = NotificationInstallationID.loadOrCreate(
+            legacyDefaults: defaults,
+            service: service,
+            account: account
+        )
+
+        #expect(migrated == legacyValue)
+        #expect(reloaded == legacyValue)
+        #expect(defaults.string(forKey: NotificationInstallationID.legacyStorageKey) == nil)
+        #expect(NotificationInstallationID.loadSavedValue(service: service, account: account) == legacyValue)
+    }
+
+    @Test func remoteLiveActivityTokenRegistrationClientSetsTimeout() async throws {
+        let session = makeStubSession()
+        let client = RemoteLiveActivityTokenRegistrationClient(
+            endpointURL: URL(string: "https://example.com/devices/live-activities/register")!,
+            session: session
+        )
+        let payload = LiveActivityTokenRegistrationPayload(
+            activityId: "activity-1",
+            environment: "sandbox",
+            activityToken: "activity-token",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            publicGameID: "public-1",
+            providerGameID: "provider-1",
+            databaseID: UUID().uuidString,
+            stableDetailIdentity: "stable-1"
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/devices/live-activities/register": StubResponse(statusCode: 200, data: Data())
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let status = try await client.register(payload)
+        let request = try #require(URLProtocolStub.lastRequest)
+
+        #expect(status == .synced)
+        #expect(request.httpMethod == "POST")
+        #expect(request.timeoutInterval == 8)
+    }
+
+    @Test func remoteLiveActivityPushToStartRegistrationClientSetsTimeout() async throws {
+        let session = makeStubSession()
+        let client = RemoteLiveActivityPushToStartTokenRegistrationClient(
+            endpointURL: URL(string: "https://example.com/devices/live-activities/push-to-start/register")!,
+            session: session
+        )
+        let payload = LiveActivityPushToStartTokenRegistrationPayload(
+            environment: "sandbox",
+            pushToStartToken: "push-to-start-token",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            notificationsAuthorized: true,
+            liveActivitiesEnabled: true,
+            liveActivityAutoStartEnabled: true,
+            gameStartEnabled: true,
+            favoriteTeamOnlyEnabled: false
+        )
+
+        URLProtocolStub.testResponses = [
+            "https://example.com/devices/live-activities/push-to-start/register": StubResponse(statusCode: 200, data: Data())
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        let status = try await client.register(payload)
+        let request = try #require(URLProtocolStub.lastRequest)
+
+        #expect(status == .synced)
+        #expect(request.httpMethod == "POST")
+        #expect(request.timeoutInterval == 8)
     }
 
     // teamIdentityCatalogKeepsTextAndThemeIdentity 메서드는 이 타입의 주요 동작을 수행합니다.

@@ -34,10 +34,26 @@ require_https_url() {
 
 require_https_url "KBO_BACKEND_BASE_URL" "${KBO_BACKEND_BASE_URL:-}"
 require_https_url "KBO_NOTIFICATION_REGISTRATION_URL" "${KBO_NOTIFICATION_REGISTRATION_URL:-}"
+require_https_url "KBO_LIVE_ACTIVITY_REGISTRATION_URL" "${KBO_LIVE_ACTIVITY_REGISTRATION_URL:-}"
 
 [ "${KBO_APNS_ENVIRONMENT:-}" = "production" ] || fail "KBO_APNS_ENVIRONMENT must be production for Release builds."
 
 case "${KBO_NOTIFICATION_REGISTRATION_URL:-}" in
     */devices/register) ;;
     *) fail "KBO_NOTIFICATION_REGISTRATION_URL must end with /devices/register." ;;
+esac
+
+case "${KBO_LIVE_ACTIVITY_REGISTRATION_URL:-}" in
+    */devices/live-activities/register) ;;
+    *) fail "KBO_LIVE_ACTIVITY_REGISTRATION_URL must end with /devices/live-activities/register." ;;
+esac
+
+case "${KBO_NOTIFICATION_REGISTRATION_URL:-}" in
+    "${KBO_BACKEND_BASE_URL%/}"/*) ;;
+    *) fail "KBO_NOTIFICATION_REGISTRATION_URL must use the configured production backend base URL." ;;
+esac
+
+case "${KBO_LIVE_ACTIVITY_REGISTRATION_URL:-}" in
+    "${KBO_BACKEND_BASE_URL%/}"/*) ;;
+    *) fail "KBO_LIVE_ACTIVITY_REGISTRATION_URL must use the configured production backend base URL." ;;
 esac

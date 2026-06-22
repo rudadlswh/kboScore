@@ -21,6 +21,11 @@ DerivedData/
 # Local app config
 kboScore/Config/Secrets.local.xcconfig
 
+# Private keys and certificates
+*.p8
+*.pem
+*.key
+
 # IDE
 .idea/
 

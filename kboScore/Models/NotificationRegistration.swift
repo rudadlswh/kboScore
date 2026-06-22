@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import Security
 
 // NotificationAlertType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
@@ -353,16 +354,103 @@ nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
 
 // NotificationInstallationID 열거형는 NotificationInstallationID 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationInstallationID {
+    nonisolated static let legacyStorageKey = "notificationInstallationID"
+    private static let keychainService = "com.chogm.kboScore.notification-installation-id"
+    private static let keychainAccount = "notification-installation-id"
+
     nonisolated static var current: String {
-        let storageKey = "notificationInstallationID"
-        if let persisted = UserDefaults.standard.string(forKey: storageKey),
-           persisted.isEmpty == false {
+        loadOrCreate()
+    }
+
+    nonisolated static func loadOrCreate(
+        legacyDefaults: UserDefaults = .standard,
+        legacyKey: String = legacyStorageKey,
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> String {
+        if let persisted = load(service: service, account: account) {
+            legacyDefaults.removeObject(forKey: legacyKey)
             return persisted
         }
 
+        if let legacyValue = legacyDefaults.string(forKey: legacyKey),
+           legacyValue.isEmpty == false {
+            if save(legacyValue, service: service, account: account) {
+                legacyDefaults.removeObject(forKey: legacyKey)
+            }
+            return legacyValue
+        }
+
         let generated = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(generated, forKey: storageKey)
+        _ = save(generated, service: service, account: account)
         return generated
+    }
+
+    nonisolated static func loadSavedValue(
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> String? {
+        load(service: service, account: account)
+    }
+
+    @discardableResult
+    nonisolated static func deleteSavedValue(
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> Bool {
+        let status = SecItemDelete(baseQuery(service: service, account: account) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    private nonisolated static func load(service: String, account: String) -> String? {
+        var query = baseQuery(service: service, account: account)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              value.isEmpty == false else {
+            return nil
+        }
+        return value
+    }
+
+    @discardableResult
+    private nonisolated static func save(_ value: String, service: String, account: String) -> Bool {
+        guard let data = value.data(using: .utf8), value.isEmpty == false else {
+            return false
+        }
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let status = SecItemUpdate(
+            baseQuery(service: service, account: account) as CFDictionary,
+            updateAttributes as CFDictionary
+        )
+        if status == errSecSuccess {
+            return true
+        }
+        if status != errSecItemNotFound {
+            return false
+        }
+
+        var insertQuery = baseQuery(service: service, account: account)
+        insertQuery[kSecValueData as String] = data
+        insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(insertQuery as CFDictionary, nil) == errSecSuccess
+    }
+
+    private nonisolated static func baseQuery(service: String, account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }
 

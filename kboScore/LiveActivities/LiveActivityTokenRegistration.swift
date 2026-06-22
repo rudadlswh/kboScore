@@ -353,17 +353,26 @@ struct RemoteLiveActivityTokenRegistrationClient: LiveActivityTokenRegistrationC
     nonisolated func register(_ payload: LiveActivityTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = 8
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
+            #if DEBUG
             print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
+            #else
+            print("[LiveActivity] token registration failure reason=nonHttpResponse status=-1")
+            #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
+            #if DEBUG
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
             print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
+            #else
+            print("[LiveActivity] token registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode)")
+            #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
         }
         return .synced
@@ -386,17 +395,26 @@ struct RemoteLiveActivityPushToStartTokenRegistrationClient: LiveActivityPushToS
     nonisolated func register(_ payload: LiveActivityPushToStartTokenRegistrationPayload) async throws -> LiveActivityTokenRegistrationStatus {
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = 8
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
+            #if DEBUG
             print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
+            #else
+            print("[LiveActivity] push-to-start registration failure reason=nonHttpResponse status=-1")
+            #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
+            #if DEBUG
             let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
             print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
+            #else
+            print("[LiveActivity] push-to-start registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode)")
+            #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
         }
         return .synced

@@ -1068,7 +1068,7 @@ private extension GameDetail {
 #if canImport(Supabase)
 import Supabase
 
-// Read-only client for public KBO tables exposed through Supabase's HTTP API layer.
+// Read-only client for public KBO views exposed through Supabase's HTTP API layer.
 // SupabaseKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     private let baseURL: URL
@@ -1186,16 +1186,16 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchTeamsFromDatabase 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func fetchTeamsFromDatabase() async throws -> [SupabaseTeamRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchTeams start schema=\(schemaName) table=teams baseURL=\(baseURL.absoluteString)")
+        print("[SupabaseKBO] fetchTeams start schema=\(schemaName) view=public_teams baseURL=\(baseURL.absoluteString)")
         #endif
         let rows: [SupabaseTeamRow] = try await database
-            .from("teams")
+            .from("public_teams")
             .select()
             .order("team_code", ascending: true)
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchTeams success schema=\(schemaName) table=teams count=\(rows.count)")
+        print("[SupabaseKBO] fetchTeams success schema=\(schemaName) view=public_teams count=\(rows.count)")
         #endif
         return rows
     }
@@ -1203,15 +1203,15 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchGameCount 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameCount() async throws -> Int {
         #if DEBUG
-        print("[SupabaseKBO] fetchGameCount query start schema=\(schemaName) table=games")
+        print("[SupabaseKBO] fetchGameCount query start schema=\(schemaName) view=public_games")
         #endif
         let count = try await database
-            .from("games")
+            .from("public_games")
             .select(head: true, count: .exact)
             .execute()
             .count ?? 0
         #if DEBUG
-        print("[SupabaseKBO] fetchGameCount success schema=\(schemaName) table=games count=\(count)")
+        print("[SupabaseKBO] fetchGameCount success schema=\(schemaName) view=public_games count=\(count)")
         #endif
         return count
     }
@@ -1219,18 +1219,18 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [SupabaseGameRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchGames query start schema=\(schemaName) table=games dateRange=all")
+        print("[SupabaseKBO] fetchGames query start schema=\(schemaName) view=public_games dateRange=all")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .order("game_date", ascending: true)
             .order("scheduled_at", ascending: true)
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames success schema=\(schemaName) table=games count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames success schema=\(schemaName) view=public_games count=\(rows.count)")
         #endif
         return rows
     }
@@ -1243,12 +1243,12 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .sorted()
 
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(excluding:) query start schema=\(schemaName) table=games excludedProviderIDs=\(excludedIDs.count)")
+        print("[SupabaseKBO] fetchGames(excluding:) query start schema=\(schemaName) view=public_games excludedProviderIDs=\(excludedIDs.count)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
 
         let query = database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
         if excludedIDs.isEmpty == false {
             _ = query.not("provider_game_id", operator: .in, value: "(\(excludedIDs.joined(separator: ",")))")
@@ -1261,7 +1261,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .value
 
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(excluding:) success schema=\(schemaName) table=games count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(excluding:) success schema=\(schemaName) view=public_games count=\(rows.count)")
         #endif
         return rows
     }
@@ -1271,12 +1271,12 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         let interval = monthInterval(for: month)
         #if DEBUG
         print(
-            "[SupabaseKBO] fetchGames(month:) query start schema=\(schemaName) table=games month=\(month.yearMonthText) dateRange=\(gameDateString(interval.start))...\(gameDateString(interval.end))"
+            "[SupabaseKBO] fetchGames(month:) query start schema=\(schemaName) view=public_games month=\(month.yearMonthText) dateRange=\(gameDateString(interval.start))...\(gameDateString(interval.end))"
         )
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .gte("game_date", value: gameDateString(interval.start))
             .lte("game_date", value: gameDateString(interval.end))
@@ -1285,7 +1285,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(month:) success schema=\(schemaName) table=games month=\(month.yearMonthText) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(month:) success schema=\(schemaName) view=public_games month=\(month.yearMonthText) count=\(rows.count)")
         #endif
         return rows
     }
@@ -1293,18 +1293,18 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(date:) query start schema=\(schemaName) table=games date=\(gameDateString(date))")
+        print("[SupabaseKBO] fetchGames(date:) query start schema=\(schemaName) view=public_games date=\(gameDateString(date))")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .eq("game_date", value: gameDateString(date))
             .order("scheduled_at", ascending: true)
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(date:) success schema=\(schemaName) table=games date=\(gameDateString(date)) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(date:) success schema=\(schemaName) view=public_games date=\(gameDateString(date)) count=\(rows.count)")
         #endif
         return rows
     }
@@ -1320,11 +1320,11 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         }
 
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(favoriteTeamDate:) query start schema=\(schemaName) table=games date=\(gameDateString(date)) favoriteTeamID=\(favoriteTeamID)")
+        print("[SupabaseKBO] fetchGames(favoriteTeamDate:) query start schema=\(schemaName) view=public_games date=\(gameDateString(date)) favoriteTeamID=\(favoriteTeamID)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .eq("game_date", value: gameDateString(date))
             .or("home_team_id.eq.\(teamUUID.uuidString),away_team_id.eq.\(teamUUID.uuidString)")
@@ -1332,7 +1332,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(favoriteTeamDate:) success schema=\(schemaName) table=games date=\(gameDateString(date)) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(favoriteTeamDate:) success schema=\(schemaName) view=public_games date=\(gameDateString(date)) count=\(rows.count)")
         #endif
         return rows
     }
@@ -1343,11 +1343,11 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         let startDate = gameDateString(dateRange.start)
         let endDate = gameDateString(dateRange.end)
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(standings:) query start schema=\(schemaName) table=games season=\(season) dateRange=\(startDate)...\(endDate)")
+        print("[SupabaseKBO] fetchGames(standings:) query start schema=\(schemaName) view=public_games season=\(season) dateRange=\(startDate)...\(endDate)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .gte("game_date", value: startDate)
             .lte("game_date", value: endDate)
@@ -1359,7 +1359,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(standings:) success schema=\(schemaName) table=games season=\(season) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(standings:) success schema=\(schemaName) view=public_games season=\(season) count=\(rows.count)")
         #endif
         return rows
     }
@@ -1384,7 +1384,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
         #if DEBUG
-        print("[SupabaseKBO] fetchGame(single:) query start schema=\(schemaName) table=games key=\(lookup.debugKey) value=\(lookup.debugValue)")
+        print("[SupabaseKBO] fetchGame(single:) query start schema=\(schemaName) view=public_games key=\(lookup.debugKey) value=\(lookup.debugValue)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
 
@@ -1392,7 +1392,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         switch lookup {
         case .providerGameID(let providerGameID):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("provider_game_id", value: providerGameID)
                 .limit(1)
@@ -1400,7 +1400,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .value
         case .officialProviderGameID(let officialProviderGameID):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("official_provider_game_id", value: officialProviderGameID)
                 .limit(1)
@@ -1408,7 +1408,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .value
         case .publicGameID(let publicGameID):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("public_game_id", value: publicGameID)
                 .limit(1)
@@ -1416,7 +1416,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .value
         case .databaseID(let id):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("id", value: id.uuidString)
                 .limit(1)
@@ -1424,7 +1424,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .value
         case .dateTeamIDs(let gameDate, let awayTeamID, let homeTeamID):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("game_date", value: gameDate)
                 .eq("away_team_id", value: awayTeamID.uuidString)
@@ -1434,7 +1434,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
                 .value
         case .dateTeamVenue(let gameDate, let awayTeamID, let homeTeamID, let stadium):
             rows = try await database
-                .from("games")
+                .from("public_games")
                 .select(Self.gameSelectColumns)
                 .eq("game_date", value: gameDate)
                 .eq("away_team_id", value: awayTeamID.uuidString)
@@ -1446,7 +1446,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         }
 
         #if DEBUG
-        print("[SupabaseKBO] fetchGame(single:) success schema=\(schemaName) table=games key=\(lookup.debugKey) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGame(single:) success schema=\(schemaName) view=public_games key=\(lookup.debugKey) count=\(rows.count)")
         #endif
         return rows
     }
@@ -1497,34 +1497,17 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #if DEBUG
         print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_batter_records game_id=\(gameID.uuidString)")
         #endif
-        do {
-            let rows: [SupabaseGameBatterRecordRow] = try await database
-                .from("public_game_batter_records")
-                .select(Self.batterRecordSelectColumns)
-                .eq("game_id", value: gameID.uuidString)
-                .order("source_order", ascending: true)
-                .execute()
-                .value
-            #if DEBUG
-            print("[GameDetailDBRecords] DB batter count=\(rows.count) source=public_game_batter_records game_id=\(gameID.uuidString)")
-            #endif
-            return rows
-        } catch {
-            #if DEBUG
-            print("[GameDetailDBRecords] DB batter public view failed game_id=\(gameID.uuidString) fallback=game_batter_records error=\(error)")
-            #endif
-            let rows: [SupabaseGameBatterRecordRow] = try await database
-                .from("game_batter_records")
-                .select(Self.batterRecordSelectColumns)
-                .eq("game_id", value: gameID.uuidString)
-                .order("source_order", ascending: true)
-                .execute()
-                .value
-            #if DEBUG
-            print("[GameDetailDBRecords] DB batter count=\(rows.count) source=game_batter_records game_id=\(gameID.uuidString)")
-            #endif
-            return rows
-        }
+        let rows: [SupabaseGameBatterRecordRow] = try await database
+            .from("public_game_batter_records")
+            .select(Self.batterRecordSelectColumns)
+            .eq("game_id", value: gameID.uuidString)
+            .order("source_order", ascending: true)
+            .execute()
+            .value
+        #if DEBUG
+        print("[GameDetailDBRecords] DB batter count=\(rows.count) source=public_game_batter_records game_id=\(gameID.uuidString)")
+        #endif
+        return rows
     }
 
     // fetchGamePitcherRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -1532,52 +1515,34 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #if DEBUG
         print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_pitcher_records game_id=\(gameID.uuidString)")
         #endif
-        do {
-            let rows: [SupabaseGamePitcherRecordRow] = try await database
-                .from("public_game_pitcher_records")
-                .select(Self.pitcherRecordSelectColumns)
-                .eq("game_id", value: gameID.uuidString)
-                .order("pitching_order", ascending: true)
-                .order("source_order", ascending: true)
-                .execute()
-                .value
-            #if DEBUG
-            print("[GameDetailDBRecords] DB pitcher count=\(rows.count) source=public_game_pitcher_records game_id=\(gameID.uuidString)")
-            #endif
-            return rows
-        } catch {
-            #if DEBUG
-            print("[GameDetailDBRecords] DB pitcher public view failed game_id=\(gameID.uuidString) fallback=game_pitcher_records error=\(error)")
-            #endif
-            let rows: [SupabaseGamePitcherRecordRow] = try await database
-                .from("game_pitcher_records")
-                .select(Self.pitcherRecordSelectColumns)
-                .eq("game_id", value: gameID.uuidString)
-                .order("pitching_order", ascending: true)
-                .order("source_order", ascending: true)
-                .execute()
-                .value
-            #if DEBUG
-            print("[GameDetailDBRecords] DB pitcher count=\(rows.count) source=game_pitcher_records game_id=\(gameID.uuidString)")
-            #endif
-            return rows
-        }
+        let rows: [SupabaseGamePitcherRecordRow] = try await database
+            .from("public_game_pitcher_records")
+            .select(Self.pitcherRecordSelectColumns)
+            .eq("game_id", value: gameID.uuidString)
+            .order("pitching_order", ascending: true)
+            .order("source_order", ascending: true)
+            .execute()
+            .value
+        #if DEBUG
+        print("[GameDetailDBRecords] DB pitcher count=\(rows.count) source=public_game_pitcher_records game_id=\(gameID.uuidString)")
+        #endif
+        return rows
     }
 
     // fetchGameEvents 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameEvents(gameID: UUID) async throws -> [SupabaseGameEventRow] {
         #if DEBUG
-        print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) table=game_events game_id=\(gameID.uuidString)")
+        print("[GameDetailDBRecords] DB detailed record fetch start schema=\(schemaName) view=public_game_events game_id=\(gameID.uuidString)")
         #endif
         let rows: [SupabaseGameEventRow] = try await database
-            .from("game_events")
+            .from("public_game_events")
             .select(Self.gameEventSelectColumns)
             .eq("game_id", value: gameID.uuidString)
             .order("sequence_number", ascending: true)
             .execute()
             .value
         #if DEBUG
-        print("[GameDetailDBRecords] DB event count=\(rows.count) source=game_events game_id=\(gameID.uuidString)")
+        print("[GameDetailDBRecords] DB event count=\(rows.count) source=public_game_events game_id=\(gameID.uuidString)")
         #endif
         return rows
     }
@@ -1590,11 +1555,11 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         }
 
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(teamID:) query start schema=\(schemaName) table=games teamID=\(teamID)")
+        print("[SupabaseKBO] fetchGames(teamID:) query start schema=\(schemaName) view=public_games teamID=\(teamID)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
         #endif
         let rows: [SupabaseGameRow] = try await database
-            .from("games")
+            .from("public_games")
             .select(Self.gameSelectColumns)
             .or("home_team_id.eq.\(teamUUID.uuidString),away_team_id.eq.\(teamUUID.uuidString)")
             .order("game_date", ascending: true)
@@ -1602,7 +1567,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
             .execute()
             .value
         #if DEBUG
-        print("[SupabaseKBO] fetchGames(teamID:) success schema=\(schemaName) table=games teamID=\(teamID) count=\(rows.count)")
+        print("[SupabaseKBO] fetchGames(teamID:) success schema=\(schemaName) view=public_games teamID=\(teamID) count=\(rows.count)")
         #endif
         return rows
     }

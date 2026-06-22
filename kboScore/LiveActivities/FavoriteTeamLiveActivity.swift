@@ -440,7 +440,11 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                     databaseID: snapshot.databaseID,
                     stableDetailIdentity: snapshot.stableDetailIdentity
                 )
+                #if DEBUG
                 print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+                #else
+                print("[LiveActivity] push token received reason=tokenUpdate environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+                #endif
                 let key = LiveActivityTokenRegistrationKey(payload: payload, endpointDescription: tokenRegistrationClient.debugEndpointDescription)
                 await MainActor.run {
                     guard self.registeredTokenKeys.insert(key).inserted else {
@@ -452,9 +456,17 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                 }
                 do {
                     _ = try await tokenRegistrationClient.register(payload)
+                    #if DEBUG
                     print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
+                    #else
+                    print("[LiveActivity] token registration success reason=activityTokenRegistration environment=\(payload.environment)")
+                    #endif
                 } catch {
+                    #if DEBUG
                     print("[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+                    #else
+                    print("[LiveActivity] token registration failure reason=activityTokenRegistration environment=\(payload.environment)")
+                    #endif
                 }
             }
         }
