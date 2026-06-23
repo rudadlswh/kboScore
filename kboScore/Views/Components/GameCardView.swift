@@ -52,17 +52,10 @@ struct GameCardView: View {
                     backgroundColor: statusBadgeBackgroundColor
                 )
 
-                if summary.isMyTeamGame {
-                    Text("MY")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(appModel.currentTheme.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(appModel.currentTheme.chipBackground)
-                        )
-                }
+                myTeamBadge(
+                    foregroundColor: appModel.currentTheme.accent,
+                    backgroundColor: appModel.currentTheme.chipBackground
+                )
 
                 Spacer(minLength: 8)
 
@@ -89,52 +82,23 @@ struct GameCardView: View {
 
                 Spacer(minLength: 6)
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    if summary.showsLiveOrFinalScore {
-                        Text(summary.displayScore)
-                            .font(.system(size: 30, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(summary.status.isLiveLike ? statusTintColor : .primary)
-                            .shadow(color: liveTextShadowColor, radius: 1, y: 1)
-                    }
-                    Label(summary.venue, systemImage: "mappin.and.ellipse")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if let currentPitcher = summary.currentPitcherName?.nilIfBlank, summary.status.isLiveLike {
-                        Label(currentPitcher, systemImage: "figure.baseball")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            if let recentEvent = summary.recentEvent {
-                HStack(spacing: 8) {
-                    Image(systemName: summary.status.isFinishedLike ? "flag.pattern.checkered" : "waveform.path.ecg")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(statusTintColor)
-                        .shadow(color: liveTextShadowColor, radius: 1, y: 1)
-                    Text(recentEvent)
-                        .font(.footnote.weight(summary.status.isLiveLike ? .semibold : .regular))
-                        .foregroundStyle(.primary.opacity(summary.status.isLiveLike ? 0.92 : 0.72))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color(.systemBackground).opacity(summary.status.isLiveLike ? 0.9 : 0.65))
+                metadataColumn(
+                    scoreFontSize: 30,
+                    scoreWeight: .heavy,
+                    scoreColor: summary.status.isLiveLike ? statusTintColor : .primary,
+                    secondaryColor: .secondary,
+                    showsScoreShadow: true
                 )
             }
+
+            recentEventRow(
+                textColor: .primary.opacity(summary.status.isLiveLike ? 0.92 : 0.72),
+                backgroundColor: Color(.systemBackground).opacity(summary.status.isLiveLike ? 0.9 : 0.65),
+                showsIconShadow: true
+            )
         }
         .cardSurface(padding: 12, cornerRadius: 18, fillColor: cardBackgroundColor)
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(statusTintColor.opacity(summary.status.isLiveLike ? 0.95 : 0.3))
-                .frame(width: 4)
-        }
+        .overlay(alignment: .leading) { accentOverlay(width: 4) }
     }
 
     // stadiumBody 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -147,17 +111,10 @@ struct GameCardView: View {
                     backgroundColor: statusBadgeBackgroundColor
                 )
 
-                if summary.isMyTeamGame {
-                    Text("MY")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(palette.textPrimary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(palette.elevatedCardStrong)
-                        )
-                }
+                myTeamBadge(
+                    foregroundColor: palette.textPrimary,
+                    backgroundColor: palette.elevatedCardStrong
+                )
 
                 Spacer(minLength: 8)
 
@@ -187,50 +144,92 @@ struct GameCardView: View {
 
                 Spacer(minLength: 6)
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    if summary.showsLiveOrFinalScore {
-                        Text(summary.displayScore)
-                            .font(.system(size: 32, weight: .black, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(summary.status.isLiveLike ? statusTintColor : palette.textPrimary)
-                    }
-                    Label(summary.venue, systemImage: "mappin.and.ellipse")
-                        .font(.caption2)
-                        .foregroundStyle(palette.textSecondary)
-                        .lineLimit(1)
-                    if let currentPitcher = summary.currentPitcherName?.nilIfBlank, summary.status.isLiveLike {
-                        Label(currentPitcher, systemImage: "figure.baseball")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(palette.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            if let recentEvent = summary.recentEvent {
-                HStack(spacing: 8) {
-                    Image(systemName: summary.status.isFinishedLike ? "flag.pattern.checkered" : "waveform.path.ecg")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(statusTintColor)
-                    Text(recentEvent)
-                        .font(.footnote.weight(summary.status.isLiveLike ? .semibold : .regular))
-                        .foregroundStyle(palette.textPrimary.opacity(summary.status.isLiveLike ? 0.92 : 0.72))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(palette.recessedSurface.opacity(summary.status.isLiveLike ? 0.96 : 0.75))
+                metadataColumn(
+                    scoreFontSize: 32,
+                    scoreWeight: .black,
+                    scoreColor: summary.status.isLiveLike ? statusTintColor : palette.textPrimary,
+                    secondaryColor: palette.textSecondary
                 )
             }
+
+            recentEventRow(
+                textColor: palette.textPrimary.opacity(summary.status.isLiveLike ? 0.92 : 0.72),
+                backgroundColor: palette.recessedSurface.opacity(summary.status.isLiveLike ? 0.96 : 0.75)
+            )
         }
         .cardSurface(padding: 14, cornerRadius: 18, fillColor: cardBackgroundColor)
-        .overlay(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(statusTintColor.opacity(summary.status.isLiveLike ? 0.95 : 0.3))
-                .frame(width: 5)
+        .overlay(alignment: .leading) { accentOverlay(width: 5) }
+    }
+
+    @ViewBuilder
+    private func myTeamBadge(foregroundColor: Color, backgroundColor: Color) -> some View {
+        if summary.isMyTeamGame {
+            Text("MY")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(foregroundColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(backgroundColor)
+                )
         }
+    }
+
+    private func metadataColumn(
+        scoreFontSize: CGFloat,
+        scoreWeight: Font.Weight,
+        scoreColor: Color,
+        secondaryColor: Color,
+        showsScoreShadow: Bool = false
+    ) -> some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            if summary.showsLiveOrFinalScore {
+                Text(summary.displayScore)
+                    .font(.system(size: scoreFontSize, weight: scoreWeight, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(scoreColor)
+                    .shadow(color: showsScoreShadow ? liveTextShadowColor : .clear, radius: 1, y: 1)
+            }
+            Label(summary.venue, systemImage: "mappin.and.ellipse")
+                .font(.caption2)
+                .foregroundStyle(secondaryColor)
+                .lineLimit(1)
+            if let currentPitcher = summary.currentPitcherName?.nilIfBlank, summary.status.isLiveLike {
+                Label(currentPitcher, systemImage: "figure.baseball")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(secondaryColor)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recentEventRow(textColor: Color, backgroundColor: Color, showsIconShadow: Bool = false) -> some View {
+        if let recentEvent = summary.recentEvent {
+            HStack(spacing: 8) {
+                Image(systemName: summary.status.isFinishedLike ? "flag.pattern.checkered" : "waveform.path.ecg")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(statusTintColor)
+                    .shadow(color: showsIconShadow ? liveTextShadowColor : .clear, radius: 1, y: 1)
+                Text(recentEvent)
+                    .font(.footnote.weight(summary.status.isLiveLike ? .semibold : .regular))
+                    .foregroundStyle(textColor)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(backgroundColor)
+            )
+        }
+    }
+
+    private func accentOverlay(width: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(statusTintColor.opacity(summary.status.isLiveLike ? 0.95 : 0.3))
+            .frame(width: width)
     }
 
     private var usesWhiteLiveStyle: Bool {
