@@ -133,11 +133,6 @@ struct AppRepositoryConfiguration: Sendable {
 
 // KBORepositoryFactory 열거형는 실행 환경에 맞는 구현체 생성을 담당합니다.
 enum KBORepositoryFactory {
-    // makeAppRepository 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
-    static func makeAppRepository() -> any KBORepository {
-        makeAppRepositoryBundle().repository
-    }
-
     // makeAppRepositoryBundle 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeAppRepositoryBundle(
         configuration: AppRepositoryConfiguration = .fromEnvironment()

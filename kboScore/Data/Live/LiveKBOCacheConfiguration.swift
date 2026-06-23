@@ -34,14 +34,6 @@ struct RepositoryCacheConfiguration: Sendable {
         self.diskCacheDirectory = diskCacheDirectory
     }
 
-    nonisolated static let `default` = RepositoryCacheConfiguration(
-        bootstrapTTL: 15,
-        gamesTTL: 12,
-        notificationsTTL: 20,
-        monthlyScheduleTTL: 60 * 60 * 24,
-        diskCacheDirectory: nil
-    )
-
     nonisolated static let supabaseStartup = RepositoryCacheConfiguration(
         bootstrapTTL: 60 * 10,
         gamesTTL: 20,

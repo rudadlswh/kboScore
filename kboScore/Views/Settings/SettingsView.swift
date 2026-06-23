@@ -416,65 +416,6 @@ private struct PrivacyPolicySafariView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
-private struct DebugRowsView: View {
-    @Environment(AppModel.self) private var appModel
-
-    var body: some View {
-        Group {
-            InfoRow(title: "활성 데이터", value: appModel.debugActiveDataSource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "표시 데이터", value: appModel.debugDeliverySource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 API", value: appModel.debugBootstrapAPIEnabled)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 ETag", value: appModel.debugBootstrapETag)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 조회", value: appModel.debugBootstrapLastFetchText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 저장", value: appModel.debugBootstrapLastWriteText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 결과", value: appModel.debugBootstrapLastResult)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "로컬 JSON 소스", value: appModel.debugLocalBootstrapSource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "문서 JSON 경로", value: appModel.debugLocalBootstrapPath)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "활성 로드 경로", value: appModel.debugLocalBootstrapResolvedPath ?? "아직 읽지 않음")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "로컬 JSON 읽기", value: appModel.debugLocalBootstrapLoadedText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            if let debugLocalBootstrapMessage = appModel.debugLocalBootstrapMessage {
-                InfoRow(title: "로컬 JSON 상태", value: debugLocalBootstrapMessage)
-                    .applyDoosanDebugRowStyleIfNeeded()
-            }
-            InfoRow(title: "기준 URL", value: appModel.debugBaseURL ?? "설정 안 됨")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "마지막 갱신", value: appModel.debugLastRefreshText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "지연 상태", value: appModel.isShowingStaleData ? "지연됨" : "정상")
-                .applyDoosanDebugRowStyleIfNeeded()
-            if let apnsDeviceToken = appModel.apnsDeviceToken {
-                InfoRow(title: "APNs 토큰", value: String(apnsDeviceToken.prefix(16)) + "…")
-                    .applyDoosanDebugRowStyleIfNeeded()
-            }
-            InfoRow(title: "등록 엔드포인트", value: appModel.notificationRegistrationEndpointDescription ?? "설정 안 됨")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 상태", value: appModel.notificationRegistrationSyncStatus.rawValue)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 시도", value: appModel.notificationRegistrationLastAttemptText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 payload", value: appModel.notificationRegistrationPayloadPreviewText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            Button("테스트 알림 예약") {
-                Task {
-                    await appModel.scheduleDebugNotification()
-                }
-            }
-            .applyDoosanDebugRowStyleIfNeeded()
-        }
-    }
-}
-
 private struct SettingsSectionHeader: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -500,22 +441,6 @@ private extension View {
         listRowBackground(palette.sectionBackground)
             .listRowSeparator(.hidden)
             .foregroundStyle(palette.textPrimary)
-    }
-
-    func applyDoosanDebugRowStyleIfNeeded() -> some View {
-        modifier(DoosanDebugRowStyleModifier())
-    }
-}
-
-private struct DoosanDebugRowStyleModifier: ViewModifier {
-    @Environment(AppModel.self) private var appModel
-
-    func body(content: Content) -> some View {
-        if let palette = appModel.favoriteStadiumPalette {
-            content.settingsRowStyle(palette)
-        } else {
-            content
-        }
     }
 }
 
