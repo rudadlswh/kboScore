@@ -165,26 +165,7 @@ private struct ScheduleCalendarCardView: View {
 
             if isDisplayedMonthAvailable {
                 HStack {
-                    Button {
-                        guard let previousMonth = previousAvailableMonth else { return }
-                        viewModel.changeDisplayedMonth(
-                            to: previousMonth,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
-                            attendedGameKeys: appModel.attendedGameKeys
-                        )
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .opacity(previousAvailableMonth == nil ? 0.4 : 1)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(previousAvailableMonth == nil)
+                    monthNavigationButton(systemName: "chevron.left", targetMonth: previousAvailableMonth)
 
                     Spacer()
 
@@ -199,26 +180,7 @@ private struct ScheduleCalendarCardView: View {
 
                     Spacer()
 
-                    Button {
-                        guard let nextMonth = nextAvailableMonth else { return }
-                        viewModel.changeDisplayedMonth(
-                            to: nextMonth,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
-                            attendedGameKeys: appModel.attendedGameKeys
-                        )
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .opacity(nextAvailableMonth == nil ? 0.4 : 1)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(nextAvailableMonth == nil)
+                    monthNavigationButton(systemName: "chevron.right", targetMonth: nextAvailableMonth)
                 }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 8) {
@@ -406,6 +368,29 @@ private struct ScheduleCalendarCardView: View {
             return "응원 팀을 선택하면 마이팀 일정이 표시됩니다."
         }
         return "선택한 날짜에는 등록된 경기가 없습니다."
+    }
+
+    private func monthNavigationButton(systemName: String, targetMonth: Date?) -> some View {
+        Button {
+            guard let targetMonth else { return }
+            viewModel.changeDisplayedMonth(
+                to: targetMonth,
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+        } label: {
+            Image(systemName: systemName)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
+                .frame(width: 34, height: 34)
+                .background(
+                    appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .opacity(targetMonth == nil ? 0.4 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(targetMonth == nil)
     }
 
     @ViewBuilder
