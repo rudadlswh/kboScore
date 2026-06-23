@@ -20,30 +20,7 @@ protocol ScheduleStaleGameReconciliationClient: Sendable {
 nonisolated enum ScheduleStaleGameReconciliationClientFactory {
     // makeAppClient 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeAppClient() -> any ScheduleStaleGameReconciliationClient {
-        let backendProcessValue = ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let backendBundleValue = (Bundle.main.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let notificationProcessValue = ProcessInfo.processInfo.environment["KBO_NOTIFICATION_REGISTRATION_URL"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let notificationBundleValue = (Bundle.main.object(forInfoDictionaryKey: "NotificationRegistrationURL") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let resolved = resolveBaseURL(
-            backendEnvironmentValue: backendProcessValue,
-            backendBundleValue: backendBundleValue,
-            notificationEnvironmentValue: notificationProcessValue,
-            notificationBundleValue: notificationBundleValue
-        ) else {
-            #if DEBUG
-            print("[ScheduleRefresh] stale reconciliation backendBaseURL source=none resolved=<none> client=noop")
-            #endif
-            return NoOpScheduleStaleGameReconciliationClient()
-        }
-        #if DEBUG
-        print("[ScheduleRefresh] stale reconciliation backendBaseURL source=\(resolved.source) resolved=\(resolved.url.absoluteString)")
-        #endif
-        return BackendScheduleStaleGameReconciliationClient(baseURL: resolved.url)
+        NoOpScheduleStaleGameReconciliationClient()
     }
 
     // resolveBaseURL 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.

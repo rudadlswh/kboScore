@@ -14296,6 +14296,56 @@ struct kboScoreTests {
 
         #expect(await dateFetchRecorder.calls.map { $0.dayKey } == ["2026-03-12"])
         #expect(viewModel.selectedDateGames.first?.status == .upcoming)
+        #expect(viewModel.selectedGamesContentState == .loaded)
+        #expect(viewModel.statusMessage == nil)
+        #expect(viewModel.monthGameCount == 1)
+    }
+
+    // schedulePullToRefreshKeepsExistingDataWhenBackendReconciliationReturnsUnauthorized 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
+    @Test func schedulePullToRefreshKeepsExistingDataWhenBackendReconciliationReturnsUnauthorized() async throws {
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
+        let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
+        let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
+        let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [staleGame]])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in [staleGame] }, fetchScheduleBypassingCache: { date, bypassingCache in
+            await dateFetchRecorder.fetch(date: date, bypassingCache: bypassingCache)
+        })
+        let session = makeStubSession()
+        let reconciliationClient = BackendScheduleStaleGameReconciliationClient(baseURL: URL(string: "http://192.168.45.140:8088")!, session: session)
+        URLProtocolStub.testResponses = [
+            "http://192.168.45.140:8088/api/v1/games/reconcile-stale": StubResponse(
+                statusCode: 401,
+                data: Data(#"{"error":"unauthorized"}"#.utf8)
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+        let model = AppModel(
+            repository: repository,
+            scheduleStaleGameReconciliationClient: reconciliationClient,
+            bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = pastDate
+        viewModel.selectedDate = pastDate
+
+        await viewModel.refreshDisplayedMonth(appModel: model)
+        let request = try #require(URLProtocolStub.lastRequest)
+
+        #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/games/reconcile-stale")
+        #expect(await dateFetchRecorder.calls.map { $0.dayKey } == ["2026-03-12"])
+        #expect(viewModel.selectedDateGames.first?.status == .upcoming)
+        #expect(viewModel.selectedGamesContentState == .loaded)
+        #expect(viewModel.statusMessage == nil)
+        #expect(viewModel.monthGameCount == 1)
     }
 
     // schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
@@ -14567,6 +14617,13 @@ struct kboScoreTests {
         #expect(request.value(forHTTPHeaderField: "Accept") == "application/json")
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(payload?["dates"] as? [String] == ["2026-03-12"])
+    }
+
+    // scheduleStaleReconciliationAppFactoryUsesNoOpClient 메서드는 실행 환경에 맞는 구현체 생성을 검증합니다.
+    @Test func scheduleStaleReconciliationAppFactoryUsesNoOpClient() {
+        let client = ScheduleStaleGameReconciliationClientFactory.makeAppClient()
+
+        #expect(client is NoOpScheduleStaleGameReconciliationClient)
     }
 
     // scheduleStaleReconciliationResolverPrefersConfiguredLANBackendURL 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
