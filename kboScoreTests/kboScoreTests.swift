@@ -2860,7 +2860,7 @@ struct kboScoreTests {
     // scheduleFilterAllIncludesWholeMonthGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleFilterAllIncludesWholeMonthGames() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
-        let sampleDate = ISO8601DateFormatter().date(from: "2026-03-23T13:00:00+09:00")!
+        let sampleDate = isoDate("2026-03-23T13:00:00+09:00")
 
         let games = model.scheduleGames(on: sampleDate, filter: .all)
 
@@ -2873,7 +2873,7 @@ struct kboScoreTests {
     @Test func scheduleFilterMyTeamOnlyReturnsFavoriteTeamGames() async throws {
         let model = AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
         model.settings.favoriteTeamID = "lg"
-        let sampleDate = ISO8601DateFormatter().date(from: "2026-03-23T13:00:00+09:00")!
+        let sampleDate = isoDate("2026-03-23T13:00:00+09:00")
 
         let games = model.scheduleGames(on: sampleDate, filter: .myTeam)
 
@@ -7368,7 +7368,7 @@ struct kboScoreTests {
         let bootstrap = try decoder.decode(KBOBootstrapDTO.self, from: data)
         let mapped = KBODataMapper.mapBootstrap(bootstrap)
         let calendar = Calendar(identifier: .gregorian)
-        let sampleDay = ISO8601DateFormatter().date(from: "2026-03-23T13:00:00+09:00")!
+        let sampleDay = isoDate("2026-03-23T13:00:00+09:00")
 
         #expect(mapped.games.count == 7)
         #expect(mapped.games.filter { calendar.isDate($0.scheduledStart, inSameDayAs: sampleDay) }.count == 4)
@@ -7791,7 +7791,7 @@ struct kboScoreTests {
         let repository = LiveKBORepository(
             baseURL: URL(string: "https://example.com/api/")!,
             session: session,
-            nowProvider: { ISO8601DateFormatter().date(from: "2026-03-27T12:00:00+09:00")! }
+            nowProvider: { isoDate("2026-03-27T12:00:00+09:00") }
         )
         URLProtocolStub.testResponses = [
             "https://example.com/api/v1/bootstrap": StubResponse(
@@ -7846,7 +7846,7 @@ struct kboScoreTests {
     // liveRepositoryUsesVerifiedOfficialKBORequestShapeForLiveGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryUsesVerifiedOfficialKBORequestShapeForLiveGames() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
-        let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
+        let fixedDate = isoDate("2026-03-23T10:00:00+09:00")
         let session = makeStubSession()
         let repository = LiveKBORepository(
             baseURL: URL(string: "https://www.koreabaseball.com/")!,
@@ -9928,7 +9928,7 @@ struct kboScoreTests {
     // liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveRepositoryBuildsBootstrapFromOfficialLiveGamesPayload() async throws {
         let officialGameList = try fixtureData(named: "2026-kbo-official-game-list-20260323")
-        let fixedDate = ISO8601DateFormatter().date(from: "2026-03-23T10:00:00+09:00")!
+        let fixedDate = isoDate("2026-03-23T10:00:00+09:00")
         let session = makeStubSession()
         let repository = LiveKBORepository(
             baseURL: URL(string: "https://www.koreabaseball.com/")!,
@@ -13237,7 +13237,7 @@ struct kboScoreTests {
 
     // myTeamCalendarDerivesMonthGridFromExistingGames 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func myTeamCalendarDerivesMonthGridFromExistingGames() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-23T12:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-23T12:00:00+09:00")
         let model = AppModel(
             bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
             usePersistedSettings: false
@@ -13254,7 +13254,7 @@ struct kboScoreTests {
 
     // myTeamCalendarUsesLoadedOfficialMonthSchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func myTeamCalendarUsesLoadedOfficialMonthSchedule() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let schedule = try KBODataMapper.mapGames(
             KBOExternalResponseAdapter.normalize(data: fixtureData(named: "2026-kbo-official-schedule-list-202603")).games,
             teams: KBODataMapper.mapBootstrap(MockKBOData.makeBootstrapDTO()).teams
@@ -13543,7 +13543,7 @@ struct kboScoreTests {
     // scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection() async throws {
         let counter = FetchCounter()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let schedule = try KBODataMapper.mapGames(
             KBOExternalResponseAdapter.normalize(data: fixtureData(named: "2026-kbo-official-schedule-list-202603")).games,
             teams: KBODataMapper.mapBootstrap(MockKBOData.makeBootstrapDTO()).teams
@@ -13565,7 +13565,7 @@ struct kboScoreTests {
     // scheduleInitialMonthLoadShowsLoadingBeforeEmptyState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadShowsLoadingBeforeEmptyState() async throws {
         let gate = ScheduleFetchGate()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let repository = StubRepository(fetchMonthlySchedule: { _ in
             await gate.wait()
             return []
@@ -13595,7 +13595,7 @@ struct kboScoreTests {
 
     // scheduleInitialMonthLoadWithGamesShowsLoadedState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadWithGamesShowsLoadedState() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13630,7 +13630,7 @@ struct kboScoreTests {
     // scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState() async throws {
         let gate = ScheduleFetchGate()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13676,7 +13676,7 @@ struct kboScoreTests {
     // failedScheduleInitialLoadDoesNotStayLoading 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func failedScheduleInitialLoadDoesNotStayLoading() async throws {
         let gate = ScheduleFetchGate()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let repository = StubRepository(fetchMonthlySchedule: { _ in
             await gate.wait()
             throw URLError(.timedOut)
@@ -13705,7 +13705,7 @@ struct kboScoreTests {
     // scheduleDayLoadUsesLocalCacheForPastCompletedDate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDayLoadUsesLocalCacheForPastCompletedDate() async throws {
         let dayFetchCounter = FetchCounter()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13733,7 +13733,7 @@ struct kboScoreTests {
             bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
             usePersistedSettings: false,
             currentDateProvider: {
-                ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+                isoDate("2026-03-13T09:00:00+09:00")
             }
         )
 
@@ -13746,7 +13746,7 @@ struct kboScoreTests {
     // scheduleDayLoadFetchesTodayOnly 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDayLoadFetchesTodayOnly() async throws {
         let dayFetchCounter = FetchCounter()
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13901,8 +13901,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshPreflightFreshDataSkipsBackendReconciliation 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightFreshDataSkipsBackendReconciliation() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13959,9 +13959,9 @@ struct kboScoreTests {
 
     // schedulePullToRefreshCallsBackendOnlyForDatesStillStaleAfterPreflight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshCallsBackendOnlyForDatesStillStaleAfterPreflight() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
-        let resolvedDate = ISO8601DateFormatter().date(from: "2026-03-11T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let staleDate = isoDate("2026-03-12T18:30:00+09:00")
+        let resolvedDate = isoDate("2026-03-11T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -13999,8 +13999,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshPreflightOverlayPreservesFullMonthGameCount 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightOverlayPreservesFullMonthGameCount() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-05-22T09:00:00+09:00")!
-        let staleDate = ISO8601DateFormatter().date(from: "2026-05-21T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-05-22T09:00:00+09:00")
+        let staleDate = isoDate("2026-05-21T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14019,7 +14019,7 @@ struct kboScoreTests {
         let unrelatedGames = (0..<267).map { index in
             makeGameDetail(
                 id: UUID(),
-                scheduledStart: ISO8601DateFormatter().date(from: "2026-05-01T12:00:00+09:00")!.addingTimeInterval(TimeInterval(index * 60)),
+                scheduledStart: isoDate("2026-05-01T12:00:00+09:00").addingTimeInterval(TimeInterval(index * 60)),
                 venue: "고척",
                 awayTeam: awayTeam,
                 homeTeam: homeTeam,
@@ -14072,13 +14072,13 @@ struct kboScoreTests {
 
     // schedulePullToRefreshPreflightOverlayUpdatesMatchesAndInsertsMissingGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightOverlayUpdatesMatchesAndInsertsMissingGames() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
         let staleGame = makeGameDetail(id: UUID(), scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: nil, homeScore: nil, status: .upcoming)
-        let unrelatedGame = makeGameDetail(id: UUID(), scheduledStart: ISO8601DateFormatter().date(from: "2026-03-10T18:30:00+09:00")!, venue: "고척", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 1, homeScore: 0, status: .final)
+        let unrelatedGame = makeGameDetail(id: UUID(), scheduledStart: isoDate("2026-03-10T18:30:00+09:00"), venue: "고척", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 1, homeScore: 0, status: .final)
         let refreshedExisting = makeGameDetail(id: staleGame.id, scheduledStart: pastDate, venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 4, homeScore: 2, status: .final)
         let insertedGame = makeGameDetail(id: UUID(), scheduledStart: pastDate.addingTimeInterval(3600), venue: "잠실", awayTeam: awayTeam, homeTeam: homeTeam, awayScore: 5, homeScore: 3, status: .final)
         let dateFetchRecorder = ScheduleDateFetchRecorder(responses: ["2026-03-12": [refreshedExisting, insertedGame]])
@@ -14111,8 +14111,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshPreflightRecomputesStaleFromOverlaidDateGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreflightRecomputesStaleFromOverlaidDateGames() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14146,7 +14146,7 @@ struct kboScoreTests {
 
     // schedulePullToRefreshSendsOnlyNewestThreeStaleDates 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshSendsOnlyNewestThreeStaleDates() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14193,9 +14193,9 @@ struct kboScoreTests {
 
     // schedulePullToRefreshPreservesUnrelatedDatesAfterPostReconciliationRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshPreservesUnrelatedDatesAfterPostReconciliationRefresh() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let staleDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
-        let unrelatedDate = ISO8601DateFormatter().date(from: "2026-03-11T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let staleDate = isoDate("2026-03-12T18:30:00+09:00")
+        let unrelatedDate = isoDate("2026-03-11T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14232,8 +14232,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshDoesNotCallReconciliationWhenNoStalePastGamesExist 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshDoesNotCallReconciliationWhenNoStalePastGamesExist() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14271,8 +14271,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshKeepsExistingDataWhenReconciliationFailsAfterPreflight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshKeepsExistingDataWhenReconciliationFailsAfterPreflight() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14300,8 +14300,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshKeepsExistingDataWhenPostReconciliationDateFetchFails() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14328,8 +14328,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshSkipsRecentlyReconciledDatesWhileForceRefreshIsRunning 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshSkipsRecentlyReconciledDatesWhileForceRefreshIsRunning() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14359,8 +14359,8 @@ struct kboScoreTests {
 
     // schedulePullToRefreshDoesNotStartDuplicateReconciliationWhileInFlight 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func schedulePullToRefreshDoesNotStartDuplicateReconciliationWhileInFlight() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!
-        let pastDate = ISO8601DateFormatter().date(from: "2026-03-12T18:30:00+09:00")!
+        let referenceDate = isoDate("2026-03-13T09:00:00+09:00")
+        let pastDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
         let homeTeam = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -14610,7 +14610,7 @@ struct kboScoreTests {
 
     // scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleStatusMessageExplicitlyShowsMissingLiveConfiguration() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let runtimeState = RepositoryRuntimeState(activeSource: .mock, baseURL: nil, deliverySource: .mock)
         let repository = RuntimeStateReportingRepository(
             base: StubRepository(fetchMonthlySchedule: { _ in
@@ -14638,7 +14638,7 @@ struct kboScoreTests {
 
     // scheduleDebugSummaryReflectsLiveMonthlyScheduleSource 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleDebugSummaryReflectsLiveMonthlyScheduleSource() async throws {
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-12T09:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-12T09:00:00+09:00")
         let runtimeState = RepositoryRuntimeState(
             activeSource: .live,
             baseURL: "https://www.koreabaseball.com/",
@@ -14692,7 +14692,7 @@ struct kboScoreTests {
         #expect(requestedURL == "https://example.com/api/v1/schedule/month?year=2026&month=3")
         #expect(schedule.count == 15)
 
-        let referenceDate = ISO8601DateFormatter().date(from: "2026-03-01T00:00:00+09:00")!
+        let referenceDate = isoDate("2026-03-01T00:00:00+09:00")
         let model = AppModel(repository: repository, bootstrap: MockKBOData.makeBootstrap(now: referenceDate), usePersistedSettings: false)
         await model.loadScheduleIfNeeded(for: referenceDate)
         let calendarDays = model.scheduleCalendarDays(for: referenceDate, filter: .all)
@@ -18166,7 +18166,7 @@ private func makeStaleScheduleFixture(
     )
     return (
         game: game,
-        today: ISO8601DateFormatter().date(from: "2026-03-13T09:00:00+09:00")!,
+        today: isoDate("2026-03-13T09:00:00+09:00"),
         calendar: calendar
     )
 }
