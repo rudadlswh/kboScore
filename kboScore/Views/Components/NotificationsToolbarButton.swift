@@ -28,25 +28,17 @@ struct NotificationsToolbarButton: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(appModel.currentTheme.accent)
 
-                if appModel.unreadNotificationsCount > 0 {
-                    Text(badgeText)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.red, in: Capsule())
-                        .offset(x: 10, y: -8)
-                }
+                notificationBadge(
+                    count: appModel.unreadNotificationsCount,
+                    background: .red,
+                    xOffset: 10,
+                    yOffset: -8
+                )
             }
             .frame(width: 28, height: 28)
         }
         .accessibilityLabel("알림")
-        .accessibilityValue(appModel.unreadNotificationsCount > 0 ? "읽지 않은 알림 \(appModel.unreadNotificationsCount)개" : "새 알림 없음")
-    }
-
-    private var badgeText: String {
-        let count = appModel.unreadNotificationsCount
-        return count > 99 ? "99+" : "\(count)"
+        .accessibilityValue(notificationAccessibilityValue(unreadCount: appModel.unreadNotificationsCount))
     }
 }
 
@@ -88,28 +80,41 @@ struct StadiumNotificationChromeButton: View {
                     .foregroundStyle(palette.textPrimary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if appModel.unreadNotificationsCount > 0 {
-                    Text(badgeText)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(palette.primary, in: Capsule())
-                        .offset(x: 7, y: -6)
-                }
+                notificationBadge(
+                    count: appModel.unreadNotificationsCount,
+                    background: palette.primary,
+                    xOffset: 7,
+                    yOffset: -6
+                )
             }
             .frame(width: 44, height: 44)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("알림")
-        .accessibilityValue(appModel.unreadNotificationsCount > 0 ? "읽지 않은 알림 \(appModel.unreadNotificationsCount)개" : "새 알림 없음")
+        .accessibilityValue(notificationAccessibilityValue(unreadCount: appModel.unreadNotificationsCount))
     }
+}
 
-    private var badgeText: String {
-        let count = appModel.unreadNotificationsCount
-        return count > 99 ? "99+" : "\(count)"
+@ViewBuilder
+private func notificationBadge(count: Int, background: Color, xOffset: CGFloat, yOffset: CGFloat) -> some View {
+    if count > 0 {
+        Text(notificationBadgeText(for: count))
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(background, in: Capsule())
+            .offset(x: xOffset, y: yOffset)
     }
+}
+
+private func notificationBadgeText(for count: Int) -> String {
+    count > 99 ? "99+" : "\(count)"
+}
+
+private func notificationAccessibilityValue(unreadCount: Int) -> String {
+    unreadCount > 0 ? "읽지 않은 알림 \(unreadCount)개" : "새 알림 없음"
 }
 
 extension View {
