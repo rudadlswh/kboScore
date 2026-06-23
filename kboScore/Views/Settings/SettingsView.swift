@@ -11,6 +11,18 @@ import SafariServices
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
 
+    private static let notificationPreferenceRows: [(title: String, keyPath: WritableKeyPath<NotificationPreferences, Bool>)] = [
+        ("경기 시작 알림", \.gameStartEnabled),
+        ("점수 변경 알림", \.scoreChangeEnabled),
+        ("리드 변경 알림", \.leadChangeEnabled),
+        ("경기 종료 알림", \.gameEndEnabled),
+        ("출루 알림", \.onBaseEnabled),
+        ("이닝 교체 알림", \.inningChangeEnabled),
+        ("상대팀 알림 끄기", \.favoriteTeamOnlyEnabled),
+        ("지고 있을 때 알림 끄기", \.muteWhenLosingEnabled),
+        ("우천/취소", \.rainDelay)
+    ]
+
     var body: some View {
         @Bindable var bindableAppModel = appModel
 
@@ -56,15 +68,7 @@ struct SettingsView: View {
         }
 
         Section("알림 설정") {
-            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
-            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
-            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
-            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
-            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
-            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
-            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
-            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
-            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
+            notificationPreferenceToggles(appModel: appModel)
 
             LabeledContent("권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
 //            LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
@@ -111,24 +115,7 @@ struct SettingsView: View {
         }
 
         Section {
-            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
-                .settingsRowStyle(palette)
+            notificationPreferenceToggles(appModel: appModel, palette: palette)
 
             InfoRow(title: "권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
                 .settingsRowStyle(palette)
@@ -211,6 +198,19 @@ struct SettingsView: View {
         components.query = nil
         components.fragment = nil
         return components.url
+    }
+
+    @ViewBuilder
+    private func notificationPreferenceToggles(appModel: AppModel, palette: StadiumPalette? = nil) -> some View {
+        ForEach(Self.notificationPreferenceRows.indices, id: \.self) { index in
+            let row = Self.notificationPreferenceRows[index]
+            if let palette {
+                Toggle(row.title, isOn: notificationPreferenceBinding(row.keyPath, appModel: appModel))
+                    .settingsRowStyle(palette)
+            } else {
+                Toggle(row.title, isOn: notificationPreferenceBinding(row.keyPath, appModel: appModel))
+            }
+        }
     }
 
     private func currentFavoriteTeamDisplayName(appModel: AppModel) -> String {
