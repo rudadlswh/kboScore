@@ -305,11 +305,12 @@
 				};
 			};
 			buildConfigurationList = 9ACDD1A82F7418770049BF00 /* Build configuration list for PBXProject "kboScore" */;
-			developmentRegion = en;
+			developmentRegion = ko;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
+				ko,
 			);
 			mainGroup = 9ACDD1A42F7418770049BF00;
 			minimizedProjectReferenceProxies = 1;
