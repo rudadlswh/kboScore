@@ -364,6 +364,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
         let contentState = snapshot.contentState()
         let contentStateKey = snapshot.contentStateKey
         let dedupeDecision = updateDeduper.decision(gameID: snapshot.gameID, contentStateKey: contentStateKey)
+        AppLog.info(.liveActivity, "[LiveActivity] startOrUpdate received gameID=\(snapshot.gameID.uuidString) publicGameID=\(snapshot.publicGameID ?? "<nil>") providerGameID=\(snapshot.providerGameID ?? "<nil>") phase=\(snapshot.isPreGame ? "preGame" : "active")")
         #if DEBUG
         print("[LiveActivityPayload] gameID=\(snapshot.gameID.uuidString) score=\(snapshot.favoriteScoreText):\(snapshot.opponentScoreText) inning=\(snapshot.inningText) balls=\(snapshot.balls.map(String.init) ?? "-") strikes=\(snapshot.strikes.map(String.init) ?? "-") outs=\(snapshot.outs.map(String.init) ?? "-") bases=\((snapshot.runnerOnFirst ?? false) ? "1" : "-")\((snapshot.runnerOnSecond ?? false) ? "2" : "-")\((snapshot.runnerOnThird ?? false) ? "3" : "-") batter=\(snapshot.currentBatterName ?? "<nil>") pitcher=\(snapshot.currentPitcherName ?? "<nil>")")
         print("[LiveActivityPayload] dedupe previousContentStateKey=\(dedupeDecision.previousContentStateKey?.description ?? "<nil>") newContentStateKey=\(dedupeDecision.newContentStateKey.description)")
@@ -372,11 +373,13 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
             #if DEBUG
             print("[LiveActivityPayload] skip reason=contentStateUnchanged gameID=\(snapshot.gameID.uuidString) previousContentStateKey=\(dedupeDecision.previousContentStateKey?.description ?? "<nil>") newContentStateKey=\(dedupeDecision.newContentStateKey.description)")
             #endif
+            AppLog.info(.liveActivity, "[LiveActivity] update skipped reason=contentStateUnchanged gameID=\(snapshot.gameID.uuidString)")
             return
         }
         #if DEBUG
         print("[LiveActivityPayload] update reason=contentStateChanged gameID=\(snapshot.gameID.uuidString) changedFields=\(dedupeDecision.changedFields)")
         #endif
+        AppLog.info(.liveActivity, "[LiveActivity] update requested reason=contentStateChanged gameID=\(snapshot.gameID.uuidString) changedFields=\(dedupeDecision.changedFields)")
         let content = ActivityContent(
             state: contentState,
             staleDate: Date().addingTimeInterval(120)
@@ -397,8 +400,10 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
 
         if let activity, activeGameID == snapshot.gameID {
             await activity.update(content)
+            AppLog.info(.liveActivity, "[LiveActivity] update completed activityID=\(activity.id) gameID=\(snapshot.gameID.uuidString) phase=\(snapshot.isPreGame ? "preGame" : "active")")
         } else {
             if let activity {
+                AppLog.info(.liveActivity, "[LiveActivity] end requested reason=replaceExisting activityID=\(activity.id) gameID=\(snapshot.gameID.uuidString)")
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
             activity = try Activity.request(attributes: attributes, content: content, pushType: .token)
@@ -406,6 +411,7 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                 #if DEBUG
                 print("[LiveActivity] activity started activityID=\(activity.id) gameID=\(snapshot.gameID.uuidString) pushType=token publicGameID=\(snapshot.publicGameID ?? "<nil>") providerGameID=\(snapshot.providerGameID ?? "<nil>") databaseID=\(snapshot.databaseID) stableDetailIdentity=\(snapshot.stableDetailIdentity)")
                 #endif
+                AppLog.info(.liveActivity, "[LiveActivity] start completed activityID=\(activity.id) gameID=\(snapshot.gameID.uuidString) pushType=token publicGameID=\(snapshot.publicGameID ?? "<nil>") providerGameID=\(snapshot.providerGameID ?? "<nil>")")
                 observePushTokens(for: activity, snapshot: snapshot)
             }
         }
@@ -417,12 +423,14 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
     // endCurrent 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func endCurrent() async {
         guard let activity else { return }
+        AppLog.info(.liveActivity, "[LiveActivity] end requested activityID=\(activity.id)")
         await activity.end(nil, dismissalPolicy: .immediate)
         self.activity = nil
         activeGameID = nil
         updateDeduper.reset()
         pushTokenObservationTask?.cancel()
         pushTokenObservationTask = nil
+        AppLog.info(.liveActivity, "[LiveActivity] end completed")
     }
 
     // observePushTokens 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -441,32 +449,36 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                     stableDetailIdentity: snapshot.stableDetailIdentity
                 )
                 #if DEBUG
-                print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+                print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
                 #else
                 print("[LiveActivity] push token received reason=tokenUpdate environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
                 #endif
+                AppLog.info(.liveActivity, "[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
                 let key = LiveActivityTokenRegistrationKey(payload: payload, endpointDescription: tokenRegistrationClient.debugEndpointDescription)
                 await MainActor.run {
                     guard self.registeredTokenKeys.insert(key).inserted else {
                         #if DEBUG
                         print("[LiveActivity] token registration skipped duplicate \(key)")
                         #endif
+                        AppLog.info(.liveActivity, "[LiveActivity] token registration skipped duplicate activityID=\(activity.id) tokenPrefix=\(token.prefix(8))")
                         return
                     }
                 }
                 do {
                     _ = try await tokenRegistrationClient.register(payload)
                     #if DEBUG
-                    print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
+                    print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
                     #else
                     print("[LiveActivity] token registration success reason=activityTokenRegistration environment=\(payload.environment)")
                     #endif
+                    AppLog.info(.liveActivity, "[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>")")
                 } catch {
                     #if DEBUG
-                    print("[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+                    print("[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
                     #else
                     print("[LiveActivity] token registration failure reason=activityTokenRegistration environment=\(payload.environment)")
                     #endif
+                    AppLog.error(.liveActivity, "[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
                 }
             }
         }

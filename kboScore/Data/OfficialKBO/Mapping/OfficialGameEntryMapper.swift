@@ -24,7 +24,7 @@ extension OfficialGameEntry {
             if cancelName?.contains("취소") == true {
                 return GameStatus.cancelled
             }
-            if cancelName?.contains("우천") == true || cancelName?.contains("중단") == true {
+            if cancelName?.contains("우천") == true || cancelName?.contains("중단") == true || cancelName?.contains("지연") == true {
                 return GameStatus.rainDelay
             }
             return GameStatus.upcoming

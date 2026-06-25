@@ -28,10 +28,11 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         #if DEBUG
-        print("[NotificationPipeline] APNs token received tokenPrefix=\(token.prefix(12)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        print("[NotificationPipeline] APNs token received tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         #else
         print("[NotificationPipeline] APNs token received reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] APNs token received tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         onDeviceToken?(token)
     }
 
@@ -39,6 +40,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         #if DEBUG
         print("APNs registration failed:", error.localizedDescription)
         #endif
+        AppLog.error(.notification, "[NotificationPipeline] APNs registration failed error=\(error.localizedDescription)")
     }
 
     func userNotificationCenter(
@@ -49,6 +51,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         let content = notification.request.content
         print("[NotificationPipeline] willPresent notification id=\(notification.request.identifier) title=\(content.title) body=\(content.body)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] willPresent notification id=\(notification.request.identifier)")
         return [.banner, .sound, .list]
     }
 
@@ -59,6 +62,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         #if DEBUG
         print("[NotificationPipeline] didReceive notification response id=\(response.notification.request.identifier) action=\(response.actionIdentifier)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] didReceive notification response id=\(response.notification.request.identifier) action=\(response.actionIdentifier)")
         handleNotificationUserInfo(response.notification.request.content.userInfo)
     }
 
@@ -70,6 +74,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         #if DEBUG
         print("[NotificationPipeline] didReceiveRemoteNotification keys=\(debugSortedKeys(userInfo))")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] didReceiveRemoteNotification keys=\(debugSortedKeys(userInfo))")
         handleNotificationUserInfo(userInfo)
         completionHandler(.noData)
     }

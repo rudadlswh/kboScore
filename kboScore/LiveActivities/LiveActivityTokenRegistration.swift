@@ -146,7 +146,7 @@ nonisolated struct LiveActivityPushToStartTokenRegistrationKey: Hashable, Sendab
     let endpointDescription: String?
 
     nonisolated init(payload: LiveActivityPushToStartTokenRegistrationPayload, endpointDescription: String?) {
-        self.tokenPrefix = String(payload.pushToStartToken.prefix(16))
+        self.tokenPrefix = String(payload.pushToStartToken.prefix(8))
         self.environment = payload.environment
         self.installationId = payload.installationId
         self.favoriteTeamID = payload.favoriteTeamID
@@ -162,7 +162,6 @@ nonisolated struct LiveActivityPushToStartTokenRegistrationKey: Hashable, Sendab
         [
             "tokenPrefix=\(tokenPrefix)",
             "environment=\(environment)",
-            "installationId=\(installationId)",
             "favoriteTeamID=\(favoriteTeamID ?? "none")",
             "notificationsAuthorized=\(notificationsAuthorized)",
             "liveActivitiesEnabled=\(liveActivitiesEnabled)",
@@ -188,7 +187,7 @@ nonisolated struct LiveActivityTokenRegistrationKey: Hashable, Sendable, CustomS
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(payload: LiveActivityTokenRegistrationPayload, endpointDescription: String?) {
         self.activityId = payload.activityId
-        self.tokenPrefix = String(payload.activityToken.prefix(16))
+        self.tokenPrefix = String(payload.activityToken.prefix(8))
         self.environment = payload.environment
         self.publicGameID = payload.publicGameID
         self.providerGameID = payload.providerGameID

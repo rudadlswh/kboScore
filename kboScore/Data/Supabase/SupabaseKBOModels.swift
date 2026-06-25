@@ -173,6 +173,8 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     let thirdBaseRunnerName: String?
     let currentPitcherName: String?
     let currentBatterName: String?
+    let fetchedAt: Date?
+    let createdAt: Date?
 #if DEBUG
     let debugAvailableFieldNames: Set<String>
 #endif
@@ -208,6 +210,8 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
             in: container,
             keys: ["current_batter_name", "batter_name", "current_hitter_name", "hitter_name", "batter", "hitter", "currentBatterName", "batterName"]
         )
+        fetchedAt = Self.firstDate(in: container, keys: ["fetched_at", "fetchedAt"])
+        createdAt = Self.firstDate(in: container, keys: ["created_at", "createdAt"])
 #if DEBUG
         debugAvailableFieldNames = Set(container.allKeys.map(\.stringValue))
 #endif
@@ -223,6 +227,24 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if let value, value.isEmpty == false {
                 return value
+            }
+        }
+        return nil
+    }
+
+    // firstDate 메서드는 snake_case/camelCase timestamp 필드 중 처음 디코딩 가능한 값을 반환합니다.
+    private static func firstDate(
+        in container: KeyedDecodingContainer<DynamicCodingKey>,
+        keys: [String]
+    ) -> Date? {
+        for key in keys {
+            let codingKey = DynamicCodingKey(key)
+            if let date = try? container.decodeIfPresent(Date.self, forKey: codingKey) {
+                return date
+            }
+            if let string = try? container.decodeIfPresent(String.self, forKey: codingKey),
+               let date = SupabaseDateParser.parseTimestamp(string) {
+                return date
             }
         }
         return nil
@@ -625,8 +647,8 @@ nonisolated enum SupabaseKBOMapper {
         let awayTeam = teamsByUUID[row.awayTeamID] ?? makeUnknownTeam(id: row.awayTeamID)
         let homeTeam = teamsByUUID[row.homeTeamID] ?? makeUnknownTeam(id: row.homeTeamID)
 
-        let resolvedStatus = statusText(for: row)
         let scheduledStart = row.scheduledAt ?? SupabaseDateParser.parseGameDate(row.gameDate) ?? .distantPast
+        let resolvedStatus = statusText(for: row, scheduledStart: scheduledStart, snapshot: snapshot)
         let venue = row.stadium?.nilIfBlank ?? "장소 미정"
         let inningText = snapshot?.inningLabel?.nilIfBlank ?? row.inningState?.nilIfBlank
         let bases = snapshot.map {
@@ -746,11 +768,238 @@ nonisolated enum SupabaseKBOMapper {
     }
 
     // statusText 메서드는 이 타입의 주요 동작을 수행합니다.
-    nonisolated private static func statusText(for row: SupabaseGameRow) -> String? {
+    nonisolated private static func statusText(
+        for row: SupabaseGameRow,
+        scheduledStart: Date,
+        snapshot: SupabaseLatestGameSnapshotRow? = nil
+    ) -> String? {
         if row.isCancelled == true || row.isPostponed == true {
+            logStatusMapping(
+                row: row,
+                rawStatus: row.status?.nilIfBlank,
+                mappedStatus: .cancelled,
+                resolvedStatusText: "cancelled",
+                scheduledStart: scheduledStart,
+                snapshot: snapshot,
+                reason: row.isPostponed == true ? "postponedFlag" : "cancelledFlag",
+                liveCorrection: "none"
+            )
             return "cancelled"
         }
-        return row.status?.nilIfBlank ?? row.inningState?.nilIfBlank
+        let rowStatus = row.status?.nilIfBlank
+        let mappedStatus = KBODataMapper.mapGameStatus(code: rowStatus, text: row.inningState?.nilIfBlank)
+        if mappedStatus == .live, !hasReliableLiveEvidence(row: row, snapshot: snapshot, scheduledStart: scheduledStart) {
+            logStatusMapping(
+                row: row,
+                rawStatus: rowStatus,
+                mappedStatus: .upcoming,
+                resolvedStatusText: "scheduled",
+                scheduledStart: scheduledStart,
+                snapshot: snapshot,
+                reason: liveRejectionReason(row: row, snapshot: snapshot, scheduledStart: scheduledStart),
+                liveCorrection: "rejected"
+            )
+            return "scheduled"
+        }
+        if mappedStatus == .upcoming, snapshotHasFreshLiveProgress(snapshot, scheduledStart: scheduledStart) {
+            logStatusMapping(
+                row: row,
+                rawStatus: rowStatus,
+                mappedStatus: .live,
+                resolvedStatusText: "live",
+                scheduledStart: scheduledStart,
+                snapshot: snapshot,
+                reason: "freshSnapshotProgress",
+                liveCorrection: "applied"
+            )
+            return "live"
+        }
+        let resolvedStatusText = rowStatus ?? row.inningState?.nilIfBlank
+        logStatusMapping(
+            row: row,
+            rawStatus: rowStatus,
+            mappedStatus: mappedStatus,
+            resolvedStatusText: resolvedStatusText,
+            scheduledStart: scheduledStart,
+            snapshot: snapshot,
+            reason: statusMappingReason(mappedStatus: mappedStatus, snapshot: snapshot, scheduledStart: scheduledStart),
+            liveCorrection: "none"
+        )
+        return resolvedStatusText
+    }
+
+    // logStatusMapping 메서드는 Supabase 상태값이 앱 상태로 해석된 이유를 운영 로그에 남깁니다.
+    nonisolated private static func logStatusMapping(
+        row: SupabaseGameRow,
+        rawStatus: String?,
+        mappedStatus: GameStatus,
+        resolvedStatusText: String?,
+        scheduledStart: Date,
+        snapshot: SupabaseLatestGameSnapshotRow?,
+        reason: String,
+        liveCorrection: String
+    ) {
+        let message = "[StatusMapping] game=\(logGameID(for: row)) raw=\(rawStatus ?? "<nil>") mapped=\(mappedStatus.rawValue) statusText=\(resolvedStatusText ?? "<nil>") reason=\(reason) scheduledAt=\(logTimeText(scheduledStart)) snapshotAt=\(logTimeText(snapshotObservedDate(snapshot))) stale=\(snapshotStaleText(snapshot, scheduledStart: scheduledStart)) liveCorrection=\(liveCorrection)"
+        if liveCorrection == "rejected" || mappedStatus == .rainDelay || mappedStatus == .cancelled {
+            AppLog.info(.statusMapping, message)
+        } else {
+            AppLog.debug(.statusMapping, message)
+        }
+    }
+
+    // logGameID 메서드는 로그에서 추적 가능한 비민감 경기 식별자를 선택합니다.
+    nonisolated private static func logGameID(for row: SupabaseGameRow) -> String {
+        row.publicGameID?.nilIfBlank ??
+            row.providerGameID?.nilIfBlank ??
+            row.officialProviderGameID?.nilIfBlank ??
+            row.id.uuidString
+    }
+
+    // statusMappingReason 메서드는 정상 매핑 경로의 대표 이유를 반환합니다.
+    nonisolated private static func statusMappingReason(
+        mappedStatus: GameStatus,
+        snapshot: SupabaseLatestGameSnapshotRow?,
+        scheduledStart: Date
+    ) -> String {
+        switch mappedStatus {
+        case .rainDelay:
+            "rainDelayOrSuspended"
+        case .cancelled:
+            "cancelledStatus"
+        case .live:
+            "officialLive"
+        case .final:
+            "officialFinal"
+        case .upcoming:
+            snapshot == nil ? "noSnapshot" : liveRejectionReason(row: nil, snapshot: snapshot, scheduledStart: scheduledStart)
+        }
+    }
+
+    // liveRejectionReason 메서드는 live 승격을 거절한 구체적 이유를 반환합니다.
+    nonisolated private static func liveRejectionReason(
+        row: SupabaseGameRow?,
+        snapshot: SupabaseLatestGameSnapshotRow?,
+        scheduledStart: Date
+    ) -> String {
+        if let scheduledAt = row?.scheduledAt, Date() < scheduledAt {
+            return "beforeScheduledAt"
+        }
+        guard let snapshot else {
+            return "missingSnapshot"
+        }
+        guard let observedAt = snapshotObservedDate(snapshot) else {
+            return "missingSnapshotTime"
+        }
+        if scheduledStart != .distantPast, observedAt < scheduledStart {
+            return "staleSnapshot"
+        }
+        if snapshotHasLiveProgress(snapshot) == false {
+            return "placeholderSnapshot"
+        }
+        return "noReliableLiveEvidence"
+    }
+
+    // snapshotObservedDate 메서드는 snapshot 관측 시각을 반환합니다.
+    nonisolated private static func snapshotObservedDate(_ snapshot: SupabaseLatestGameSnapshotRow?) -> Date? {
+        snapshot?.fetchedAt ?? snapshot?.createdAt
+    }
+
+    // snapshotStaleText 메서드는 scheduledStart 기준 snapshot stale 여부를 로그용 문자열로 반환합니다.
+    nonisolated private static func snapshotStaleText(
+        _ snapshot: SupabaseLatestGameSnapshotRow?,
+        scheduledStart: Date
+    ) -> String {
+        guard scheduledStart != .distantPast, let observedAt = snapshotObservedDate(snapshot) else {
+            return "unknown"
+        }
+        return observedAt < scheduledStart ? "true" : "false"
+    }
+
+    // logTimeText 메서드는 로그에 남길 시간을 KST HH:mm 형태로 축약합니다.
+    nonisolated private static func logTimeText(_ date: Date?) -> String {
+        guard let date, date != .distantPast else { return "<nil>" }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Seoul")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
+    }
+
+    // hasReliableLiveEvidence 메서드는 stale placeholder가 LIVE로 보이는 것을 막습니다.
+    nonisolated private static func hasReliableLiveEvidence(
+        row: SupabaseGameRow,
+        snapshot: SupabaseLatestGameSnapshotRow?,
+        scheduledStart: Date
+    ) -> Bool {
+        if let scheduledAt = row.scheduledAt, Date() < scheduledAt {
+            return false
+        }
+        if hasExplicitLiveStatusReason(row.statusReason) {
+            return true
+        }
+        if (row.awayScore ?? 0) > 0 || (row.homeScore ?? 0) > 0 {
+            return true
+        }
+        return snapshotHasFreshLiveProgress(snapshot, scheduledStart: scheduledStart)
+    }
+
+    // hasExplicitLiveStatusReason 메서드는 공식 응답이 명시적으로 live임을 말하는 텍스트만 허용합니다.
+    nonisolated private static func hasExplicitLiveStatusReason(_ value: String?) -> Bool {
+        guard let value = value?.nilIfBlank else { return false }
+        let lower = value.lowercased()
+        let collapsed = value.replacingOccurrences(of: " ", with: "")
+        return collapsed.contains("경기중") ||
+            lower.contains("live") ||
+            lower.contains("in_progress") ||
+            lower.contains("in progress") ||
+            lower.contains("running")
+    }
+
+    // snapshotHasFreshLiveProgress 메서드는 scheduledStart 이후 snapshot의 실제 진행 신호만 live 근거로 사용합니다.
+    nonisolated private static func snapshotHasFreshLiveProgress(_ snapshot: SupabaseLatestGameSnapshotRow?, scheduledStart: Date) -> Bool {
+        guard let snapshot, snapshotObservedAt(snapshot, scheduledStart: scheduledStart) else {
+            return false
+        }
+        return snapshotHasLiveProgress(snapshot)
+    }
+
+    // snapshotHasLiveProgress 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
+    nonisolated private static func snapshotHasLiveProgress(_ snapshot: SupabaseLatestGameSnapshotRow?) -> Bool {
+        guard let snapshot else { return false }
+        return inningLabelShowsProgress(snapshot.inningLabel) ||
+            (snapshot.balls ?? 0) > 0 ||
+            (snapshot.strikes ?? 0) > 0 ||
+            (snapshot.outs ?? 0) > 0 ||
+            snapshot.runnerOnFirst == true ||
+            snapshot.runnerOnSecond == true ||
+            snapshot.runnerOnThird == true
+    }
+
+    // snapshotObservedAt 메서드는 snapshot 자체가 scheduledStart 이후 관측됐는지 확인합니다.
+    nonisolated private static func snapshotObservedAt(_ snapshot: SupabaseLatestGameSnapshotRow, scheduledStart: Date) -> Bool {
+        guard scheduledStart != .distantPast, let observedAt = snapshot.fetchedAt ?? snapshot.createdAt else {
+            return false
+        }
+        return observedAt >= scheduledStart
+    }
+
+    // inningLabelShowsProgress 메서드는 1회 초 0/0/0 placeholder를 live 근거로 쓰지 않습니다.
+    nonisolated private static func inningLabelShowsProgress(_ value: String?) -> Bool {
+        guard let value = value?.nilIfBlank else { return false }
+        let lower = value.lowercased()
+        if lower.contains("bottom") || lower.contains("bot") || value.contains("말") {
+            return true
+        }
+        let numberText = value
+            .map { $0.isNumber ? String($0) : " " }
+            .joined()
+            .split(separator: " ")
+            .first
+        if let numberText, let inning = Int(numberText), inning > 1 {
+            return true
+        }
+        return false
     }
 
     // classifiedRow 메서드는 이 타입의 주요 동작을 수행합니다.

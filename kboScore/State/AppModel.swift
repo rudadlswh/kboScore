@@ -2347,6 +2347,7 @@ final class AppModel {
         gameIdentity: String,
         forceRefresh: Bool
     ) async -> GameDetailRefreshResult? {
+        AppLog.info(.gameDetail, "[GameDetail] refresh start game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity) publicGameID=\(selectedGame.publicGameID ?? "<nil>") providerGameID=\(selectedGame.providerGameID ?? selectedGame.officialProviderGameID ?? "<nil>") status=\(selectedGame.status.rawValue) forceRefresh=\(forceRefresh)")
         if forceRefresh == false, selectedGame.status == .upcoming {
             #if DEBUG
             print("[GameDetailStarterRefresh] start selectedIdentity=\(gameIdentity) publicGameID=\(selectedGame.publicGameID ?? "<nil>") providerGameID=\(selectedGame.providerGameID ?? "<nil>") initialAwayStarter=\(selectedGame.awayStartingPitcherName ?? "<nil>") initialHomeStarter=\(selectedGame.homeStartingPitcherName ?? "<nil>")")
@@ -2360,6 +2361,7 @@ final class AppModel {
                 print("[GameDetailStarterRefresh] skipped reason=unsupportedRepository selectedIdentity=\(gameIdentity)")
             }
             #endif
+            AppLog.warning(.gameDetail, "[GameDetail] refresh skipped game=\(operationalGameIdentifier(for: selectedGame)) reason=unsupportedRepository finalStatus=\(selectedGame.status.rawValue)")
             return GameDetailRefreshResult(
                 game: selectedGame,
                 rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
@@ -2403,6 +2405,7 @@ final class AppModel {
                     print("[GameDetailStarterRefresh] skipped reason=noRows selectedIdentity=\(gameIdentity) initialAwayStarter=\(selectedGame.awayStartingPitcherName ?? "<nil>") initialHomeStarter=\(selectedGame.homeStartingPitcherName ?? "<nil>")")
                 }
                 #endif
+                AppLog.warning(.gameDetail, "[GameDetail] refresh empty game=\(operationalGameIdentifier(for: selectedGame)) reason=noRows finalStatus=\(selectedGame.status.rawValue)")
                 return GameDetailRefreshResult(
                     game: selectedGame,
                     rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
@@ -2411,6 +2414,7 @@ final class AppModel {
                 )
             }
             let incomingGame = snapshotResult.game
+            AppLog.info(.gameDetail, "[GameDetail] snapshot received game=\(operationalGameIdentifier(for: incomingGame)) publicGameID=\(incomingGame.publicGameID ?? "<nil>") providerGameID=\(incomingGame.providerGameID ?? incomingGame.officialProviderGameID ?? "<nil>") inning=\(incomingGame.inningText ?? "<nil>") score=\(scoreDebugText(incomingGame)) count=\(incomingGame.balls.map(String.init) ?? "-")/\(incomingGame.strikes.map(String.init) ?? "-")/\(incomingGame.outs.map(String.init) ?? "-") source=\(snapshotResult.rawSupabaseGameID == nil ? "repository" : "supabase") status=\(incomingGame.status.rawValue)")
             let resolvedIncomingGame = selectedGame.status == .upcoming && forceRefresh == false
                 ? GameMergeResolver.preferredGame(existing: selectedGame, candidate: incomingGame)
                 : incomingGame
@@ -2437,6 +2441,7 @@ final class AppModel {
                 print("[GameDetailStarterRefresh] success selectedIdentity=\(gameIdentity) fetchedAwayStarter=\(incomingGame.awayStartingPitcherName ?? "<nil>") fetchedHomeStarter=\(incomingGame.homeStartingPitcherName ?? "<nil>") appliedStarterUpdate=\(appliedStarterUpdate)")
             }
             #endif
+            AppLog.info(.gameDetail, "[GameDetail] refresh completed game=\(operationalGameIdentifier(for: resolved)) before=\(selectedGame.status.rawValue) incoming=\(incomingGame.status.rawValue) finalStatus=\(resolved.status.rawValue) sharedUpdated=\(sharedUpdated)")
             await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await syncFavoriteTeamLiveActivity()
@@ -2460,6 +2465,7 @@ final class AppModel {
                 print("[GameDetailStarterRefresh] skipped reason=cancelled selectedIdentity=\(gameIdentity)")
             }
             #endif
+            AppLog.warning(.gameDetail, "[GameDetail] refresh cancelled game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity)")
             return GameDetailRefreshResult(
                 game: selectedGame,
                 rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
@@ -2473,6 +2479,7 @@ final class AppModel {
                 print("[GameDetailStarterRefresh] skipped reason=error selectedIdentity=\(gameIdentity)")
             }
             #endif
+            AppLog.error(.gameDetail, "[GameDetail] refresh failed game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity) error=\(error)")
             return GameDetailRefreshResult(
                 game: selectedGame,
                 rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
@@ -2600,6 +2607,7 @@ final class AppModel {
         guard shouldShowLiveActivityAction(for: game) else { return }
 
         if isLiveActivityOn(for: game.id) {
+            AppLog.info(.liveActivity, "[LiveActivity] end requested source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
             await liveActivityController.endCurrent()
             activeLiveActivityGameID = nil
             return
@@ -2607,14 +2615,18 @@ final class AppModel {
 
         guard isLiveActivityActionEnabled(for: game),
               let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: settings.favoriteTeamID) else {
+            AppLog.info(.liveActivity, "[LiveActivity] start rejected source=manual game=\(operationalGameIdentifier(for: game)) reason=actionDisabledOrSnapshotMissing status=\(game.status.rawValue)")
             return
         }
 
         do {
+            AppLog.info(.liveActivity, "[LiveActivity] start requested source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
             try await liveActivityController.startOrUpdate(using: snapshot)
             activeLiveActivityGameID = game.id
+            AppLog.info(.liveActivity, "[LiveActivity] start completed source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
         } catch {
             activeLiveActivityGameID = nil
+            AppLog.error(.liveActivity, "[LiveActivity] start failed source=manual game=\(operationalGameIdentifier(for: game)) error=\(error)")
         }
     }
 
@@ -2626,17 +2638,17 @@ final class AppModel {
             game
 
         guard settings.liveActivitiesEnabled else {
-            #if DEBUG
             logLiveActivityAutoStartSkipped(reason: "disabledInSettings", game: resolvedGame)
-            #endif
             return
         }
 
         guard liveActivitySupported else {
+            logLiveActivityAutoStartSkipped(reason: "unsupported", game: resolvedGame)
             return
         }
 
         guard resolvedGame.involves(teamID: settings.favoriteTeamID) else {
+            logLiveActivityAutoStartSkipped(reason: "noFavoriteTeam", game: resolvedGame)
             return
         }
 
@@ -2645,36 +2657,40 @@ final class AppModel {
             now: currentDateProvider()
         )
         guard eligibilityDecision == .eligible else {
-            #if DEBUG
             logLiveActivityAutoStartSkipped(reason: eligibilityDecision.logReason, game: resolvedGame)
-            #endif
             return
         }
 
         #if DEBUG
         print("[LiveActivityAutoStart] eligible gameID=\(resolvedGame.id.uuidString) status=\(resolvedGame.status.rawValue) scheduledAt=\(resolvedGame.scheduledStart)")
         #endif
+        AppLog.info(.liveActivity, "[LiveActivity] autoStart allowed game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue) scheduledAt=\(resolvedGame.scheduledStart)")
 
         guard let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: resolvedGame, favoriteTeamID: settings.favoriteTeamID) else {
+            logLiveActivityAutoStartSkipped(reason: "snapshotMissing", game: resolvedGame)
             return
         }
 
         do {
+            AppLog.info(.liveActivity, "[LiveActivity] startOrUpdate requested source=auto game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue)")
             try await liveActivityController.startOrUpdate(using: snapshot)
             activeLiveActivityGameID = resolvedGame.id
+            AppLog.info(.liveActivity, "[LiveActivity] startOrUpdate completed source=auto game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue)")
         } catch {
             #if DEBUG
             print("[LiveActivityPayload] auto start/update failed gameID=\(resolvedGame.id.uuidString) error=\(error)")
             #endif
+            AppLog.error(.liveActivity, "[LiveActivity] startOrUpdate failed source=auto game=\(operationalGameIdentifier(for: resolvedGame)) error=\(error)")
         }
     }
 
-    #if DEBUG
     // logLiveActivityAutoStartSkipped 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logLiveActivityAutoStartSkipped(reason: String, game: GameDetail) {
+        AppLog.info(.liveActivity, "[LiveActivity] autoStart rejected game=\(operationalGameIdentifier(for: game)) reason=\(reason) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
+        #if DEBUG
         print("[LiveActivityAutoStart] skipped reason=\(reason) gameID=\(game.id.uuidString) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
+        #endif
     }
-    #endif
 
     // isGameAlertEnabled 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isGameAlertEnabled(for gameID: UUID) -> Bool {
@@ -3954,10 +3970,11 @@ final class AppModel {
     // updateAPNsDeviceToken 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func updateAPNsDeviceToken(_ token: String) {
         #if DEBUG
-        print("[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(12)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        print("[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         #else
         print("[NotificationPipeline] APNs token stored reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         guard apnsDeviceToken != token else {
             scheduleNotificationRegistrationSync(force: false)
             return
@@ -4051,15 +4068,13 @@ final class AppModel {
         #if canImport(ActivityKit)
         guard liveActivityPushToStartTokenObservationTask == nil else { return }
         guard FavoriteTeamLiveActivitySupport.hasWidgetExtension() else {
-            #if DEBUG
             print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
-            #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            #if DEBUG
             print("[LiveActivity] push-to-start observation skipped reason=activities_disabled")
-            #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=activities_disabled")
             return
         }
         liveActivityPushToStartTokenObservationTask = Task { [weak self] in
@@ -4072,12 +4087,14 @@ final class AppModel {
                 #if DEBUG
                 print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
                 #endif
+                AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
             }
         }
         #else
         #if DEBUG
         print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
         #endif
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
         #endif
     }
 
@@ -4102,27 +4119,31 @@ final class AppModel {
             #if DEBUG
             print("[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) \(key)")
             #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing")")
             return
         }
 
         #if DEBUG
-        print("[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
+        print("[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
         #else
         print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment)")
         #endif
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
         do {
             _ = try await liveActivityPushToStartTokenRegistrationClient.register(payload)
             #if DEBUG
-            print("[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(12)) environment=\(payload.environment)")
+            print("[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment)")
             #else
             print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment)")
             #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment)")
         } catch {
             #if DEBUG
-            print("[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(12)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
             #else
             print("[LiveActivity] push-to-start registration failure reason=\(reason)")
             #endif
+            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
         }
     }
 
@@ -4217,10 +4238,11 @@ final class AppModel {
         do {
             try Task.checkCancellation()
             #if DEBUG
-            print("[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
+            print("[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
             #else
             print("[NotificationPipeline] registration sync start reason=deviceRegistration environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
             #endif
+            AppLog.info(.notification, "[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             guard generation == notificationRegistrationSyncGeneration else {
                 notificationRegistrationDeduplicationState.fail(key)
@@ -4618,6 +4640,14 @@ final class AppModel {
     // scoreDebugText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func scoreDebugText(_ game: GameDetail) -> String {
         "\(game.awayScore.map(String.init) ?? "-"):\(game.homeScore.map(String.init) ?? "-")"
+    }
+
+    // operationalGameIdentifier 메서드는 운영 로그용 비민감 경기 식별자를 선택합니다.
+    private func operationalGameIdentifier(for game: GameDetail) -> String {
+        game.publicGameID ??
+            game.providerGameID ??
+            game.officialProviderGameID ??
+            game.id.uuidString
     }
 
     // selectedGameMatch 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.

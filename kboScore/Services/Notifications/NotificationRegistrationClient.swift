@@ -109,8 +109,9 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
 
         #if DEBUG
         print("[NotificationPipeline] registration URL=\(endpointURL.absoluteString)")
-        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(12)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
+        print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
 
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"
@@ -124,16 +125,19 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
                 #if DEBUG
                 print("[NotificationPipeline] registration failure error=non-http response")
                 #endif
+                AppLog.error(.notification, "[NotificationPipeline] registration failure error=non-http response")
                 throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
             }
             #if DEBUG
             print("[NotificationPipeline] registration response status=\(httpResponse.statusCode)")
             #endif
+            AppLog.info(.notification, "[NotificationPipeline] registration response status=\(httpResponse.statusCode)")
             guard (200..<300).contains(httpResponse.statusCode) else {
                 #if DEBUG
                 let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
                 print("[NotificationPipeline] registration failure body=\(body)")
                 #endif
+                AppLog.warning(.notification, "[NotificationPipeline] registration failure status=\(httpResponse.statusCode)")
                 throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
             }
             return .synced
@@ -141,6 +145,7 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
             #if DEBUG
             print("[NotificationPipeline] registration failure error=\(error)")
             #endif
+            AppLog.error(.notification, "[NotificationPipeline] registration failure error=\(error)")
             throw error
         }
     }

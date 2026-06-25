@@ -198,6 +198,9 @@ private struct ScheduleCalendarCardView: View {
                                 favoriteTeamID: appModel.settings.favoriteTeamID,
                                 attendedGameKeys: appModel.attendedGameKeys
                             )
+                            Task {
+                                await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+                            }
                         } label: {
                             VStack(spacing: 4) {
                                 Text(dayNumberText(for: day.date))

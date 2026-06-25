@@ -446,7 +446,8 @@ struct GameDetailPresentation {
             bases: summary?.bases ?? game.bases
         )
         currentBatterName = game.currentBatterName?.nilIfBlank
-        currentPitcherName = game.currentPitcherName?.nilIfBlank
+        currentPitcherName = game.currentPitcherName?.nilIfBlank ??
+            (status.isLiveLike ? (game.awayStartingPitcherName?.nilIfBlank ?? game.homeStartingPitcherName?.nilIfBlank) : nil)
         winningPitcher = summary?.winningPitcher?.nilIfBlank
         losingPitcher = summary?.losingPitcher?.nilIfBlank
         savePitcher = summary?.savePitcher?.nilIfBlank

@@ -24,7 +24,9 @@ enum ScheduleMonthOverlayResolver {
             isGame($0, in: monthKey, calendar: calendar)
         }
         guard existingMonthGames.isEmpty == false else {
-            return monthIncomingGames.sorted { $0.scheduledStart < $1.scheduledStart }
+            let sorted = monthIncomingGames.sorted { $0.scheduledStart < $1.scheduledStart }
+            AppLog.info(.schedule, "[Schedule] month overlay merge month=\(monthKey.yearMonthText) source=incomingOnly existing=0 incoming=\(monthIncomingGames.count) result=\(sorted.count) \(statusCountsText(sorted))")
+            return sorted
         }
 
         var mergedGames = existingMonthGames.filter {
@@ -36,13 +38,18 @@ enum ScheduleMonthOverlayResolver {
             if let index = mergedGames.firstIndex(where: { existingGame in
                 existingGame.gameIdentityAliases.isDisjoint(with: incomingAliases) == false
             }) {
-                mergedGames[index] = incomingGame
+                mergedGames[index] = GameMergeResolver.preferredGame(
+                    existing: mergedGames[index],
+                    candidate: incomingGame
+                )
             } else {
                 mergedGames.append(incomingGame)
             }
         }
 
-        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+        let sorted = mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
+        AppLog.info(.schedule, "[Schedule] month overlay merge month=\(monthKey.yearMonthText) source=local+supabase existing=\(existingMonthGames.count) incoming=\(monthIncomingGames.count) result=\(sorted.count) \(statusCountsText(sorted))")
+        return sorted
     }
 
     // isGame 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
@@ -53,5 +60,11 @@ enum ScheduleMonthOverlayResolver {
     ) -> Bool {
         let components = calendar.dateComponents([.year, .month], from: game.scheduledStart)
         return components.year == monthKey.year && components.month == monthKey.month
+    }
+
+    // statusCountsText 메서드는 일정 병합 결과의 상태별 개수를 로그 문자열로 반환합니다.
+    private static func statusCountsText(_ games: [GameDetail]) -> String {
+        let counts = Dictionary(grouping: games, by: \.status).mapValues(\.count)
+        return "scheduled=\(counts[.upcoming, default: 0]) live=\(counts[.live, default: 0]) suspended=\(counts[.rainDelay, default: 0]) cancelled=\(counts[.cancelled, default: 0]) final=\(counts[.final, default: 0])"
     }
 }

@@ -831,16 +831,14 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         for row: SupabaseGameRow,
         fallbackGame: GameDetail
     ) async throws -> SupabaseLatestGameSnapshotRow? {
+        let snapshot = try await source.fetchLatestSnapshot(gameID: row.id)
+        #if DEBUG
         let status = row.status.map {
             KBODataMapper.mapGameStatus(code: $0, text: nil)
         } ?? fallbackGame.status
-        guard status != .upcoming else {
-            #if DEBUG
-            print("[GameDetailFetch] latestSnapshot skipped reason=scheduledNoSnapshot game_id=\(row.id.uuidString) publicGameID=\(row.publicGameID ?? "<nil>") providerGameID=\(row.providerGameID ?? "<nil>")")
-            #endif
-            return nil
-        }
-        return try await source.fetchLatestSnapshot(gameID: row.id)
+        print("[GameDetailFetch] latestSnapshot fetched game_id=\(row.id.uuidString) publicGameID=\(row.publicGameID ?? "<nil>") providerGameID=\(row.providerGameID ?? "<nil>") rowStatus=\(status.rawValue) snapshotStatus=\(snapshot == nil ? "<nil>" : "present") score=\(row.awayScore.map(String.init) ?? "-"):\(row.homeScore.map(String.init) ?? "-") inning=\(snapshot?.inningLabel ?? row.inningState ?? "<nil>")")
+        #endif
+        return snapshot
     }
 
     // identityFallbackDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -1269,6 +1267,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(month: KBOMonthScheduleKey) async throws -> [SupabaseGameRow] {
         let interval = monthInterval(for: month)
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGames(month:) start schema=\(schemaName) view=public_games month=\(month.yearMonthText)")
         #if DEBUG
         print(
             "[SupabaseKBO] fetchGames(month:) query start schema=\(schemaName) view=public_games month=\(month.yearMonthText) dateRange=\(gameDateString(interval.start))...\(gameDateString(interval.end))"
@@ -1287,11 +1286,13 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #if DEBUG
         print("[SupabaseKBO] fetchGames(month:) success schema=\(schemaName) view=public_games month=\(month.yearMonthText) count=\(rows.count)")
         #endif
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGames(month:) success schema=\(schemaName) view=public_games month=\(month.yearMonthText) count=\(rows.count)")
         return rows
     }
 
     // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames(date: Date) async throws -> [SupabaseGameRow] {
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGames(date:) start schema=\(schemaName) view=public_games date=\(gameDateString(date))")
         #if DEBUG
         print("[SupabaseKBO] fetchGames(date:) query start schema=\(schemaName) view=public_games date=\(gameDateString(date))")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
@@ -1306,6 +1307,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #if DEBUG
         print("[SupabaseKBO] fetchGames(date:) success schema=\(schemaName) view=public_games date=\(gameDateString(date)) count=\(rows.count)")
         #endif
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGames(date:) success schema=\(schemaName) view=public_games date=\(gameDateString(date)) count=\(rows.count)")
         return rows
     }
 
@@ -1383,6 +1385,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
 
     // fetchGame 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGame(lookup: SupabaseGameLookup) async throws -> [SupabaseGameRow] {
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGame(single:) start schema=\(schemaName) view=public_games key=\(lookup.debugKey) value=\(lookup.debugValue)")
         #if DEBUG
         print("[SupabaseKBO] fetchGame(single:) query start schema=\(schemaName) view=public_games key=\(lookup.debugKey) value=\(lookup.debugValue)")
         print("[SupabaseKBO] gamesSelect columns=\(Self.gameSelectColumns)")
@@ -1448,6 +1451,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         #if DEBUG
         print("[SupabaseKBO] fetchGame(single:) success schema=\(schemaName) view=public_games key=\(lookup.debugKey) count=\(rows.count)")
         #endif
+        AppLog.info(.supabase, "[SupabaseKBO] fetchGame(single:) success schema=\(schemaName) view=public_games key=\(lookup.debugKey) count=\(rows.count)")
         return rows
     }
 
@@ -1457,6 +1461,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         guard ids.isEmpty == false else {
             return []
         }
+        AppLog.debug(.supabase, "[SupabaseKBO] fetchLatestSnapshots start schema=\(schemaName) view=public_latest_game_snapshots count=\(ids.count)")
         #if DEBUG
         print("[SupabaseKBO] fetchLatestSnapshots query start schema=\(schemaName) view=public_latest_game_snapshots count=\(ids.count)")
         #endif
@@ -1470,11 +1475,14 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         print("[SupabaseKBO] fetchLatestSnapshots success schema=\(schemaName) view=public_latest_game_snapshots count=\(rows.count)")
         logLatestSnapshotFieldDiagnostics(rows, context: "batch")
         #endif
+        AppLog.info(.supabase, "[SupabaseKBO] fetchLatestSnapshots success schema=\(schemaName) view=public_latest_game_snapshots count=\(rows.count)")
+        logLatestSnapshotOperationalDiagnostics(rows, context: "batch")
         return rows
     }
 
     // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
+        AppLog.debug(.supabase, "[SupabaseKBO] fetchLatestSnapshot start schema=\(schemaName) view=public_latest_game_snapshots game_id=\(gameID.uuidString)")
         #if DEBUG
         print("[SupabaseKBO] fetchLatestSnapshot query start schema=\(schemaName) view=public_latest_game_snapshots game_id=\(gameID.uuidString)")
         #endif
@@ -1489,6 +1497,8 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         print("[SupabaseKBO] fetchLatestSnapshot success schema=\(schemaName) view=public_latest_game_snapshots game_id=\(gameID.uuidString) count=\(rows.count)")
         logLatestSnapshotFieldDiagnostics(rows, context: "single")
         #endif
+        AppLog.info(.supabase, "[SupabaseKBO] fetchLatestSnapshot success schema=\(schemaName) view=public_latest_game_snapshots game_id=\(gameID.uuidString) count=\(rows.count)")
+        logLatestSnapshotOperationalDiagnostics(rows, context: "single")
         return rows.first
     }
 
@@ -1602,6 +1612,25 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     }
 }
 #endif
+
+// logLatestSnapshotOperationalDiagnostics 메서드는 snapshot 수신 여부와 핵심 경기 진행값만 운영 로그로 남깁니다.
+private nonisolated func logLatestSnapshotOperationalDiagnostics(
+    _ rows: [SupabaseLatestGameSnapshotRow],
+    context: String
+) {
+    for row in rows.prefix(5) {
+        AppLog.info(
+            .supabase,
+            "[SupabaseKBO] latestSnapshot received context=\(context) game_id=\(row.gameID.uuidString) inning=\(row.inningLabel ?? "<nil>") count=\(row.balls.map(String.init) ?? "-")/\(row.strikes.map(String.init) ?? "-")/\(row.outs.map(String.init) ?? "-") fetchedAt=\(supabaseOperationalTimestamp(row.fetchedAt)) createdAt=\(supabaseOperationalTimestamp(row.createdAt))"
+        )
+    }
+}
+
+// supabaseOperationalTimestamp 메서드는 로그에 사용할 timestamp를 축약합니다.
+private nonisolated func supabaseOperationalTimestamp(_ date: Date?) -> String {
+    guard let date else { return "<nil>" }
+    return SupabaseDateParser.debugTimestamp(date)
+}
 
 #if DEBUG
 // logLatestSnapshotFieldDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.

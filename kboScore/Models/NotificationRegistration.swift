@@ -292,7 +292,7 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
 
     nonisolated var description: String {
         [
-            "tokenPrefix=\(deviceToken.prefix(12))",
+            "tokenPrefix=\(deviceToken.prefix(8))",
             "environment=\(environment)",
             "favoriteTeamID=\(favoriteTeamID ?? "none")",
             "notificationsEnabled=\(notificationsEnabled)",

@@ -18,6 +18,7 @@ enum LiveActivityAutoStartEligibility {
         case eligible
         case tooEarly
         case missingScheduledAt
+        case delayed
         case terminalStatus
 
         nonisolated var logReason: String {
@@ -28,6 +29,8 @@ enum LiveActivityAutoStartEligibility {
                 "tooEarly"
             case .missingScheduledAt:
                 "missingScheduledAt"
+            case .delayed:
+                "rainDelay"
             case .terminalStatus:
                 "terminalStatus"
             }
@@ -74,6 +77,10 @@ enum LiveActivityAutoStartEligibility {
         scheduledAt: Date?,
         now: Date
     ) -> Decision {
+        if status == .rainDelay {
+            return .delayed
+        }
+
         if status.isLiveLike {
             return .eligible
         }

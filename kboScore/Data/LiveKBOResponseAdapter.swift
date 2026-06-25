@@ -808,11 +808,11 @@ enum KBOExternalResponseAdapter {
 
     // normalizedOfficialStatusCode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func normalizedOfficialStatusCode(gameState: String?, cancelName: String?) -> String {
-        if let cancelName, cancelName.contains("우천") {
-            return "RAIN_DELAY"
-        }
         if let cancelName, cancelName.contains("취소") {
             return "CANCELLED"
+        }
+        if let cancelName, cancelName.contains("우천") || cancelName.contains("지연") || cancelName.contains("중단") {
+            return "RAIN_DELAY"
         }
 
         switch gameState {
@@ -827,10 +827,10 @@ enum KBOExternalResponseAdapter {
 
     // normalizedOfficialStatusText 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated private static func normalizedOfficialStatusText(gameState: String?, cancelName: String?) -> String {
-        if let cancelName, cancelName.contains("우천") {
-            return "우천 중단"
-        }
         if let cancelName, cancelName.contains("취소") {
+            return cancelName
+        }
+        if let cancelName, cancelName.contains("우천") || cancelName.contains("지연") || cancelName.contains("중단") {
             return cancelName
         }
 

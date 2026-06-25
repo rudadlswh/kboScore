@@ -403,6 +403,26 @@ struct kboScoreTests {
         #expect(GameDetailOverviewContentKind.contentKind(for: .cancelled) == .overview)
     }
 
+    @Test func liveActivityAutoStartRejectsRainDelay() throws {
+        let now = isoDate("2026-06-25T18:35:00+09:00")
+
+        #expect(LiveActivityAutoStartEligibility.decision(
+            status: .rainDelay,
+            scheduledAt: isoDate("2026-06-25T18:30:00+09:00"),
+            now: now
+        ) == .delayed)
+        #expect(LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .rainDelay,
+            scheduledAt: isoDate("2026-06-25T18:30:00+09:00"),
+            now: now
+        ) == false)
+        #expect(LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
+            status: .live,
+            scheduledAt: isoDate("2026-06-25T18:30:00+09:00"),
+            now: now
+        ) == true)
+    }
+
     // homeSummaryUsesStartingPitchersFromSupabaseRows 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func homeSummaryUsesStartingPitchersFromSupabaseRows() throws {
         let awayTeamID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
@@ -2576,6 +2596,72 @@ struct kboScoreTests {
         #expect(await tracker.singleLookups == [.publicGameID("20260428-LOT-KIW")])
         #expect(await tracker.dateFetches == 0)
         #expect(await tracker.teamFetches == 0)
+    }
+
+    // gameDetailScheduledRowUsesLatestSnapshotAsLiveState 메서드는 최신 스냅샷이 예정 row보다 우선되는지 검증합니다.
+    @Test func gameDetailScheduledRowUsesLatestSnapshotAsLiveState() async throws {
+        let referenceDate = isoDate("2026-06-24T18:30:00+09:00")
+        let awayTeamID = UUID(uuidString: "61616161-6161-6161-6161-616161616161")!
+        let homeTeamID = UUID(uuidString: "62626262-6262-6262-6262-626262626262")!
+        let rowID = UUID(uuidString: "63636363-6363-6363-6363-636363636363")!
+        let teams = [
+            SupabaseTeamRow(id: awayTeamID, code: "nc", name: "NC 다이노스", shortName: "NC"),
+            SupabaseTeamRow(id: homeTeamID, code: "lotte", name: "롯데 자이언츠", shortName: "롯데")
+        ]
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "64646464-6464-6464-6464-646464646464")!,
+            scheduledStart: referenceDate,
+            venue: "사직",
+            awayTeam: SupabaseKBOMapper.mapTeam(teams[0]),
+            homeTeam: SupabaseKBOMapper.mapTeam(teams[1]),
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260624-NC-LT provider_game_id=sched-202606241830-nc-lotte",
+            providerGameID: "sched-202606241830-nc-lotte",
+            awayStartingPitcherName: "NC선발",
+            homeStartingPitcherName: "롯데선발"
+        )
+        let row = try makeSupabaseGameRow(
+            id: rowID,
+            publicGameID: "20260624-NC-LT",
+            providerGameID: "20260624NCLT0",
+            gameDate: "2026-06-24",
+            scheduledAt: "2026-06-24T18:30:00+09:00",
+            status: "scheduled",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 1,
+            homeScore: 0,
+            inningState: nil
+        )
+        let snapshot = try makeSupabaseLatestSnapshotRow(
+            gameID: rowID,
+            inningLabel: "1회 초",
+            currentPitcherName: "롯데투수",
+            currentBatterName: "NC타자"
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(teamRows: teams, gameRows: [row], tracker: tracker, latestSnapshotRows: [snapshot]),
+            runtimeState: nil
+        )
+
+        let refreshed = try #require(await repository.fetchGameDetailSnapshot(
+            for: selected,
+            identity: selected.canonicalGameIdentityValue,
+            cachedTeams: [selected.awayTeam, selected.homeTeam]
+        ))
+
+        #expect(refreshed.status == .live)
+        #expect(refreshed.awayScore == 1)
+        #expect(refreshed.homeScore == 0)
+        #expect(refreshed.inningText == "1회 초")
+        #expect(refreshed.currentPitcherName == "롯데투수")
+        #expect(refreshed.currentBatterName == "NC타자")
+        #expect(await tracker.latestSnapshotGameIDs == [rowID])
     }
 
     // gameDetailSingleFetchByProviderGameIDReturnsOneRow 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -14490,6 +14576,72 @@ struct kboScoreTests {
         #expect(mergedGames.contains { $0.id == untouchedGame.id })
     }
 
+    // scheduleTodayLiveRefreshMergesAllFiveLatestSnapshots 메서드는 오늘 전체 경기 live overlay 병합을 검증합니다.
+    @Test func scheduleTodayLiveRefreshMergesAllFiveLatestSnapshots() async throws {
+        let selectedDate = isoDate("2026-05-26T18:40:00+09:00")
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let teams = MockKBOData.makeBootstrap().teams
+        let pairs = [("samsung", "lg"), ("nc", "lotte"), ("kia", "ssg"), ("kiwoom", "hanwha"), ("doosan", "kt")]
+        let scheduledGames = try pairs.enumerated().map { index, pair in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "97000000-0000-0000-0000-%012d", index + 1))!,
+                scheduledStart: selectedDate.addingTimeInterval(TimeInterval(index * 60)),
+                venue: "구장\(index)",
+                awayTeam: try #require(teams.first { $0.id == pair.0 }),
+                homeTeam: try #require(teams.first { $0.id == pair.1 }),
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .regularSeason,
+                inningText: nil,
+                note: "public_game_id=live-overlay-\(index)",
+                providerGameID: index == 1 ? "sched-202605261830-\(pair.0)-\(pair.1)" : "provider-\(index)"
+            )
+        }
+        let liveGames = scheduledGames.enumerated().map { index, game in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "98000000-0000-0000-0000-%012d", index + 1))!,
+                scheduledStart: game.scheduledStart,
+                venue: game.venue,
+                awayTeam: game.awayTeam,
+                homeTeam: game.homeTeam,
+                awayScore: index,
+                homeScore: index == 0 ? 0 : index - 1,
+                status: .live,
+                seasonClassification: .regularSeason,
+                inningText: index % 2 == 0 ? "\(index + 1)회 초" : "\(index + 1)회 말",
+                note: "public_game_id=live-overlay-\(index)",
+                providerGameID: "provider-\(index)",
+                currentPitcherName: "투수\(index)",
+                currentBatterName: "타자\(index)"
+            )
+        }
+        let repository = StubRepository(
+            fetchMonthlySchedule: { key in key == monthKey ? scheduledGames : [] },
+            fetchScheduleBypassingCache: { _, _ in liveGames }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { selectedDate }
+        )
+        let coordinator = ScheduleRefreshCoordinator()
+
+        await coordinator.loadMonth(monthKey, forceRefresh: false, appModel: model, callSite: "test", reason: "initialLoad")
+        await coordinator.refreshTodayLiveIfNeeded(selectedDate: selectedDate, displayedMonthKey: monthKey, appModel: model, callSite: "test")
+
+        let cachedGames = try #require(coordinator.cachedMonthEntries[monthKey.yearMonthText]?.games)
+        let selectedDayGames = cachedGames.filter {
+            ScheduleDateKeyFormatter.dayKey(for: $0.scheduledStart) == "2026-05-26"
+        }
+        #expect(selectedDayGames.count == 5)
+        #expect(selectedDayGames.allSatisfy { $0.status == .live })
+        #expect(selectedDayGames.map(\.inningText).contains("1회 초"))
+        #expect(selectedDayGames.map(\.inningText).contains("2회 말"))
+        #expect(selectedDayGames.map(\.currentPitcherName).allSatisfy { $0?.hasPrefix("투수") == true })
+    }
+
     // scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth() async throws {
         let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
@@ -16047,6 +16199,7 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
     let batterRows: [SupabaseGameBatterRecordRow]
     let pitcherRows: [SupabaseGamePitcherRecordRow]
     let eventRows: [SupabaseGameEventRow]
+    let latestSnapshotRows: [SupabaseLatestGameSnapshotRow]
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
@@ -16055,7 +16208,8 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         tracker: DetailFetchTracker,
         batterRows: [SupabaseGameBatterRecordRow] = [],
         pitcherRows: [SupabaseGamePitcherRecordRow] = [],
-        eventRows: [SupabaseGameEventRow] = []
+        eventRows: [SupabaseGameEventRow] = [],
+        latestSnapshotRows: [SupabaseLatestGameSnapshotRow] = []
     ) {
         self.teamRows = teamRows
         self.gameRows = gameRows
@@ -16063,6 +16217,7 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
         self.batterRows = batterRows
         self.pitcherRows = pitcherRows
         self.eventRows = eventRows
+        self.latestSnapshotRows = latestSnapshotRows
     }
 
     // fetchTeams 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -16144,13 +16299,17 @@ private struct TrackingSupabaseSource: SupabaseKBOReading, Sendable {
 
     // fetchLatestSnapshots 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshots(gameIDs: [UUID]) async throws -> [SupabaseLatestGameSnapshotRow] {
-        []
+        await MainActor.run {
+            latestSnapshotRows.filter { gameIDs.contains($0.gameID) }
+        }
     }
 
     // fetchLatestSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchLatestSnapshot(gameID: UUID) async throws -> SupabaseLatestGameSnapshotRow? {
         await tracker.recordLatestSnapshotFetch(gameID: gameID)
-        return nil
+        return await MainActor.run {
+            latestSnapshotRows.first { $0.gameID == gameID }
+        }
     }
 
     // fetchGameBatterRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -18393,9 +18552,10 @@ private func makeSupabaseGameRow(
     homeTeamID: UUID,
     awayScore: Int,
     homeScore: Int,
-    inningState: String
+    inningState: String?
 ) throws -> SupabaseGameRow {
     let resolvedOfficialProviderGameID = officialProviderGameID ?? providerGameID
+    let inningValue = inningState.map { "\"\($0)\"" } ?? "null"
     let payload = """
     [
       {
@@ -18412,7 +18572,7 @@ private func makeSupabaseGameRow(
         "away_team_id": "\(awayTeamID.uuidString)",
         "home_score": \(homeScore),
         "away_score": \(awayScore),
-        "inning_state": "\(inningState)",
+        "inning_state": \(inningValue),
         "is_cancelled": false,
         "is_postponed": false,
         "source_updated_at": "2026-04-28T20:00:00+09:00",
@@ -18421,6 +18581,31 @@ private func makeSupabaseGameRow(
     ]
     """
     return try JSONDecoder().decode([SupabaseGameRow].self, from: Data(payload.utf8))[0]
+}
+
+private func makeSupabaseLatestSnapshotRow(
+    gameID: UUID,
+    inningLabel: String,
+    currentPitcherName: String? = nil,
+    currentBatterName: String? = nil,
+    balls: Int? = 0,
+    strikes: Int? = 0,
+    outs: Int? = 0
+) throws -> SupabaseLatestGameSnapshotRow {
+    let payload: [String: Any?] = [
+        "game_id": gameID.uuidString,
+        "inning_label": inningLabel,
+        "balls": balls,
+        "strikes": strikes,
+        "outs": outs,
+        "runner_on_first": false,
+        "runner_on_second": false,
+        "runner_on_third": false,
+        "current_pitcher_name": currentPitcherName,
+        "current_batter_name": currentBatterName
+    ]
+    let data = try JSONSerialization.data(withJSONObject: payload.compactMapValues { $0 })
+    return try JSONDecoder().decode(SupabaseLatestGameSnapshotRow.self, from: data)
 }
 
 // makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.

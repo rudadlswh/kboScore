@@ -873,15 +873,15 @@ enum KBODataMapper {
             .scoreChange
         case "onbase", "on_base", "reachedbase", "reached_base", "출루":
             .onBase
-        case "gamestart", "start", "시작":
+        case "gamestart", "game_start", "start", "시작":
             .gameStart
         case "leadchange", "lead", "역전":
             .leadChange
-        case "gameend", "final", "종료":
+        case "gameend", "game_end", "final", "종료":
             .gameEnd
         case "inningchange", "inning_changed", "inning", "이닝":
             .inningChange
-        case "raindelay", "cancelled", "rain", "우천", "취소":
+        case "raindelay", "rain_delay", "game_interrupted", "game_resumed", "game_resume_scheduled", "game_cancelled", "cancelled", "rain", "우천", "취소", "지연", "재개":
             .rainDelay
         default:
             .scoreChange

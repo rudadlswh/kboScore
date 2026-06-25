@@ -52,6 +52,7 @@ final class ScheduleRefreshCoordinator {
         reason: String
     ) async {
         let startedAt = Date()
+        AppLog.info(.schedule, "[Schedule] refresh start month=\(key.yearMonthText) callSite=\(callSite) reason=\(reason) forceRefresh=\(forceRefresh)")
         if forceRefresh == false, let cachedEntry = cachedMonths[key] {
             logLocalMonth(
                 key,
@@ -123,11 +124,13 @@ final class ScheduleRefreshCoordinator {
             #if DEBUG
             print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(monthKey) source=repository gameCount=\(entry.games.count) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
             #endif
+            AppLog.info(.schedule, "[Schedule] refresh completed month=\(monthKey) source=supabase games=\(entry.games.count) \(statusCountsText(entry.games)) durationMs=\(Self.durationMilliseconds(since: startedAt))")
         } catch {
             failedMonths.insert(key)
             #if DEBUG
             print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(monthKey) source=repository failed durationMs=\(Self.durationMilliseconds(since: startedAt)) error=\(error)")
             #endif
+            AppLog.warning(.schedule, "[Schedule] refresh failed month=\(monthKey) source=supabase durationMs=\(Self.durationMilliseconds(since: startedAt)) error=\(error)")
         }
     }
 
@@ -161,6 +164,7 @@ final class ScheduleRefreshCoordinator {
             selectedDate: selectedDate,
             reason: "scheduleTodayLiveRefresh"
         )
+        AppLog.info(.schedule, "[Schedule] refresh today completed date=\(selectedDayKey) source=supabase games=\(refreshedGames.count) \(statusCountsText(refreshedGames))")
         await syncStartersIntoMonthCache(
             refreshedGames,
             monthKey: displayedMonthKey,
@@ -208,12 +212,15 @@ final class ScheduleRefreshCoordinator {
 
         var updatedGames = existingEntry.games
         var didUpdate = false
+        var mergedCount = 0
+        var unmatchedGameIDs: [String] = []
 
         for refreshedGame in refreshedGames {
             let aliases = refreshedGame.gameIdentityAliases
             guard let index = updatedGames.firstIndex(where: { cachedGame in
                 cachedGame.gameIdentityAliases.isDisjoint(with: aliases) == false
             }) else {
+                unmatchedGameIDs.append(refreshedGame.publicGameID ?? refreshedGame.providerGameID ?? refreshedGame.id.uuidString)
                 continue
             }
             let existingGame = updatedGames[index]
@@ -222,6 +229,7 @@ final class ScheduleRefreshCoordinator {
                 updatedGames[index] = mergedGame
                 didUpdate = true
             }
+            mergedCount += 1
         }
 
         if didUpdate {
@@ -240,6 +248,10 @@ final class ScheduleRefreshCoordinator {
             updated: didUpdate,
             refreshedCount: refreshedGames.count
         )
+        #if DEBUG
+        print("[ScheduleLiveOverlay] callSite=\(callSite) reason=\(reason) month=\(monthKey.yearMonthText) snapshotCount=\(refreshedGames.count) mergedCount=\(mergedCount) unmatchedGameIds=\(unmatchedGameIDs.joined(separator: ","))")
+        #endif
+        AppLog.info(.schedule, "[Schedule] merge completed month=\(monthKey.yearMonthText) source=supabase refreshed=\(refreshedGames.count) merged=\(mergedCount) updated=\(didUpdate) unmatched=\(unmatchedGameIDs.count) \(statusCountsText(updatedGames))")
     }
 
     // reconcileStalePastGamesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -329,6 +341,7 @@ final class ScheduleRefreshCoordinator {
         #if DEBUG
         print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) hit=\(cacheHit) source=local durationMs=\(durationMs)")
         #endif
+        AppLog.info(.schedule, "[Schedule] refresh completed month=\(key.yearMonthText) source=local cacheHit=\(cacheHit) games=\(cachedMonths[key]?.games.count ?? 0) durationMs=\(durationMs)")
     }
 
     // logMonthCache 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -367,6 +380,7 @@ final class ScheduleRefreshCoordinator {
         let durationText = durationMs.map { " durationMs=\($0)" } ?? ""
         print("[ScheduleRefreshCoordinator] callSite=\(callSite) reason=\(reason)\(monthText)\(dateText) selectedPublicGameID=\(publicGameID) selectedProviderGameID=\(providerGameID)\(skippedText)\(localOnlyText)\(skippedReasonText)\(durationText)")
         #endif
+        AppLog.debug(.schedule, "[Schedule] coordinator callSite=\(callSite) reason=\(reason) month=\(month ?? "<nil>") date=\(date ?? "<nil>") selectedPublicGameID=\(selectedGame?.publicGameID ?? "<nil>") selectedProviderGameID=\(selectedGame?.providerGameID ?? selectedGame?.officialProviderGameID ?? "<nil>") skippedDueToInFlight=\(skippedDueToInFlight) localOnly=\(localOnlyDateSelection) skippedReason=\(skippedReason ?? "<nil>") durationMs=\(durationMs.map(String.init) ?? "<nil>")")
     }
 
     // logStarterSync 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -385,5 +399,11 @@ final class ScheduleRefreshCoordinator {
     // durationMilliseconds 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func durationMilliseconds(since start: Date) -> Int {
         Int(Date().timeIntervalSince(start) * 1_000)
+    }
+
+    // statusCountsText 메서드는 일정 병합 결과의 상태별 개수를 로그 문자열로 반환합니다.
+    private func statusCountsText(_ games: [GameDetail]) -> String {
+        let counts = Dictionary(grouping: games, by: \.status).mapValues(\.count)
+        return "scheduled=\(counts[.upcoming, default: 0]) live=\(counts[.live, default: 0]) suspended=\(counts[.rainDelay, default: 0]) cancelled=\(counts[.cancelled, default: 0]) final=\(counts[.final, default: 0])"
     }
 }
