@@ -20,11 +20,18 @@ DerivedData/
 
 # Local app config
 kboScore/Config/Secrets.local.xcconfig
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # Private keys and certificates
 *.p8
 *.pem
 *.key
+*.p12
+*.cer
+*.crt
 
 # IDE
 .idea/

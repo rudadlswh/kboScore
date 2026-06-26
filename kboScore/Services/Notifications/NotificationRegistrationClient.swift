@@ -111,7 +111,7 @@ struct RemoteNotificationRegistrationClient: NotificationRegistrationClient {
         print("[NotificationPipeline] registration URL=\(endpointURL.absoluteString)")
         print("[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
         #endif
-        AppLog.info(.notification, "[NotificationPipeline] registration request start tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) favoriteTeamID=\(payload.favoriteTeamID ?? "none") notificationsEnabled=\(payload.notificationsAuthorized) \(payload.debugBooleanDescription)")
+        AppLog.info(.notification, "[NotificationPipeline] registration request start environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) notificationsEnabled=\(payload.notificationsAuthorized)")
 
         var request = URLRequest(url: endpointURL)
         request.httpMethod = "POST"

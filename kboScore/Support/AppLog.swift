@@ -26,20 +26,20 @@ enum AppLog {
     }
 
     nonisolated static func info(_ category: Category, _ message: String) {
-        logger(category).info("\(message, privacy: .public)")
+        logger(category).info("\(message, privacy: .private)")
     }
 
     nonisolated static func warning(_ category: Category, _ message: String) {
-        logger(category).warning("\(message, privacy: .public)")
+        logger(category).warning("\(message, privacy: .private)")
     }
 
     nonisolated static func error(_ category: Category, _ message: String) {
-        logger(category).error("\(message, privacy: .public)")
+        logger(category).error("\(message, privacy: .private)")
     }
 
     nonisolated static func debug(_ category: Category, _ message: String) {
         #if DEBUG
-        logger(category).debug("\(message, privacy: .public)")
+        logger(category).debug("\(message, privacy: .private)")
         #endif
     }
 }

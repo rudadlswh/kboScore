@@ -3974,7 +3974,7 @@ final class AppModel {
         #else
         print("[NotificationPipeline] APNs token stored reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
-        AppLog.info(.notification, "[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        AppLog.info(.notification, "[NotificationPipeline] APNs token stored environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         guard apnsDeviceToken != token else {
             scheduleNotificationRegistrationSync(force: false)
             return
@@ -4119,7 +4119,7 @@ final class AppModel {
             #if DEBUG
             print("[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) \(key)")
             #endif
-            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing")")
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration skipped duplicate reason=\(reason)")
             return
         }
 
@@ -4128,7 +4128,7 @@ final class AppModel {
         #else
         print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment)")
         #endif
-        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled)")
         do {
             _ = try await liveActivityPushToStartTokenRegistrationClient.register(payload)
             #if DEBUG
@@ -4136,14 +4136,14 @@ final class AppModel {
             #else
             print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment)")
             #endif
-            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment)")
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment)")
         } catch {
             #if DEBUG
             print("[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
             #else
             print("[LiveActivity] push-to-start registration failure reason=\(reason)")
             #endif
-            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) error=\(error)")
         }
     }
 
@@ -4242,7 +4242,7 @@ final class AppModel {
             #else
             print("[NotificationPipeline] registration sync start reason=deviceRegistration environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
             #endif
-            AppLog.info(.notification, "[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
+            AppLog.info(.notification, "[NotificationPipeline] registration sync start environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             guard generation == notificationRegistrationSyncGeneration else {
                 notificationRegistrationDeduplicationState.fail(key)

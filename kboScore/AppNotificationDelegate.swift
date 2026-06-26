@@ -32,7 +32,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
         #else
         print("[NotificationPipeline] APNs token received reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
-        AppLog.info(.notification, "[NotificationPipeline] APNs token received tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        AppLog.info(.notification, "[NotificationPipeline] APNs token received environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         onDeviceToken?(token)
     }
 
