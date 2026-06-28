@@ -449,11 +449,11 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                     stableDetailIdentity: snapshot.stableDetailIdentity
                 )
                 #if DEBUG
-                print("[LiveActivity] push token received activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+                print("[LiveActivity] push token received hasActivityId=\(activity.id.isEmpty == false) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) hasDatabaseID=\(payload.databaseID.isEmpty == false)")
                 #else
                 print("[LiveActivity] push token received reason=tokenUpdate environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
                 #endif
-                AppLog.info(.liveActivity, "[LiveActivity] push token received environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+                AppLog.info(.liveActivity, "[LiveActivity] push token received environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) hasActivityId=\(activity.id.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false)")
                 let key = LiveActivityTokenRegistrationKey(payload: payload, endpointDescription: tokenRegistrationClient.debugEndpointDescription)
                 await MainActor.run {
                     guard self.registeredTokenKeys.insert(key).inserted else {
@@ -467,18 +467,18 @@ final class FavoriteTeamLiveActivityManager: FavoriteTeamLiveActivityControlling
                 do {
                     _ = try await tokenRegistrationClient.register(payload)
                     #if DEBUG
-                    print("[LiveActivity] token registration success activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) publicGameID=\(payload.publicGameID ?? "<nil>") providerGameID=\(payload.providerGameID ?? "<nil>") databaseID=\(payload.databaseID) stableDetailIdentity=\(payload.stableDetailIdentity)")
+                    print("[LiveActivity] token registration success environment=\(payload.environment) hasActivityId=\(activity.id.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) hasDatabaseID=\(payload.databaseID.isEmpty == false) hasStableDetailIdentity=\(payload.stableDetailIdentity.isEmpty == false) retry=false")
                     #else
-                    print("[LiveActivity] token registration success reason=activityTokenRegistration environment=\(payload.environment)")
+                    print("[LiveActivity] token registration success reason=activityTokenRegistration environment=\(payload.environment) retry=false")
                     #endif
-                    AppLog.info(.liveActivity, "[LiveActivity] token registration success environment=\(payload.environment)")
+                    AppLog.info(.liveActivity, "[LiveActivity] token registration success environment=\(payload.environment) hasActivityId=\(activity.id.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) retry=false")
                 } catch {
                     #if DEBUG
-                    print("[LiveActivity] token registration failure activityID=\(activity.id) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+                    print("[LiveActivity] token registration failure environment=\(payload.environment) hasActivityId=\(activity.id.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) endpoint=\(tokenRegistrationClient.debugEndpointDescription ?? "missing") retry=false error=\(error)")
                     #else
-                    print("[LiveActivity] token registration failure reason=activityTokenRegistration environment=\(payload.environment)")
+                    print("[LiveActivity] token registration failure reason=activityTokenRegistration environment=\(payload.environment) retry=false")
                     #endif
-                    AppLog.error(.liveActivity, "[LiveActivity] token registration failure environment=\(payload.environment) error=\(error)")
+                    AppLog.error(.liveActivity, "[LiveActivity] token registration failure environment=\(payload.environment) hasActivityId=\(activity.id.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) retry=false error=\(error)")
                 }
             }
         }

@@ -6578,6 +6578,45 @@ struct kboScoreTests {
         #expect(request.timeoutInterval == 8)
     }
 
+    @Test func liveActivityRegistrationDebugDescriptionsDoNotExposeTokens() {
+        let activityPayload = LiveActivityTokenRegistrationPayload(
+            activityId: "activity-1",
+            environment: "sandbox",
+            activityToken: "sensitive-activity-token-value",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            publicGameID: "public-1",
+            providerGameID: "provider-1",
+            databaseID: UUID().uuidString,
+            stableDetailIdentity: "stable-1"
+        )
+        let pushToStartPayload = LiveActivityPushToStartTokenRegistrationPayload(
+            environment: "sandbox",
+            pushToStartToken: "sensitive-push-to-start-token-value",
+            installationId: "install-1",
+            favoriteTeamID: "lg",
+            notificationsAuthorized: true,
+            liveActivitiesEnabled: true,
+            liveActivityAutoStartEnabled: true,
+            gameStartEnabled: true,
+            favoriteTeamOnlyEnabled: false
+        )
+
+        let activityDescription = LiveActivityTokenRegistrationKey(
+            payload: activityPayload,
+            endpointDescription: "https://example.com/devices/live-activities/register"
+        ).description
+        let pushToStartDescription = LiveActivityPushToStartTokenRegistrationKey(
+            payload: pushToStartPayload,
+            endpointDescription: "https://example.com/devices/live-activities/push-to-start/register"
+        ).description
+
+        #expect(activityDescription.contains("sensitive-activity-token-value") == false)
+        #expect(activityDescription.contains("sensitive") == false)
+        #expect(pushToStartDescription.contains("sensitive-push-to-start-token-value") == false)
+        #expect(pushToStartDescription.contains("sensitive") == false)
+    }
+
     // teamIdentityCatalogKeepsTextAndThemeIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func teamIdentityCatalogKeepsTextAndThemeIdentity() async throws {
         let lgIdentity = TeamIdentity.catalog["lg"]
