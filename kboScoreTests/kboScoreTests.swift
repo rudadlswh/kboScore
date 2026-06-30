@@ -4277,13 +4277,61 @@ struct kboScoreTests {
 
         let standings = model.standingsSnapshots
 
-        #expect(standings.first?.team.id == "lg")
-        #expect(standings.first?.recordText == "1승 0패 0무")
-        #expect(standings.first?.winPercentageText == "1.000")
-        #expect(standings[1].team.id == "doosan")
-        #expect(standings[1].recordText == "1승 1패 0무")
-        #expect(standings[1].winPercentageText == "0.500")
+        let lgSnapshot = try requireStandingsSnapshot(in: standings, teamID: "lg")
+        let doosanSnapshot = try requireStandingsSnapshot(in: standings, teamID: "doosan")
+
+        #expect(lgSnapshot.rank == 1)
+        #expect(lgSnapshot.recordText == "1승 0패 0무")
+        #expect(lgSnapshot.winPercentageText == "1.000")
+        #expect(doosanSnapshot.rank == 2)
+        #expect(doosanSnapshot.recordText == "1승 1패 0무")
+        #expect(doosanSnapshot.winPercentageText == "0.500")
         #expect(model.regularSeasonGames.count == 2)
+    }
+
+    // appModelBootstrapImmediatelyPublishesStandingsRows 메서드는 bootstrap 초기화 정책을 고정합니다.
+    @Test func appModelBootstrapImmediatelyPublishesStandingsRows() throws {
+        let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-01T09:00:00+09:00"))
+        let lg = try #require(base.teams.first(where: { $0.id == "lg" }))
+        let doosan = try #require(base.teams.first(where: { $0.id == "doosan" }))
+        let game = makeGameDetail(
+            id: UUID(uuidString: "10000000-0000-0000-0000-000000000004")!,
+            scheduledStart: isoDate("2026-03-28T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason
+        )
+
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: [lg, doosan],
+                games: [game],
+                notifications: [],
+                settings: base.settings
+            ),
+            usePersistedSettings: false
+        )
+
+        #expect(model.standingsSnapshots.count == 2)
+        let lgSnapshot = try requireStandingsSnapshot(in: model.standingsSnapshots, teamID: "lg")
+        #expect(lgSnapshot.wins == 1)
+    }
+
+    // standingsSnapshotLookupReportsMissingTeamWithoutIndexingCrash 메서드는 빈 배열 guard 실패가 crash로 전파되지 않음을 검증합니다.
+    @Test func standingsSnapshotLookupReportsMissingTeamWithoutIndexingCrash() {
+        do {
+            _ = try requireStandingsSnapshot(in: [], teamID: "lg")
+            #expect(Bool(false))
+        } catch let error as TestFixtureError {
+            #expect(error.description.contains("teamID=lg"))
+            #expect(error.description.contains("count=0"))
+        } catch {
+            #expect(Bool(false))
+        }
     }
 
     // standingsRankMovementMovedUpShowsUpIndicator 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -5483,12 +5531,7 @@ struct kboScoreTests {
 
     // uploadedLocalBootstrapProducesNonZeroStandingsRecords 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func uploadedLocalBootstrapProducesNonZeroStandingsRecords() async throws {
-        let testFileURL = URL(fileURLWithPath: #filePath)
-        let projectRoot = testFileURL
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let bootstrapURL = projectRoot.appendingPathComponent("kboScore/LocalBootstrapData.json")
-        let data = try Data(contentsOf: bootstrapURL)
+        let data = try localBootstrapFixtureData()
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let payload = try decoder.decode(KBOBootstrapDTO.self, from: data)
@@ -6247,8 +6290,8 @@ struct kboScoreTests {
         #expect(state.start(key) == .start(keyChanged: false))
     }
 
-    // backendDeviceRegistrationSkipsWhenNotificationsDisabled 메서드는 이 타입의 주요 동작을 수행합니다.
-    @Test func backendDeviceRegistrationSkipsWhenNotificationsDisabled() async throws {
+    // backendDeviceRegistrationSyncsDisabledNotificationPreferences 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func backendDeviceRegistrationSyncsDisabledNotificationPreferences() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
             notificationRegistrationClient: client,
@@ -6262,12 +6305,25 @@ struct kboScoreTests {
             preferences: disabledNotificationPreferences()
         )
 
-        #expect(await client.requestCount() == 0)
-        #expect(model.notificationRegistrationSyncStatus == .idle)
+        let didRegister = await eventually(timeout: 3.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+
+        #expect(didRegister)
+        #expect(payload.notificationsAuthorized == true)
+        #expect(payload.gameStartEnabled == false)
+        #expect(payload.scoreChangeEnabled == false)
+        #expect(payload.leadChangeEnabled == false)
+        #expect(payload.gameEndEnabled == false)
+        #expect(payload.onBaseEnabled == false)
+        #expect(payload.inningChangeEnabled == false)
+        #expect(payload.favoriteTeamOnlyEnabled == false)
+        #expect(model.notificationRegistrationSyncStatus == .synced)
     }
 
-    // backendDeviceRegistrationSkipsWhenAuthorizationIsNotGranted 메서드는 이 타입의 주요 동작을 수행합니다.
-    @Test func backendDeviceRegistrationSkipsWhenAuthorizationIsNotGranted() async throws {
+    // backendDeviceRegistrationSyncsDeniedAuthorizationState 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func backendDeviceRegistrationSyncsDeniedAuthorizationState() async throws {
         let client = RecordingNotificationRegistrationClient()
         let model = AppModel(
             notificationRegistrationClient: client,
@@ -6278,8 +6334,15 @@ struct kboScoreTests {
 
         model.settings = notificationRegistrationSettings(favoriteTeamID: "lotte")
 
-        #expect(await client.requestCount() == 0)
-        #expect(model.notificationRegistrationSyncStatus == .idle)
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+
+        #expect(didRegister)
+        #expect(payload.notificationsAuthorized == false)
+        #expect(payload.scoreChangeEnabled == true)
+        #expect(model.notificationRegistrationSyncStatus == .synced)
     }
 
     // backendDeviceRegistrationSkipsWhenFavoriteTeamIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -6342,6 +6405,193 @@ struct kboScoreTests {
         #expect(didRegister)
         #expect(payload.favoriteTeamOnlyEnabled == true)
         #expect(key.favoriteTeamOnlyEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationPayloadSendsAllEnabledNotificationPreferences() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(
+                gameStart: true,
+                scoreChange: true,
+                leadChange: true,
+                gameEnd: true,
+                rainDelay: true,
+                onBaseEnabled: true,
+                inningChangeEnabled: true,
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: true
+            )
+        )
+
+        let didRegister = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+
+        #expect(didRegister)
+        #expect(payload.notificationsAuthorized == true)
+        #expect(payload.gameStartEnabled == true)
+        #expect(payload.scoreChangeEnabled == true)
+        #expect(payload.leadChangeEnabled == true)
+        #expect(payload.gameEndEnabled == true)
+        #expect(payload.onBaseEnabled == true)
+        #expect(payload.inningChangeEnabled == true)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(payload.muteWhenLosingEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationPayloadPreservesEnabledPreferencesWhenResyncing() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(
+                gameStart: true,
+                scoreChange: true,
+                leadChange: true,
+                gameEnd: true,
+                rainDelay: true,
+                onBaseEnabled: true,
+                inningChangeEnabled: true,
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: true
+            )
+        )
+
+        let didRegisterInitialSettings = await eventually(timeout: 3.0) {
+            await client.requestCount() == 1
+        }
+
+        var updatedSettings = model.settings
+        updatedSettings.quietHours = QuietHours(isEnabled: true, startHour: 23, endHour: 7)
+        model.settings = updatedSettings
+
+        let didRegisterUpdatedSettings = await eventually(timeout: 3.0) {
+            await client.requestCount() == 2
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+
+        #expect(didRegisterInitialSettings)
+        #expect(didRegisterUpdatedSettings)
+        #expect(payload.scoreChangeEnabled == true)
+        #expect(payload.onBaseEnabled == true)
+        #expect(payload.inningChangeEnabled == true)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(payload.muteWhenLosingEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationPreservesFavoriteTeamOnlyWhenAPNsTokenReregisters() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        let delegate = AppNotificationDelegate()
+        model.connectNotificationDelegate(delegate)
+        model.notificationAuthorizationStatus = .authorized
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(favoriteTeamOnlyEnabled: true)
+        )
+
+        delegate.onDeviceToken?("abc123")
+        let didRegisterInitialToken = await eventually(timeout: 1.0) {
+            await client.requestCount() == 1
+        }
+
+        delegate.onDeviceToken?("def456")
+        let didRegisterUpdatedToken = await eventually(timeout: 1.0) {
+            await client.requestCount() == 2
+        }
+        let payloads = await client.recordedPayloads()
+
+        #expect(didRegisterInitialToken)
+        #expect(didRegisterUpdatedToken)
+        #expect(payloads.map(\.favoriteTeamOnlyEnabled) == [true, true])
+        #expect(model.settings.notificationPreferences.favoriteTeamOnlyEnabled == true)
+    }
+
+    @Test func backendDeviceRegistrationPayloadSendsOnlyDisabledTogglesAsFalse() async throws {
+        let client = RecordingNotificationRegistrationClient()
+        let model = AppModel(
+            notificationRegistrationClient: client,
+            usePersistedSettings: false
+        )
+        model.apnsDeviceToken = "abc123"
+        model.notificationAuthorizationStatus = .authorized
+
+        model.settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(
+                gameStart: true,
+                scoreChange: false,
+                leadChange: true,
+                gameEnd: true,
+                rainDelay: true,
+                onBaseEnabled: true,
+                inningChangeEnabled: false,
+                favoriteTeamOnlyEnabled: true,
+                muteWhenLosingEnabled: false
+            )
+        )
+
+        let didRegister = await eventually(timeout: 3.0) {
+            await client.requestCount() == 1
+        }
+        let payload = try #require(await client.recordedPayloads().last)
+
+        #expect(didRegister)
+        #expect(payload.gameStartEnabled == true)
+        #expect(payload.scoreChangeEnabled == false)
+        #expect(payload.leadChangeEnabled == true)
+        #expect(payload.gameEndEnabled == true)
+        #expect(payload.onBaseEnabled == true)
+        #expect(payload.inningChangeEnabled == false)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+        #expect(payload.muteWhenLosingEnabled == false)
+    }
+
+    @Test func notificationRegistrationDebugDescriptionsDoNotExposeDeviceToken() async throws {
+        let payload = NotificationRegistrationPayload(
+            platform: "ios",
+            environment: "sandbox",
+            deviceToken: "abcdef1234567890",
+            installationId: "install-1",
+            favoriteTeamID: "lotte",
+            notificationsAuthorized: true,
+            alertTypes: [.gameStart, .scoreChange],
+            quietHours: nil,
+            scoreChangeEnabled: true,
+            onBaseEnabled: true,
+            inningChangeEnabled: true,
+            favoriteTeamOnlyEnabled: true
+        )
+        let key = NotificationRegistrationKey(payload: payload, endpointDescription: "https://example.com/devices/register")
+
+        #expect(payload.debugRegistrationDescription.contains("abcdef1234567890") == false)
+        #expect(payload.debugRegistrationDescription.contains("abcdef12") == false)
+        #expect(key.description.contains("abcdef1234567890") == false)
+        #expect(key.description.contains("abcdef12") == false)
+        #expect(key.description.contains("tokenPrefix") == false)
+        #expect(payload.debugRegistrationDescription.contains("environment=sandbox"))
+        #expect(payload.debugRegistrationDescription.contains("favoriteTeamID=lotte"))
+        #expect(payload.debugRegistrationDescription.contains("scoreChangeEnabled=true"))
+        #expect(payload.debugRegistrationDescription.contains("onBaseEnabled=true"))
+        #expect(payload.debugRegistrationDescription.contains("inningChangeEnabled=true"))
+        #expect(payload.debugRegistrationDescription.contains("favoriteTeamOnlyEnabled=true"))
     }
 
     // backendDeviceRegistrationPayloadAndKeyIncludeMuteWhenLosingPreference 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -6445,7 +6695,8 @@ struct kboScoreTests {
             favoriteTeamID: "lg",
             notificationsAuthorized: true,
             alertTypes: [.gameStart, .scoreChange],
-            quietHours: NotificationRegistrationQuietHours(startHour: 23, endHour: 7)
+            quietHours: NotificationRegistrationQuietHours(startHour: 23, endHour: 7),
+            favoriteTeamOnlyEnabled: true
         )
 
         URLProtocolStub.testResponses = [
@@ -6460,12 +6711,15 @@ struct kboScoreTests {
         let status = try await client.syncRegistration(payload)
         let request = try #require(URLProtocolStub.lastRequest)
         let body = try #require(httpBodyData(from: request))
+        let json = try #require(String(data: body, encoding: .utf8))
         let decoded = try JSONDecoder().decode(NotificationRegistrationPayload.self, from: body)
 
         #expect(status == .synced)
         #expect(request.httpMethod == "POST")
         #expect(request.timeoutInterval == 8)
         #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        #expect(json.contains("\"favorite_team_only_enabled\":true"))
+        #expect(json.contains("\"favoriteTeamOnlyEnabled\"") == false)
         #expect(decoded == payload)
         #expect(decoded.installationId == "install-1")
         #expect(decoded.gameStartEnabled == true)
@@ -6474,8 +6728,28 @@ struct kboScoreTests {
         #expect(decoded.gameEndEnabled == true)
         #expect(decoded.onBaseEnabled == false)
         #expect(decoded.inningChangeEnabled == false)
-        #expect(decoded.favoriteTeamOnlyEnabled == false)
+        #expect(decoded.favoriteTeamOnlyEnabled == true)
         #expect(decoded.muteWhenLosingEnabled == false)
+    }
+
+    @Test func notificationRegistrationPayloadDecodesLegacyCamelCaseFavoriteTeamOnlyPreference() throws {
+        let payload = try JSONDecoder().decode(
+            NotificationRegistrationPayload.self,
+            from: Data("""
+            {
+              "platform": "ios",
+              "environment": "sandbox",
+              "deviceToken": "abc123",
+              "installationId": "install-1",
+              "favoriteTeamID": "lg",
+              "notificationsAuthorized": true,
+              "alertTypes": ["gameStart"],
+              "favoriteTeamOnlyEnabled": true
+            }
+            """.utf8)
+        )
+
+        #expect(payload.favoriteTeamOnlyEnabled == true)
     }
 
     @Test func notificationInstallationIDMigratesLegacyUserDefaultsToKeychain() throws {
@@ -10152,14 +10426,15 @@ struct kboScoreTests {
         let standings = try await repository.fetchStandings()
 
         #expect(standings.count == 1)
-        #expect(standings[0].team.id == "lg")
-        #expect(standings[0].rank == 1)
-        #expect(standings[0].recentResults == [.win, .win, .loss])
-        #expect(standings[0].runsScored == 31)
-        #expect(standings[0].runsAllowed == 18)
-        #expect(standings[0].pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 31, runsAllowed: 18))
-        #expect(standings[0].rankingResolution == .resolved)
-        #expect(standings[0].postseasonQualificationProbability == 0.84)
+        let snapshot = try #require(standings.first)
+        #expect(snapshot.team.id == "lg")
+        #expect(snapshot.rank == 1)
+        #expect(snapshot.recentResults == [.win, .win, .loss])
+        #expect(snapshot.runsScored == 31)
+        #expect(snapshot.runsAllowed == 18)
+        #expect(snapshot.pythagoreanWinningPercentage == StandingsMetrics.pythagoreanWinningPercentage(runsScored: 31, runsAllowed: 18))
+        #expect(snapshot.rankingResolution == .resolved)
+        #expect(snapshot.postseasonQualificationProbability == 0.84)
     }
 
     // liveRepositoryMapsBackendStandingsUnavailableProbabilityState 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -10207,9 +10482,10 @@ struct kboScoreTests {
         let standings = try await repository.fetchStandings()
 
         #expect(standings.count == 1)
-        #expect(standings[0].postseasonQualificationProbability == nil)
-        #expect(standings[0].postseasonProbabilityUnavailableReason == .unknownClassificationGames)
-        #expect(standings[0].postseasonQualificationText == "산출 불가")
+        let snapshot = try #require(standings.first)
+        #expect(snapshot.postseasonQualificationProbability == nil)
+        #expect(snapshot.postseasonProbabilityUnavailableReason == .unknownClassificationGames)
+        #expect(snapshot.postseasonQualificationText == "산출 불가")
     }
 
     // repositoryFactoryUsesBundledModeWhenBackendURLIsMissing 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -10430,7 +10706,7 @@ struct kboScoreTests {
 
         let documentsURL = documentsDirectory.appendingPathComponent("LocalBootstrapData.json")
         let bundledURL = bundledDirectory.appendingPathComponent("LocalBootstrapData.json")
-        let sourceData = try appLocalBootstrapFixtureData()
+        let sourceData = try localBootstrapFixtureData()
         try sourceData.write(to: documentsURL, options: .atomic)
         try sourceData.write(to: bundledURL, options: .atomic)
 
@@ -10447,11 +10723,33 @@ struct kboScoreTests {
         )
 
         await model.loadIfNeeded()
+        await model.loadStandingsIfNeeded()
 
         #expect(model.regularSeasonGames.isEmpty == false)
         #expect(model.standingsSnapshots.count == model.teams.count)
         #expect(model.standingsSnapshots.contains { $0.wins + $0.losses + $0.ties > 0 })
         #expect(model.debugLocalBootstrapSource == "문서 JSON")
+    }
+
+    // fixtureLoaderReportsMissingFixtureNameAndPath 메서드는 fixture 누락 실패 메시지를 명확히 유지합니다.
+    @Test func fixtureLoaderReportsMissingFixtureNameAndPath() {
+        do {
+            _ = try fixtureData(named: "missing-bootstrap-fixture")
+            #expect(Bool(false))
+        } catch let error as TestFixtureError {
+            #expect(error.description.contains("missing-bootstrap-fixture.json"))
+            #expect(error.description.contains("Fixtures"))
+        } catch {
+            #expect(Bool(false))
+        }
+    }
+
+    // testsDoNotReadProjectLocalBootstrapDataDirectly 메서드는 테스트가 fixture loader를 우회하지 않도록 고정합니다.
+    @Test func testsDoNotReadProjectLocalBootstrapDataDirectly() throws {
+        let source = try String(contentsOf: URL(fileURLWithPath: #filePath), encoding: .utf8)
+        let forbiddenPath = "kboScore/" + "LocalBootstrapData.json"
+
+        #expect(source.contains(forbiddenPath) == false)
     }
 
     // appModelRefreshReReadsEditedDocumentsBootstrapJSON 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -17610,21 +17908,64 @@ private func httpBodyData(from request: URLRequest) -> Data? {
     return data.isEmpty ? nil : data
 }
 
+private enum TestFixtureError: Error, CustomStringConvertible {
+    case missingFixture(name: String, searchedPath: String)
+    case unreadableFixture(name: String, searchedPath: String, underlying: Error)
+    case missingStandingsSnapshot(teamID: String, availableTeamIDs: [String], count: Int)
+
+    nonisolated var description: String {
+        switch self {
+        case .missingFixture(let name, let searchedPath):
+            return "Missing test fixture name=\(name) searchedPath=\(searchedPath)"
+        case .unreadableFixture(let name, let searchedPath, let underlying):
+            return "Unreadable test fixture name=\(name) searchedPath=\(searchedPath) error=\(underlying)"
+        case .missingStandingsSnapshot(let teamID, let availableTeamIDs, let count):
+            return "Missing standings snapshot teamID=\(teamID) count=\(count) availableTeamIDs=\(availableTeamIDs.joined(separator: ","))"
+        }
+    }
+}
+
+// requireStandingsSnapshot 메서드는 standings 테스트가 배열 인덱싱으로 프로세스를 중단하지 않게 합니다.
+private func requireStandingsSnapshot(
+    in standings: [TeamStandingsSnapshot],
+    teamID: String
+) throws -> TeamStandingsSnapshot {
+    guard let snapshot = standings.first(where: { $0.team.id == teamID }) else {
+        throw TestFixtureError.missingStandingsSnapshot(
+            teamID: teamID,
+            availableTeamIDs: standings.map(\.team.id),
+            count: standings.count
+        )
+    }
+    return snapshot
+}
+
 // fixtureData 메서드는 이 타입의 주요 동작을 수행합니다.
 private func fixtureData(named name: String) throws -> Data {
-    let fixturesDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .appendingPathComponent("Fixtures", isDirectory: true)
-    return try Data(contentsOf: fixturesDirectory.appendingPathComponent("\(name).json"))
+    let fixturesDirectory = testFixturesDirectory()
+    let fixtureURL = fixturesDirectory.appendingPathComponent("\(name).json")
+    guard FileManager.default.fileExists(atPath: fixtureURL.path) else {
+        throw TestFixtureError.missingFixture(name: "\(name).json", searchedPath: fixtureURL.path)
+    }
+    do {
+        return try Data(contentsOf: fixtureURL)
+    } catch {
+        throw TestFixtureError.unreadableFixture(name: "\(name).json", searchedPath: fixtureURL.path, underlying: error)
+    }
 }
 
 // saveFixtureData 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
 private func saveFixtureData(_ data: Data, named name: String) throws {
-    let fixturesDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .appendingPathComponent("Fixtures", isDirectory: true)
+    let fixturesDirectory = testFixturesDirectory()
     try FileManager.default.createDirectory(at: fixturesDirectory, withIntermediateDirectories: true, attributes: nil)
     try data.write(to: fixturesDirectory.appendingPathComponent("\(name).json"), options: .atomic)
+}
+
+// testFixturesDirectory 메서드는 테스트 fixture 탐색 경로를 한 곳에서 정의합니다.
+private func testFixturesDirectory() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures", isDirectory: true)
 }
 
 // makeTemporaryDirectory 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
@@ -17643,12 +17984,9 @@ private func makeTemporaryUserDefaults() -> UserDefaults {
     return defaults
 }
 
-// appLocalBootstrapFixtureData 메서드는 이 타입의 주요 동작을 수행합니다.
-private func appLocalBootstrapFixtureData() throws -> Data {
-    let projectDirectory = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-    return try Data(contentsOf: projectDirectory.appendingPathComponent("kboScore/LocalBootstrapData.json"))
+// localBootstrapFixtureData 메서드는 앱 fallback bootstrap과 같은 형태의 테스트 fixture를 읽습니다.
+private func localBootstrapFixtureData() throws -> Data {
+    try fixtureData(named: "local-bootstrap-data")
 }
 
 // makeBootstrapJSON 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
@@ -17656,7 +17994,7 @@ private func makeBootstrapJSON(
     teamName: String? = nil,
     firstGameAwayScore: Int? = nil
 ) throws -> Data {
-    guard var root = try JSONSerialization.jsonObject(with: appLocalBootstrapFixtureData()) as? [String: Any] else {
+    guard var root = try JSONSerialization.jsonObject(with: localBootstrapFixtureData()) as? [String: Any] else {
         throw CocoaError(.fileReadCorruptFile)
     }
 

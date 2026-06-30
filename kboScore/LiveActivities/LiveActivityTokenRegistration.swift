@@ -160,9 +160,8 @@ nonisolated struct LiveActivityPushToStartTokenRegistrationKey: Hashable, Sendab
 
     nonisolated var description: String {
         [
-            "tokenPrefix=\(tokenPrefix)",
             "environment=\(environment)",
-            "favoriteTeamID=\(favoriteTeamID ?? "none")",
+            "hasFavoriteTeamID=\(favoriteTeamID?.isEmpty == false)",
             "notificationsAuthorized=\(notificationsAuthorized)",
             "liveActivitiesEnabled=\(liveActivitiesEnabled)",
             "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)",
@@ -198,13 +197,12 @@ nonisolated struct LiveActivityTokenRegistrationKey: Hashable, Sendable, CustomS
 
     nonisolated var description: String {
         [
-            "activityId=\(activityId)",
-            "tokenPrefix=\(tokenPrefix)",
+            "hasActivityId=\(activityId.isEmpty == false)",
             "environment=\(environment)",
-            "publicGameID=\(publicGameID ?? "none")",
-            "providerGameID=\(providerGameID ?? "none")",
-            "databaseID=\(databaseID)",
-            "stableDetailIdentity=\(stableDetailIdentity)",
+            "hasPublicGameID=\(publicGameID?.isEmpty == false)",
+            "hasProviderGameID=\(providerGameID?.isEmpty == false)",
+            "hasDatabaseID=\(databaseID.isEmpty == false)",
+            "hasStableDetailIdentity=\(stableDetailIdentity.isEmpty == false)",
             "endpoint=\(endpointDescription ?? "missing")"
         ].joined(separator: " ")
     }
@@ -359,21 +357,23 @@ struct RemoteLiveActivityTokenRegistrationClient: LiveActivityTokenRegistrationC
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             #if DEBUG
-            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
+            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasActivityId=\(payload.activityId.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) status=-1 responseKind=nonHttp retry=false")
             #else
-            print("[LiveActivity] token registration failure reason=nonHttpResponse status=-1")
+            print("[LiveActivity] token registration failure reason=nonHttpResponse status=-1 retry=false")
             #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
             #if DEBUG
-            let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
-            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
+            print("[LiveActivity] token registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasActivityId=\(payload.activityId.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) status=\(httpResponse.statusCode) responseBytes=\(data.count) retry=false")
             #else
-            print("[LiveActivity] token registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode)")
+            print("[LiveActivity] token registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode) retry=false")
             #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
         }
+        #if DEBUG
+        print("[LiveActivity] token registration response success endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasActivityId=\(payload.activityId.isEmpty == false) hasPublicGameID=\(payload.publicGameID?.isEmpty == false) hasProviderGameID=\(payload.providerGameID?.isEmpty == false) status=\(httpResponse.statusCode) retry=false")
+        #endif
         return .synced
     }
 }
@@ -401,21 +401,23 @@ struct RemoteLiveActivityPushToStartTokenRegistrationClient: LiveActivityPushToS
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             #if DEBUG
-            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=-1 body=<non-http response>")
+            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) status=-1 responseKind=nonHttp retry=false")
             #else
-            print("[LiveActivity] push-to-start registration failure reason=nonHttpResponse status=-1")
+            print("[LiveActivity] push-to-start registration failure reason=nonHttpResponse status=-1 retry=false")
             #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(-1)
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
             #if DEBUG
-            let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
-            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) status=\(httpResponse.statusCode) body=\(body)")
+            print("[LiveActivity] push-to-start registration failure endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) status=\(httpResponse.statusCode) responseBytes=\(data.count) retry=false")
             #else
-            print("[LiveActivity] push-to-start registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode)")
+            print("[LiveActivity] push-to-start registration failure reason=unexpectedStatusCode status=\(httpResponse.statusCode) retry=false")
             #endif
             throw RemoteNotificationRegistrationClientError.unexpectedStatusCode(httpResponse.statusCode)
         }
+        #if DEBUG
+        print("[LiveActivity] push-to-start registration response success endpoint=\(endpointURL.absoluteString) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) status=\(httpResponse.statusCode) retry=false")
+        #endif
         return .synced
     }
 }

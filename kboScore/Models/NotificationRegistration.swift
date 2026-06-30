@@ -70,10 +70,15 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         case gameEndEnabled
         case onBaseEnabled
         case inningChangeEnabled
-        case favoriteTeamOnlyEnabled
+        case favoriteTeamOnlyEnabled = "favorite_team_only_enabled"
         case muteWhenLosingEnabled
         case liveActivitiesEnabled
         case liveActivityAutoStartEnabled
+    }
+
+// LegacyCodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case favoriteTeamOnlyEnabled
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -166,7 +171,10 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         gameEndEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameEndEnabled) ?? true
         onBaseEnabled = try container.decodeIfPresent(Bool.self, forKey: .onBaseEnabled) ?? false
         inningChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .inningChangeEnabled) ?? false
-        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled) ?? false
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled))
+            ?? false
         muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
         liveActivitiesEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivitiesEnabled) ?? true
         liveActivityAutoStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivityAutoStartEnabled) ?? liveActivitiesEnabled
@@ -199,6 +207,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
 extension NotificationRegistrationPayload {
     nonisolated var debugBooleanDescription: String {
         [
+            "notificationsEnabled=\(notificationsAuthorized)",
             "gameStartEnabled=\(gameStartEnabled)",
             "scoreChangeEnabled=\(scoreChangeEnabled)",
             "leadChangeEnabled=\(leadChangeEnabled)",
@@ -210,6 +219,10 @@ extension NotificationRegistrationPayload {
             "liveActivitiesEnabled=\(liveActivitiesEnabled)",
             "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)"
         ].joined(separator: " ")
+    }
+
+    nonisolated var debugRegistrationDescription: String {
+        "environment=\(environment) favoriteTeamID=\(favoriteTeamID ?? "none") \(debugBooleanDescription)"
     }
 }
 
@@ -292,7 +305,6 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
 
     nonisolated var description: String {
         [
-            "tokenPrefix=\(deviceToken.prefix(8))",
             "environment=\(environment)",
             "favoriteTeamID=\(favoriteTeamID ?? "none")",
             "notificationsEnabled=\(notificationsEnabled)",

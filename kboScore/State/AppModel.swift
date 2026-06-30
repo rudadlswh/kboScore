@@ -359,6 +359,7 @@ final class AppModel {
         FavoriteTeamScheduleWidgetShared.saveFavoriteTeamID(initialSettings.favoriteTeamID)
         if let bootstrap {
             apply(bootstrap)
+            publishBootstrapStandings()
             hasLoaded = true
             let now = Date()
             lastSuccessfulRefresh[.games] = now
@@ -409,6 +410,15 @@ final class AppModel {
         }
         normalizeFavoriteTeamSelectionIfNeeded()
         logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "bootstrap")
+    }
+
+    // publishBootstrapStandings 메서드는 bootstrap으로 초기화된 화면 상태의 순위 행을 즉시 계산합니다.
+    private func publishBootstrapStandings() {
+        refreshLocalStandingsProbabilitySignalsSynchronously()
+        refreshPublishedStandingsRowsWithCurrentSource(
+            season: currentStandingsSeason(),
+            reason: "bootstrap"
+        )
     }
 
     // normalizeFavoriteTeamSelectionIfNeeded 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
@@ -3970,7 +3980,7 @@ final class AppModel {
     // updateAPNsDeviceToken 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func updateAPNsDeviceToken(_ token: String) {
         #if DEBUG
-        print("[NotificationPipeline] APNs token stored tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        print("[NotificationPipeline] APNs token stored hasToken=\(!token.isEmpty) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         #else
         print("[NotificationPipeline] APNs token stored reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
@@ -4124,26 +4134,26 @@ final class AppModel {
         }
 
         #if DEBUG
-        print("[LiveActivity] push-to-start token received reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) favoriteTeamID=\(payload.favoriteTeamID ?? "nil")")
+        print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
         #else
         print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment)")
         #endif
-        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled)")
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
         do {
             _ = try await liveActivityPushToStartTokenRegistrationClient.register(payload)
             #if DEBUG
-            print("[LiveActivity] push-to-start registration success reason=\(reason) tokenPrefix=\(token.prefix(8)) environment=\(payload.environment)")
+            print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
             #else
-            print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment)")
+            print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) retry=false")
             #endif
-            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment)")
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
         } catch {
             #if DEBUG
-            print("[LiveActivity] push-to-start registration failure reason=\(reason) tokenPrefix=\(token.prefix(8)) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") error=\(error)")
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false error=\(error)")
             #else
-            print("[LiveActivity] push-to-start registration failure reason=\(reason)")
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) retry=false")
             #endif
-            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) error=\(error)")
+            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false error=\(error)")
         }
     }
 
@@ -4174,22 +4184,6 @@ final class AppModel {
             #endif
             return
         }
-        guard payload.alertTypes.isEmpty == false else {
-            notificationRegistrationSyncStatus = .idle
-            #if DEBUG
-            print("[NotificationPipeline] registration skipped reason=notificationsDisabled favoriteTeamID=\(favoriteTeamID)")
-            #endif
-            return
-        }
-        guard notificationAuthorizationStatus == .authorized ||
-                notificationAuthorizationStatus == .provisional else {
-            notificationRegistrationSyncStatus = .idle
-            #if DEBUG
-            print("[NotificationPipeline] registration skipped reason=authorizationNotGranted status=\(notificationAuthorizationStatus.rawValue)")
-            #endif
-            return
-        }
-
         let key = NotificationRegistrationKey(
             payload: payload,
             endpointDescription: notificationRegistrationClient.debugEndpointDescription
@@ -4238,11 +4232,11 @@ final class AppModel {
         do {
             try Task.checkCancellation()
             #if DEBUG
-            print("[NotificationPipeline] registration sync start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") tokenPrefix=\(payload.deviceToken.prefix(8)) environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugBooleanDescription)")
+            print("[NotificationPipeline] registration sync start buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugRegistrationDescription)")
             #else
             print("[NotificationPipeline] registration sync start reason=deviceRegistration environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
             #endif
-            AppLog.info(.notification, "[NotificationPipeline] registration sync start environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
+            AppLog.info(.notification, "[NotificationPipeline] registration sync start buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugRegistrationDescription)")
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             guard generation == notificationRegistrationSyncGeneration else {
                 notificationRegistrationDeduplicationState.fail(key)

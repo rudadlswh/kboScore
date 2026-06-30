@@ -28,7 +28,7 @@ final class AppNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNoti
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         #if DEBUG
-        print("[NotificationPipeline] APNs token received tokenPrefix=\(token.prefix(8)) length=\(token.count) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        print("[NotificationPipeline] APNs token received environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         #else
         print("[NotificationPipeline] APNs token received reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
