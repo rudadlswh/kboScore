@@ -106,6 +106,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         self.environment = environment
         self.deviceToken = deviceToken
         self.installationId = installationId
+        let hasFavoriteTeamID = favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         self.favoriteTeamID = favoriteTeamID
         self.notificationsAuthorized = notificationsAuthorized
         self.alertTypes = alertTypes
@@ -116,7 +117,7 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         self.gameEndEnabled = gameEndEnabled
         self.onBaseEnabled = onBaseEnabled
         self.inningChangeEnabled = inningChangeEnabled
-        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+        self.favoriteTeamOnlyEnabled = hasFavoriteTeamID || favoriteTeamOnlyEnabled
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
         self.liveActivitiesEnabled = liveActivitiesEnabled
         self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled

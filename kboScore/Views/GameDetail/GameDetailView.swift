@@ -137,63 +137,19 @@ struct GameDetailView: View {
                     forceRefresh: refreshedGame.status.isLiveLike
                 )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
-            }
-        }
-        .task(id: viewModel.liveRefreshTaskID) {
-            guard viewModel.shouldAutoRefreshLiveGame else {
-                #if DEBUG
-                print("[GameDetailLive] refresh stop reason=notLive stableIdentity=\(viewModel.stableIdentity)")
-                #endif
-                return
-            }
-            #if DEBUG
-            print("[GameDetailLive] refresh start stableIdentity=\(viewModel.stableIdentity) intervalSeconds=\(GameDetailViewModel.livePollingIntervalNanoseconds / 1_000_000_000)")
-            #endif
-            defer {
-                #if DEBUG
-                print("[GameDetailLive] refresh stop stableIdentity=\(viewModel.stableIdentity)")
-                #endif
-            }
-            while Task.isCancelled == false {
-                do {
-                    try await Task.sleep(nanoseconds: GameDetailViewModel.livePollingIntervalNanoseconds)
-                } catch {
-                    break
-                }
-                guard Task.isCancelled == false, viewModel.shouldAutoRefreshLiveGame else { break }
-                let inputLocalGameID = viewModel.game?.id
-                guard let refreshedGame = await viewModel.refreshIfNeeded(
-                    appModel: appModel,
-                    bypassAutomaticThrottle: true
-                ) else { continue }
-                await loadDetailPresentation(
-                    for: refreshedGame,
-                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
-                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
-                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
-                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-                    forceRefresh: refreshedGame.status.isLiveLike
-                )
-                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
+                await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, viewModel.shouldAutoRefreshLiveGame else { return }
             Task {
-                let inputLocalGameID = viewModel.game?.id
-                guard let refreshedGame = await viewModel.refreshIfNeeded(
-                    appModel: appModel,
-                    bypassAutomaticThrottle: true
-                ) else { return }
-                await loadDetailPresentation(
-                    for: refreshedGame,
-                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
-                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
-                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
-                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-                    forceRefresh: refreshedGame.status.isLiveLike
-                )
-                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
+                await appModel.resumeLiveGameDetailPollingIfNeeded()
+            }
+        }
+        .onChange(of: appModel.game(withIdentity: viewModel.stableIdentity)) { _, updatedGame in
+            guard let updatedGame else { return }
+            Task {
+                await applySharedGameDetailUpdate(updatedGame)
             }
         }
         .refreshable {
@@ -208,7 +164,25 @@ struct GameDetailView: View {
                 rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
                 forceRefresh: true
             )
+            await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
         }
+    }
+
+    // applySharedGameDetailUpdate 메서드는 AppModel의 live polling 결과를 현재 표시 중인 상세 화면에 반영합니다.
+    private func applySharedGameDetailUpdate(_ updatedGame: GameDetail) async {
+        let inputLocalGameID = viewModel.game?.id ?? updatedGame.id
+        if let result = appModel.gameDetailRefreshResultSnapshot(for: updatedGame.stableDetailIdentity) ??
+            appModel.gameDetailRefreshResultSnapshot(for: viewModel.stableIdentity) {
+            viewModel.applyExternalRefreshResult(result)
+        }
+        await loadDetailPresentation(
+            for: updatedGame,
+            inputLocalGameId: inputLocalGameID,
+            rawSupabaseGameID: viewModel.rawSupabaseGameID,
+            rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+            rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+            forceRefresh: updatedGame.status.isLiveLike
+        )
     }
 
     // loadDetailPresentation 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.

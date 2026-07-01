@@ -6026,6 +6026,24 @@ struct kboScoreTests {
         #expect(payload.alertTypes.contains(.scoreChange))
     }
 
+    @Test func notificationRegistrationPayloadForcesFavoriteTeamOnlyWhenFavoriteTeamExists() async throws {
+        let settings = notificationRegistrationSettings(
+            favoriteTeamID: "lotte",
+            preferences: NotificationPreferences(favoriteTeamOnlyEnabled: false)
+        )
+
+        let payload = try #require(
+            NotificationRegistrationPayload(
+                deviceToken: "abc123",
+                settings: settings,
+                authorizationStatus: .authorized
+            )
+        )
+
+        #expect(payload.favoriteTeamID == "lotte")
+        #expect(payload.favoriteTeamOnlyEnabled == true)
+    }
+
     @Test func notificationRegistrationEnvironmentNormalizesConfiguredValues() async throws {
         #expect(NotificationRegistrationEnvironment.normalize("sandbox") == "sandbox")
         #expect(NotificationRegistrationEnvironment.normalize(" Sandbox ") == "sandbox")
@@ -6318,7 +6336,7 @@ struct kboScoreTests {
         #expect(payload.gameEndEnabled == false)
         #expect(payload.onBaseEnabled == false)
         #expect(payload.inningChangeEnabled == false)
-        #expect(payload.favoriteTeamOnlyEnabled == false)
+        #expect(payload.favoriteTeamOnlyEnabled == true)
         #expect(model.notificationRegistrationSyncStatus == .synced)
     }
 

@@ -129,6 +129,7 @@ struct kboScoreApp: App {
                     switch newPhase {
                     case .active:
                         Task {
+                            await appModel.resumeLiveGameDetailPollingIfNeeded()
                             await appModel.refreshTodayOnForeground()
                         }
                     case .background:

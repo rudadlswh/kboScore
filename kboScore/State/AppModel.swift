@@ -258,6 +258,9 @@ final class AppModel {
     private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
     private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
     private var inFlightGameDetailRefreshTasks: [String: Task<GameDetailRefreshResult?, Never>] = [:]
+    private var activeGameDetailLivePollingIdentity: String?
+    private var gameDetailLivePollingTask: Task<Void, Never>?
+    private var gameDetailLivePollingGeneration = 0
     private var inFlightGameDetailDatabaseReviewTasks: [String: Task<GameDetailDatabaseReviewFetchResult?, Never>] = [:]
     private var cachedGameDetailDatabaseReviewsByRequestKey: [String: GameDetailDatabaseReviewFetchResult] = [:]
     private var cachedGameDetailDatabaseReviewsByRawSupabaseID: [UUID: GameDetailDatabaseReviewFetchResult] = [:]
@@ -2242,6 +2245,119 @@ final class AppModel {
     @discardableResult
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
         await refreshGameDetailResult(for: gameIdentity, forceRefresh: forceRefresh)?.game
+    }
+
+    // startLiveGameDetailPolling 메서드는 화면 생명주기와 분리된 라이브 경기 상세 갱신을 시작합니다.
+    func startLiveGameDetailPolling(gameIdentity: String) async {
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else { return }
+        guard selectedGame.status.isLiveLike else { return }
+
+        let stableIdentity = selectedGame.stableDetailIdentity
+        if activeGameDetailLivePollingIdentity == stableIdentity,
+           let pollingTask = gameDetailLivePollingTask,
+           pollingTask.isCancelled == false {
+            #if DEBUG
+            print("[GameDetailLivePolling] deduped identity=\(stableIdentity)")
+            #endif
+            return
+        }
+
+        if let activeIdentity = activeGameDetailLivePollingIdentity,
+           activeIdentity != stableIdentity {
+            #if DEBUG
+            print("[GameDetailLivePolling] replace old=\(activeIdentity) new=\(stableIdentity)")
+            #endif
+            gameDetailLivePollingTask?.cancel()
+        } else if gameDetailLivePollingTask?.isCancelled == true {
+            gameDetailLivePollingTask = nil
+        }
+
+        activeGameDetailLivePollingIdentity = stableIdentity
+        gameDetailLivePollingGeneration += 1
+        let generation = gameDetailLivePollingGeneration
+        let intervalNanoseconds = GameDetailViewModel.livePollingIntervalNanoseconds
+        #if DEBUG
+        print("[GameDetailLivePolling] start identity=\(stableIdentity) intervalSeconds=\(intervalNanoseconds / 1_000_000_000)")
+        #endif
+
+        gameDetailLivePollingTask = Task { @MainActor [weak self] in
+            await self?.runGameDetailLivePolling(
+                identity: stableIdentity,
+                generation: generation,
+                intervalNanoseconds: intervalNanoseconds
+            )
+        }
+    }
+
+    // resumeLiveGameDetailPollingIfNeeded 메서드는 foreground 복귀 시 기존 라이브 polling task를 복구합니다.
+    func resumeLiveGameDetailPollingIfNeeded() async {
+        guard let activeIdentity = activeGameDetailLivePollingIdentity else { return }
+        if let pollingTask = gameDetailLivePollingTask,
+           pollingTask.isCancelled == false {
+            return
+        }
+        guard let selectedGame = await resolveGameDetailSelection(for: activeIdentity) else { return }
+        guard selectedGame.status.isLiveLike else { return }
+        await startLiveGameDetailPolling(gameIdentity: activeIdentity)
+    }
+
+    // gameDetailRefreshResultSnapshot 메서드는 공유 저장소에 반영된 상세 경기 상태를 화면 모델에 전달합니다.
+    func gameDetailRefreshResultSnapshot(for gameIdentity: String) -> GameDetailRefreshResult? {
+        guard let game = game(withIdentity: gameIdentity) else { return nil }
+        let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
+        return GameDetailRefreshResult(
+            game: game,
+            rawSupabaseGameID: rawIdentity?.supabaseGameID,
+            providerGameID: rawIdentity?.providerGameID ?? game.providerGameID,
+            publicGameID: rawIdentity?.publicGameID ?? game.publicGameID
+        )
+    }
+
+    // runGameDetailLivePolling 메서드는 선택된 라이브 경기 상세를 1초 간격으로 강제 갱신합니다.
+    private func runGameDetailLivePolling(
+        identity: String,
+        generation: Int,
+        intervalNanoseconds: UInt64
+    ) async {
+        defer {
+            if Task.isCancelled {
+                #if DEBUG
+                print("[GameDetailLivePolling] cancelled identity=\(identity)")
+                #endif
+            }
+            if activeGameDetailLivePollingIdentity == identity,
+               gameDetailLivePollingGeneration == generation {
+                gameDetailLivePollingTask = nil
+            }
+        }
+
+        while Task.isCancelled == false {
+            do {
+                try await Task.sleep(nanoseconds: intervalNanoseconds)
+            } catch {
+                break
+            }
+            guard Task.isCancelled == false else { break }
+            #if DEBUG
+            print("[GameDetailLivePolling] tick identity=\(identity)")
+            #endif
+            guard let result = await refreshGameDetailResult(for: identity, forceRefresh: true) else {
+                continue
+            }
+            guard Task.isCancelled == false else { break }
+            if result.game.status.isLiveLike == false {
+                #if DEBUG
+                print("[GameDetailLivePolling] stop reason=notLive status=\(result.game.status.rawValue)")
+                #endif
+                if activeGameDetailLivePollingIdentity == identity,
+                   gameDetailLivePollingGeneration == generation {
+                    activeGameDetailLivePollingIdentity = nil
+                    gameDetailLivePollingTask = nil
+                }
+                return
+            }
+            await startOrUpdateLiveActivityIfNeeded(for: result.game)
+        }
     }
 
     // refreshGameDetailResult 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.

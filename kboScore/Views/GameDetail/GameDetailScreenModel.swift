@@ -672,7 +672,7 @@ final class GameDetailViewModel: ObservableObject {
     private static let automaticRefreshStableIdentityThrottle: TimeInterval = 8
     private static var inFlightRefreshesByStableIdentity: [String: Task<GameDetailRefreshResult?, Never>] = [:]
     private static var recentAutomaticRefreshesByStableIdentity: [String: (date: Date, result: GameDetailRefreshResult)] = [:]
-    static let livePollingIntervalNanoseconds: UInt64 = 12_000_000_000
+    static let livePollingIntervalNanoseconds: UInt64 = 1_000_000_000
 
     private let requestedIdentity: String
     private var lastAutomaticRefreshAt: Date?
@@ -689,10 +689,6 @@ final class GameDetailViewModel: ObservableObject {
 
     var shouldAutoRefreshLiveGame: Bool {
         game?.status.isLiveLike == true
-    }
-
-    var liveRefreshTaskID: String {
-        shouldAutoRefreshLiveGame ? "live:\(stableIdentity)" : "idle:\(stableIdentity)"
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -739,6 +735,11 @@ final class GameDetailViewModel: ObservableObject {
         isResolvingInitialGame = false
         hasAttemptedInitialResolution = true
         baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
+    }
+
+    // applyExternalRefreshResult 메서드는 AppModel의 전역 live polling 결과를 현재 화면 상태에 반영합니다.
+    func applyExternalRefreshResult(_ fetched: GameDetailRefreshResult) {
+        apply(fetched)
     }
 
     // refreshIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
