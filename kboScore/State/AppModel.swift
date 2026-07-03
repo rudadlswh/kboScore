@@ -138,6 +138,12 @@ struct GameDetailRefreshResult: Sendable {
     let publicGameID: String?
 }
 
+private enum GameDetailLiveStateRefresh: Sendable {
+    case updated(GameDetailRefreshResult)
+    case unchanged
+    case unavailable
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -161,9 +167,11 @@ final class AppModel {
     private let notificationRegistrationClient: any NotificationRegistrationClient
     private let liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient
     private let scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient
+    private let gameLiveStateClient: any GameLiveStateFetching
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
     private let cancellationNotificationScheduler: GameCancellationNotificationScheduler
     private let currentDateProvider: CurrentDateProvider
+    private let gameDetailPollingIntervalNanoseconds: UInt64
     private let cancellationNotificationCoordinator = GameCancellationNotificationCoordinator()
     private let officialGameCenterClient = OfficialKBOGameCenterClient()
     private let localPostseasonQualificationCalculator = LocalPostseasonQualificationCalculator()
@@ -186,6 +194,7 @@ final class AppModel {
     private var lastFavoriteTeamWidgetSnapshot: FavoriteTeamScheduleWidgetSnapshot?
     private var favoriteTeamWidgetMonthSources: [KBOMonthScheduleKey: FavoriteTeamScheduleWidgetMonthSource] = [:]
     private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
+    private var lastGameDetailLiveStateRawHashByIdentity: [String: String] = [:]
 
     var isLoading = false
     var loadErrorMessage: String?
@@ -292,10 +301,12 @@ final class AppModel {
         notificationRegistrationClient: any NotificationRegistrationClient = NoOpNotificationRegistrationClient(),
         liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient = NoOpLiveActivityPushToStartTokenRegistrationClient(),
         scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient = NoOpScheduleStaleGameReconciliationClient(),
+        gameLiveStateClient: any GameLiveStateFetching = GameLiveStateClientFactory.makeAppClient(),
         liveActivityController: (any FavoriteTeamLiveActivityControlling)? = nil,
         bootstrap: KBOBootstrapData? = nil,
         usePersistedSettings: Bool = true,
         currentDateProvider: @escaping CurrentDateProvider = Date.init,
+        gameDetailPollingIntervalNanoseconds: UInt64 = 2_000_000_000,
         cancellationNotificationScheduler: @escaping GameCancellationNotificationScheduler = { request in
             try await UNUserNotificationCenter.current().add(request)
         }
@@ -305,8 +316,10 @@ final class AppModel {
         self.notificationRegistrationClient = notificationRegistrationClient
         self.liveActivityPushToStartTokenRegistrationClient = liveActivityPushToStartTokenRegistrationClient
         self.scheduleStaleGameReconciliationClient = scheduleStaleGameReconciliationClient
+        self.gameLiveStateClient = gameLiveStateClient
         self.cancellationNotificationScheduler = cancellationNotificationScheduler
         self.currentDateProvider = currentDateProvider
+        self.gameDetailPollingIntervalNanoseconds = gameDetailPollingIntervalNanoseconds
         #if canImport(ActivityKit)
         self.liveActivityController = liveActivityController ?? FavoriteTeamLiveActivityManager()
         #else
@@ -2249,16 +2262,24 @@ final class AppModel {
 
     // startLiveGameDetailPolling 메서드는 화면 생명주기와 분리된 라이브 경기 상세 갱신을 시작합니다.
     func startLiveGameDetailPolling(gameIdentity: String) async {
-        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else { return }
-        guard selectedGame.status.isLiveLike else { return }
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else {
+            logGameDetailPollingSkip(identity: gameIdentity, reason: "missingGame")
+            return
+        }
+        let now = currentDateProvider()
+        guard selectedGame.shouldPollGameDetail(now: now) else {
+            logGameDetailPollingSkip(
+                identity: selectedGame.stableDetailIdentity,
+                reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "notEligible"
+            )
+            return
+        }
 
         let stableIdentity = selectedGame.stableDetailIdentity
         if activeGameDetailLivePollingIdentity == stableIdentity,
            let pollingTask = gameDetailLivePollingTask,
            pollingTask.isCancelled == false {
-            #if DEBUG
-            print("[GameDetailLivePolling] deduped identity=\(stableIdentity)")
-            #endif
+            logGameDetailPollingSkip(identity: stableIdentity, reason: "duplicateTask")
             return
         }
 
@@ -2275,10 +2296,8 @@ final class AppModel {
         activeGameDetailLivePollingIdentity = stableIdentity
         gameDetailLivePollingGeneration += 1
         let generation = gameDetailLivePollingGeneration
-        let intervalNanoseconds = GameDetailViewModel.livePollingIntervalNanoseconds
-        #if DEBUG
-        print("[GameDetailLivePolling] start identity=\(stableIdentity) intervalSeconds=\(intervalNanoseconds / 1_000_000_000)")
-        #endif
+        let intervalNanoseconds = gameDetailPollingIntervalNanoseconds
+        logGameDetailPolling("GameDetail polling started identity=\(stableIdentity) intervalSeconds=\(intervalNanoseconds / 1_000_000_000)")
 
         gameDetailLivePollingTask = Task { @MainActor [weak self] in
             await self?.runGameDetailLivePolling(
@@ -2289,16 +2308,53 @@ final class AppModel {
         }
     }
 
+    // stopLiveGameDetailPolling 메서드는 상세 화면이 사라질 때 자동 갱신을 중단합니다.
+    func stopLiveGameDetailPolling() {
+        guard activeGameDetailLivePollingIdentity != nil || gameDetailLivePollingTask != nil else {
+            logGameDetailPollingSkip(identity: "<none>", reason: "stopWithoutActiveTask")
+            return
+        }
+        let identity = activeGameDetailLivePollingIdentity ?? "<unknown>"
+        gameDetailLivePollingGeneration += 1
+        gameDetailLivePollingTask?.cancel()
+        gameDetailLivePollingTask = nil
+        activeGameDetailLivePollingIdentity = nil
+        logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=screenDisappear")
+    }
+
     // resumeLiveGameDetailPollingIfNeeded 메서드는 foreground 복귀 시 기존 라이브 polling task를 복구합니다.
     func resumeLiveGameDetailPollingIfNeeded() async {
-        guard let activeIdentity = activeGameDetailLivePollingIdentity else { return }
+        guard let activeIdentity = activeGameDetailLivePollingIdentity else {
+            logGameDetailPollingSkip(identity: "<none>", reason: "foregroundNoActiveIdentity")
+            return
+        }
+        _ = await refreshGameDetailResult(for: activeIdentity, forceRefresh: true)
         if let pollingTask = gameDetailLivePollingTask,
            pollingTask.isCancelled == false {
             return
         }
-        guard let selectedGame = await resolveGameDetailSelection(for: activeIdentity) else { return }
-        guard selectedGame.status.isLiveLike else { return }
+        guard let selectedGame = await resolveGameDetailSelection(for: activeIdentity) else {
+            logGameDetailPollingSkip(identity: activeIdentity, reason: "foregroundMissingGame")
+            return
+        }
+        let now = currentDateProvider()
+        guard selectedGame.shouldPollGameDetail(now: now) else {
+            logGameDetailPollingSkip(
+                identity: activeIdentity,
+                reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "foregroundNotEligible"
+            )
+            return
+        }
         await startLiveGameDetailPolling(gameIdentity: activeIdentity)
+    }
+
+    var isGameDetailPollingActiveForTesting: Bool {
+        activeGameDetailLivePollingIdentity != nil &&
+            gameDetailLivePollingTask?.isCancelled == false
+    }
+
+    var activeGameDetailPollingIdentityForTesting: String? {
+        activeGameDetailLivePollingIdentity
     }
 
     // gameDetailRefreshResultSnapshot 메서드는 공유 저장소에 반영된 상세 경기 상태를 화면 모델에 전달합니다.
@@ -2313,7 +2369,7 @@ final class AppModel {
         )
     }
 
-    // runGameDetailLivePolling 메서드는 선택된 라이브 경기 상세를 1초 간격으로 강제 갱신합니다.
+    // runGameDetailLivePolling 메서드는 선택된 라이브 경기 상세를 2초 간격으로 갱신합니다.
     private func runGameDetailLivePolling(
         identity: String,
         generation: Int,
@@ -2321,9 +2377,7 @@ final class AppModel {
     ) async {
         defer {
             if Task.isCancelled {
-                #if DEBUG
-                print("[GameDetailLivePolling] cancelled identity=\(identity)")
-                #endif
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=cancelled")
             }
             if activeGameDetailLivePollingIdentity == identity,
                gameDetailLivePollingGeneration == generation {
@@ -2338,25 +2392,106 @@ final class AppModel {
                 break
             }
             guard Task.isCancelled == false else { break }
-            #if DEBUG
-            print("[GameDetailLivePolling] tick identity=\(identity)")
-            #endif
-            guard let result = await refreshGameDetailResult(for: identity, forceRefresh: true) else {
+            logGameDetailPolling("GameDetail polling tick identity=\(identity)")
+            guard let selectedGame = await resolveGameDetailSelection(for: identity) else {
+                logGameDetailPollingSkip(identity: identity, reason: "tickMissingGame")
                 continue
             }
-            guard Task.isCancelled == false else { break }
-            if result.game.status.isLiveLike == false {
-                #if DEBUG
-                print("[GameDetailLivePolling] stop reason=notLive status=\(result.game.status.rawValue)")
-                #endif
+            let now = currentDateProvider()
+            guard selectedGame.shouldPollGameDetail(now: now) else {
+                logGameDetailPollingSkip(
+                    identity: identity,
+                    reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "tickNotEligible"
+                )
                 if activeGameDetailLivePollingIdentity == identity,
                    gameDetailLivePollingGeneration == generation {
                     activeGameDetailLivePollingIdentity = nil
                     gameDetailLivePollingTask = nil
                 }
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=notEligible")
                 return
             }
-            await startOrUpdateLiveActivityIfNeeded(for: result.game)
+            guard let result = await refreshGameDetailResult(for: identity, initialGame: selectedGame, forceRefresh: true) else {
+                logGameDetailPolling("GameDetail polling refresh failed identity=\(identity) reason=nilResult")
+                continue
+            }
+            logGameDetailPolling(
+                "GameDetail polling tick latestSnapshot runner_on_first=\(boolDebugText(result.game.bases?.first)) runner_on_second=\(boolDebugText(result.game.bases?.second)) runner_on_third=\(boolDebugText(result.game.bases?.third)) identity=\(identity)"
+            )
+            logGameDetailPolling("GameDetail polling refresh succeeded identity=\(identity) status=\(result.game.status.rawValue)")
+            guard Task.isCancelled == false else { break }
+            if result.game.shouldPollGameDetail(now: currentDateProvider()) {
+                await startOrUpdateLiveActivityIfNeeded(for: result.game)
+            } else {
+                logGameDetailPollingSkip(
+                    identity: identity,
+                    reason: result.game.gameDetailPollingSkipReason(now: currentDateProvider()) ?? "refreshedNotEligible"
+                )
+                if activeGameDetailLivePollingIdentity == identity,
+                   gameDetailLivePollingGeneration == generation {
+                    activeGameDetailLivePollingIdentity = nil
+                    gameDetailLivePollingTask = nil
+                }
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=refreshedNotEligible")
+                return
+            }
+        }
+    }
+
+    private func logGameDetailPollingSkip(identity: String, reason: String) {
+        logGameDetailPolling("polling skip reason=\(reason) identity=\(identity)")
+    }
+
+    private func logGameDetailPolling(_ message: String) {
+        AppLog.info(.gameDetail, "[GameDetailPolling] \(message)")
+        #if DEBUG
+        print("[GameDetailPolling] \(message)")
+        #endif
+    }
+
+    private func refreshGameDetailLiveStateResult(for gameIdentity: String) async -> GameDetailLiveStateRefresh {
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity),
+              selectedGame.status.isLiveLike,
+              let publicGameID = selectedGame.publicGameID?.nilIfBlank else {
+            return .unavailable
+        }
+        do {
+            let liveState = try await gameLiveStateClient.fetchGameLiveState(gameId: publicGameID)
+            let stableKey = selectedGame.stableDetailIdentity
+            if lastGameDetailLiveStateRawHashByIdentity[stableKey] == liveState.rawHash {
+                #if DEBUG
+                print("[GameDetailLivePolling] skipped reason=rawHashUnchanged identity=\(stableKey) rawHash=\(liveState.rawHash)")
+                #endif
+                return .unchanged
+            }
+            lastGameDetailLiveStateRawHashByIdentity[stableKey] = liveState.rawHash
+            let updatedGame = selectedGame.applyingLiveState(liveState)
+            let previousKnownGames = allKnownGames()
+            let upsertResult = upsertScheduleGamesIntoLocalStore([updatedGame], source: .gameDetailRefresh)
+            let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([updatedGame])
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: scheduleMonthKey(for: updatedGame.scheduledStart),
+                reason: "gameDetailLiveState"
+            )
+            let resolved = game(withIdentity: updatedGame.canonicalGameIdentityValue) ??
+                game(withIdentity: gameIdentity) ??
+                updatedGame
+            if upsertResult.inserted > 0 || upsertResult.updated > 0 || cacheUpsertResult.inserted > 0 || cacheUpsertResult.updated > 0 {
+                await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+                await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+            }
+            await syncFavoriteTeamLiveActivity()
+            return .updated(GameDetailRefreshResult(
+                game: resolved,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: liveState.publicGameId
+            ))
+        } catch {
+            #if DEBUG
+            print("[GameDetailLivePolling] liveState unavailable identity=\(gameIdentity) error=\(error)")
+            #endif
+            return .unavailable
         }
     }
 
@@ -2551,9 +2686,13 @@ final class AppModel {
                 including: scheduleMonthKey(for: resolvedIncomingGame.scheduledStart),
                 reason: "gameDetailRefresh"
             )
-            let resolved = game(withIdentity: resolvedIncomingGame.canonicalGameIdentityValue) ??
+            let storeResolved = game(withIdentity: resolvedIncomingGame.canonicalGameIdentityValue) ??
                 game(withIdentity: gameIdentity) ??
                 resolvedIncomingGame
+            let resolved = gameDetailRefreshResultGame(
+                storeResolved: storeResolved,
+                incomingSnapshot: resolvedIncomingGame
+            )
             recordRawSupabaseGameDetailIdentity(snapshotResult, selectedGame: selectedGame, incomingGame: resolvedIncomingGame, resolvedGame: resolved, requestedIdentity: gameIdentity)
             let sharedUpdated = upsertResult.inserted > 0 ||
                 upsertResult.updated > 0 ||
@@ -2606,6 +2745,9 @@ final class AppModel {
             }
             #endif
             AppLog.error(.gameDetail, "[GameDetail] refresh failed game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity) error=\(error)")
+            if activeGameDetailLivePollingIdentity == selectedGame.stableDetailIdentity {
+                logGameDetailPolling("GameDetail polling refresh failed identity=\(selectedGame.stableDetailIdentity) error=\(error)")
+            }
             return GameDetailRefreshResult(
                 game: selectedGame,
                 rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
@@ -2613,6 +2755,80 @@ final class AppModel {
                 publicGameID: selectedGame.publicGameID
             )
         }
+    }
+
+    private func gameDetailRefreshResultGame(
+        storeResolved: GameDetail,
+        incomingSnapshot: GameDetail
+    ) -> GameDetail {
+        let bases = incomingSnapshot.bases ?? storeResolved.bases
+        let baseRunners = baseRunnersForLatestSnapshotPriority(
+            incomingSnapshot: incomingSnapshot,
+            storeResolved: storeResolved,
+            bases: bases
+        )
+        let game = GameDetail(
+            id: storeResolved.id,
+            scheduledStart: storeResolved.scheduledStart,
+            venue: storeResolved.venue,
+            awayTeam: storeResolved.awayTeam,
+            homeTeam: storeResolved.homeTeam,
+            awayScore: storeResolved.awayScore,
+            homeScore: storeResolved.homeScore,
+            status: storeResolved.status,
+            seasonClassification: storeResolved.seasonClassification,
+            inningText: storeResolved.inningText,
+            bases: bases,
+            baseRunners: baseRunners,
+            balls: incomingSnapshot.balls ?? storeResolved.balls,
+            strikes: incomingSnapshot.strikes ?? storeResolved.strikes,
+            outs: incomingSnapshot.outs ?? storeResolved.outs,
+            highlightText: storeResolved.highlightText,
+            events: storeResolved.events,
+            note: storeResolved.note,
+            providerGameID: storeResolved.providerGameID,
+            awayStartingPitcherName: storeResolved.awayStartingPitcherName,
+            homeStartingPitcherName: storeResolved.homeStartingPitcherName,
+            currentPitcherName: incomingSnapshot.currentPitcherName?.nilIfBlank ?? storeResolved.currentPitcherName,
+            currentBatterName: incomingSnapshot.currentBatterName?.nilIfBlank ?? storeResolved.currentBatterName
+        )
+        #if DEBUG
+        print("[GameDetailFetch] result latestSnapshot bases first=\(boolDebugText(incomingSnapshot.bases?.first)) second=\(boolDebugText(incomingSnapshot.bases?.second)) third=\(boolDebugText(incomingSnapshot.bases?.third)) final first=\(boolDebugText(game.bases?.first)) second=\(boolDebugText(game.bases?.second)) third=\(boolDebugText(game.bases?.third))")
+        #endif
+        return game
+    }
+
+    private func boolDebugText(_ value: Bool?) -> String {
+        value.map(String.init) ?? "nil"
+    }
+
+    private func baseRunnersForLatestSnapshotPriority(
+        incomingSnapshot: GameDetail,
+        storeResolved: GameDetail,
+        bases: RunnerState?
+    ) -> GameBaseRunners? {
+        guard let bases else {
+            return incomingSnapshot.baseRunners ?? storeResolved.baseRunners
+        }
+        if incomingSnapshot.bases != nil {
+            return incomingSnapshot.baseRunners.map {
+                GameBaseRunners(
+                    first: bases.first ? $0.first?.nilIfBlank : nil,
+                    second: bases.second ? $0.second?.nilIfBlank : nil,
+                    third: bases.third ? $0.third?.nilIfBlank : nil
+                )
+            }
+        }
+        guard let runners = incomingSnapshot.baseRunners ?? storeResolved.baseRunners else {
+            return nil
+        }
+        let first = bases.first ? runners.first?.nilIfBlank : nil
+        let second = bases.second ? runners.second?.nilIfBlank : nil
+        let third = bases.third ? runners.third?.nilIfBlank : nil
+        guard first != nil || second != nil || third != nil else {
+            return nil
+        }
+        return GameBaseRunners(first: first, second: second, third: third)
     }
 
     // recordRawSupabaseGameDetailIdentity 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
@@ -5035,6 +5251,69 @@ private enum ScheduleStartupSyncState {
     case inFlight(Task<Void, Never>)
     case completed
     case failedButDoNotRetryAutomatically
+}
+
+private extension GameDetail {
+    func applyingLiveState(_ liveState: GameLiveStateResponse) -> GameDetail {
+        GameDetail(
+            id: id,
+            scheduledStart: scheduledStart,
+            venue: venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: liveState.awayScore,
+            homeScore: liveState.homeScore,
+            status: GameStatus(liveStateStatus: liveState.status),
+            seasonClassification: seasonClassification,
+            inningText: Self.inningText(inning: liveState.inning, half: liveState.half) ?? inningText,
+            bases: RunnerState(first: liveState.bases.first, second: liveState.bases.second, third: liveState.bases.third),
+            baseRunners: baseRunners,
+            balls: liveState.balls,
+            strikes: liveState.strikes,
+            outs: liveState.outs,
+            highlightText: highlightText,
+            events: events,
+            note: note,
+            providerGameID: providerGameID,
+            awayStartingPitcherName: awayStartingPitcherName,
+            homeStartingPitcherName: homeStartingPitcherName,
+            currentPitcherName: liveState.currentPitcherName?.nilIfBlank,
+            currentBatterName: liveState.currentBatterName?.nilIfBlank
+        )
+    }
+
+    private static func inningText(inning: Int?, half: String?) -> String? {
+        guard let inning else { return nil }
+        let normalizedHalf = half?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let halfText: String?
+        switch normalizedHalf {
+        case "top", "초":
+            halfText = "초"
+        case "bottom", "bot", "말":
+            halfText = "말"
+        default:
+            halfText = nil
+        }
+        guard let halfText else { return "\(inning)회" }
+        return "\(inning)회 \(halfText)"
+    }
+}
+
+private extension GameStatus {
+    init(liveStateStatus: String) {
+        let normalized = liveStateStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("cancel") || normalized.contains("postpon") {
+            self = .cancelled
+        } else if normalized.contains("final") || normalized.contains("complete") || normalized == "ended" {
+            self = .final
+        } else if normalized.contains("suspend") || normalized.contains("delay") {
+            self = .rainDelay
+        } else if normalized.contains("live") || normalized.contains("progress") || normalized.contains("playing") {
+            self = .live
+        } else {
+            self = .upcoming
+        }
+    }
 }
 
 private extension String {

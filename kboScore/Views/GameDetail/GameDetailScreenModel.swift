@@ -672,7 +672,7 @@ final class GameDetailViewModel: ObservableObject {
     private static let automaticRefreshStableIdentityThrottle: TimeInterval = 8
     private static var inFlightRefreshesByStableIdentity: [String: Task<GameDetailRefreshResult?, Never>] = [:]
     private static var recentAutomaticRefreshesByStableIdentity: [String: (date: Date, result: GameDetailRefreshResult)] = [:]
-    static let livePollingIntervalNanoseconds: UInt64 = 1_000_000_000
+    static let livePollingIntervalNanoseconds: UInt64 = 2_000_000_000
 
     private let requestedIdentity: String
     private var lastAutomaticRefreshAt: Date?
@@ -688,7 +688,14 @@ final class GameDetailViewModel: ObservableObject {
     @Published private(set) var rawSupabasePublicGameID: String?
 
     var shouldAutoRefreshLiveGame: Bool {
-        game?.status.isLiveLike == true
+        game?.shouldPollGameDetail(now: Date()) == true
+    }
+
+    var liveRefreshTaskID: String {
+        guard shouldAutoRefreshLiveGame else {
+            return "idle:\(stableIdentity)"
+        }
+        return "live:\(stableIdentity)"
     }
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
@@ -702,7 +709,8 @@ final class GameDetailViewModel: ObservableObject {
         self.isResolvingInitialGame = initialGame == nil
         self.hasAttemptedInitialResolution = initialGame != nil
         if let initialGame {
-            baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
+            baseRunnerDisplay = Self.liveSnapshotOnlyDisplayIfNeeded(initialGame)
+                ?? baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
         }
         #if DEBUG
         print("GameDetailViewModel init stableIdentity=\(stableIdentity)")
@@ -721,7 +729,8 @@ final class GameDetailViewModel: ObservableObject {
         self.stableIdentity = stableIdentity
         self.isResolvingInitialGame = false
         self.hasAttemptedInitialResolution = true
-        baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
+        baseRunnerDisplay = Self.liveSnapshotOnlyDisplayIfNeeded(initialGame)
+            ?? baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
         #if DEBUG
         print("GameDetailViewModel init stableIdentity=\(stableIdentity)")
         print("[GameDetailNavigation] initialSnapshotPresent=true stableIdentity=\(stableIdentity) requestedIdentity=\(requestedIdentity)")
@@ -734,7 +743,8 @@ final class GameDetailViewModel: ObservableObject {
         game = initialGame
         isResolvingInitialGame = false
         hasAttemptedInitialResolution = true
-        baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
+        baseRunnerDisplay = Self.liveSnapshotOnlyDisplayIfNeeded(initialGame)
+            ?? baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: initialGame)
     }
 
     // applyExternalRefreshResult 메서드는 AppModel의 전역 live polling 결과를 현재 화면 상태에 반영합니다.
@@ -846,13 +856,29 @@ final class GameDetailViewModel: ObservableObject {
     // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func apply(_ fetched: GameDetail) {
         let changed = fetched != game
-        baseRunnerDisplay = baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: fetched)
+        baseRunnerDisplay = Self.liveSnapshotOnlyDisplayIfNeeded(fetched)
+            ?? baseRunnerDisplayResolver.resolve(gameIdentity: stableIdentity, game: fetched)
         if changed {
             game = fetched
         }
         #if DEBUG
         print("GameDetailFetch success changed=\(changed)")
         #endif
+    }
+
+    private static func liveSnapshotOnlyDisplayIfNeeded(_ game: GameDetail) -> BaseRunnerDisplayResolution? {
+        guard game.status.isLiveLike else { return nil }
+        #if DEBUG
+        print("[BaseRunners] official runner names skipped reason=liveSnapshotAuthoritative")
+        #endif
+        return BaseRunnerDisplayResolution(
+            runners: GameBaseRunners(
+                first: game.bases?.first == true ? game.baseRunners?.first : nil,
+                second: game.bases?.second == true ? game.baseRunners?.second : nil,
+                third: game.bases?.third == true ? game.baseRunners?.third : nil
+            ),
+            source: "latestSnapshotOnly"
+        )
     }
 }
 

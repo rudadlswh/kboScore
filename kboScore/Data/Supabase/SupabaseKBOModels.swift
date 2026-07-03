@@ -210,8 +210,8 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
             in: container,
             keys: ["current_batter_name", "batter_name", "current_hitter_name", "hitter_name", "batter", "hitter", "currentBatterName", "batterName"]
         )
-        fetchedAt = Self.firstDate(in: container, keys: ["fetched_at", "fetchedAt"])
-        createdAt = Self.firstDate(in: container, keys: ["created_at", "createdAt"])
+        fetchedAt = Self.firstDate(in: container, keys: ["fetched_at", "fetchedAt", "source_updated_at", "sourceUpdatedAt"])
+        createdAt = Self.firstDate(in: container, keys: ["snapshot_created_at", "snapshotCreatedAt", "created_at", "createdAt", "updated_at", "updatedAt"])
 #if DEBUG
         debugAvailableFieldNames = Set(container.allKeys.map(\.stringValue))
 #endif
@@ -788,6 +788,21 @@ nonisolated enum SupabaseKBOMapper {
         }
         let rowStatus = row.status?.nilIfBlank
         let mappedStatus = KBODataMapper.mapGameStatus(code: rowStatus, text: row.inningState?.nilIfBlank)
+        if mappedStatus == .live,
+           snapshotObservedDate(snapshot) == nil,
+           snapshotHasLiveEvidence(snapshot) {
+            logStatusMapping(
+                row: row,
+                rawStatus: rowStatus,
+                mappedStatus: .live,
+                resolvedStatusText: rowStatus ?? row.inningState?.nilIfBlank ?? "live",
+                scheduledStart: scheduledStart,
+                snapshot: snapshot,
+                reason: "snapshotAt nil but accepted as live reason=liveProgressEvidence",
+                liveCorrection: "accepted"
+            )
+            return rowStatus ?? row.inningState?.nilIfBlank ?? "live"
+        }
         if mappedStatus == .live, !hasReliableLiveEvidence(row: row, snapshot: snapshot, scheduledStart: scheduledStart) {
             logStatusMapping(
                 row: row,
@@ -938,6 +953,10 @@ nonisolated enum SupabaseKBOMapper {
         if hasExplicitLiveStatusReason(row.statusReason) {
             return true
         }
+        if KBODataMapper.mapGameStatus(code: row.status?.nilIfBlank, text: nil) == .live,
+           snapshotHasLiveEvidence(snapshot) {
+            return true
+        }
         if (row.awayScore ?? 0) > 0 || (row.homeScore ?? 0) > 0 {
             return true
         }
@@ -974,6 +993,23 @@ nonisolated enum SupabaseKBOMapper {
             snapshot.runnerOnFirst == true ||
             snapshot.runnerOnSecond == true ||
             snapshot.runnerOnThird == true
+    }
+
+    // snapshotHasLiveEvidence 메서드는 raw live 상태를 유지할 수 있는 최신 snapshot 필드 존재 여부를 판단합니다.
+    nonisolated private static func snapshotHasLiveEvidence(_ snapshot: SupabaseLatestGameSnapshotRow?) -> Bool {
+        guard let snapshot else { return false }
+        return snapshotHasLiveProgress(snapshot) ||
+            snapshot.balls != nil ||
+            snapshot.strikes != nil ||
+            snapshot.outs != nil ||
+            snapshot.currentBatterName?.nilIfBlank != nil ||
+            snapshot.currentPitcherName?.nilIfBlank != nil ||
+            snapshot.runnerOnFirst != nil ||
+            snapshot.runnerOnSecond != nil ||
+            snapshot.runnerOnThird != nil ||
+            snapshot.firstBaseRunnerName?.nilIfBlank != nil ||
+            snapshot.secondBaseRunnerName?.nilIfBlank != nil ||
+            snapshot.thirdBaseRunnerName?.nilIfBlank != nil
     }
 
     // snapshotObservedAt 메서드는 snapshot 자체가 scheduledStart 이후 관측됐는지 확인합니다.

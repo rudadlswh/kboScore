@@ -253,6 +253,146 @@ enum GameBoxscoreClientError: Error, Sendable {
     case httpStatus(Int)
 }
 
+protocol GameLiveStateFetching: Sendable {
+    nonisolated var cacheIdentity: String { get }
+    nonisolated func fetchGameLiveState(gameId: String) async throws -> GameLiveStateResponse
+}
+
+nonisolated struct GameLiveStateResponse: Codable, Equatable, Sendable {
+    let publicGameId: String
+    let status: String
+    let inning: Int?
+    let half: String?
+    let awayScore: Int?
+    let homeScore: Int?
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let bases: Bases
+    let currentPitcherName: String?
+    let currentBatterName: String?
+    let rawHash: String
+    let updatedAtKst: String?
+
+    nonisolated struct Bases: Codable, Equatable, Sendable {
+        let first: Bool
+        let second: Bool
+        let third: Bool
+    }
+}
+
+nonisolated enum GameLiveStateClientFactory {
+    static func makeAppClient() -> any GameLiveStateFetching {
+        let processValue = ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleValue = (Bundle.main.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        #if DEBUG
+        #if targetEnvironment(simulator)
+        let candidates: [(source: String, value: String?)] = [
+            ("default", "http://localhost:8088"),
+            ("environment", processValue),
+            ("plist", bundleValue)
+        ]
+        #else
+        let candidates: [(source: String, value: String?)] = [
+            ("environment", processValue),
+            ("plist", bundleValue)
+        ]
+        #endif
+        #else
+        let candidates: [(source: String, value: String?)] = [
+            ("environment", processValue),
+            ("plist", bundleValue)
+        ]
+        #endif
+
+        guard let resolved = candidates.compactMap(resolveCandidate).first else {
+            return NoOpGameLiveStateClient()
+        }
+        return BackendGameLiveStateClient(baseURL: resolved.url)
+    }
+
+    private static func resolveCandidate(_ candidate: (source: String, value: String?)) -> (source: String, url: URL)? {
+        guard let rawValue = candidate.value,
+              rawValue.isEmpty == false,
+              rawValue.hasPrefix("$(") == false,
+              let url = URL(string: rawValue),
+              isAllowed(url) else {
+            return nil
+        }
+        return (candidate.source, url)
+    }
+
+    private static func isAllowed(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              url.host?.isEmpty == false else {
+            return false
+        }
+        #if DEBUG
+        #if os(iOS) && !targetEnvironment(simulator)
+        if isLocalhost(url) {
+            return false
+        }
+        #endif
+        return scheme == "http" || scheme == "https"
+        #else
+        return scheme == "https"
+        #endif
+    }
+
+    private static func isLocalhost(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+}
+
+struct NoOpGameLiveStateClient: GameLiveStateFetching {
+    nonisolated init() {}
+    nonisolated var cacheIdentity: String { "noop" }
+    nonisolated func fetchGameLiveState(gameId: String) async throws -> GameLiveStateResponse {
+        throw GameBoxscoreClientError.invalidURL
+    }
+}
+
+struct BackendGameLiveStateClient: GameLiveStateFetching {
+    private let baseURL: URL
+    private let session: URLSession
+
+    nonisolated init(baseURL: URL, session: URLSession = .shared) {
+        if baseURL.absoluteString.hasSuffix("/") {
+            self.baseURL = baseURL
+        } else {
+            self.baseURL = URL(string: baseURL.absoluteString + "/") ?? baseURL
+        }
+        self.session = session
+    }
+
+    nonisolated var cacheIdentity: String { baseURL.absoluteString }
+
+    nonisolated func fetchGameLiveState(gameId: String) async throws -> GameLiveStateResponse {
+        guard let encodedGameId = gameId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "api/v1/games/\(encodedGameId)/realtime", relativeTo: baseURL)?.absoluteURL else {
+            throw GameBoxscoreClientError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 2.0
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GameBoxscoreClientError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw GameBoxscoreClientError.httpStatus(httpResponse.statusCode)
+        }
+        return try JSONDecoder().decode(GameLiveStateResponse.self, from: data)
+    }
+}
+
 extension GameBoxscoreResponse {
     var gameCenterReview: GameCenterReview? {
         guard hasRecords else { return nil }

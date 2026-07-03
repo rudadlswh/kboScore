@@ -134,7 +134,7 @@ struct GameDetailView: View {
                     rawSupabaseGameID: viewModel.rawSupabaseGameID,
                     rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
                     rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-                    forceRefresh: refreshedGame.status.isLiveLike
+                    forceRefresh: refreshedGame.shouldPollGameDetail(now: Date())
                 )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
                 await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
@@ -143,8 +143,11 @@ struct GameDetailView: View {
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, viewModel.shouldAutoRefreshLiveGame else { return }
             Task {
-                await appModel.resumeLiveGameDetailPollingIfNeeded()
+                await refreshCurrentGame(forceRefresh: true)
             }
+        }
+        .onDisappear {
+            appModel.stopLiveGameDetailPolling()
         }
         .onChange(of: appModel.game(withIdentity: viewModel.stableIdentity)) { _, updatedGame in
             guard let updatedGame else { return }
@@ -153,6 +156,13 @@ struct GameDetailView: View {
             }
         }
         .refreshable {
+            await refreshCurrentGame(forceRefresh: true)
+        }
+    }
+
+    // refreshCurrentGame 메서드는 수동 새로고침과 자동 polling/foreground 복귀의 상세 갱신 경로를 맞춥니다.
+    private func refreshCurrentGame(forceRefresh: Bool) async {
+        if forceRefresh {
             let inputLocalGameID = viewModel.game?.id
             await viewModel.refreshIfNeeded(appModel: appModel, manual: true)
             guard let refreshedGame = viewModel.game else { return }
@@ -163,6 +173,16 @@ struct GameDetailView: View {
                 rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
                 rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
                 forceRefresh: true
+            )
+            await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
+        } else if let refreshedGame = await viewModel.refreshIfNeeded(appModel: appModel) {
+            await loadDetailPresentation(
+                for: refreshedGame,
+                inputLocalGameId: refreshedGame.id,
+                rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                forceRefresh: refreshedGame.shouldPollGameDetail(now: Date())
             )
             await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
         }
@@ -181,7 +201,7 @@ struct GameDetailView: View {
             rawSupabaseGameID: viewModel.rawSupabaseGameID,
             rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
             rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-            forceRefresh: updatedGame.status.isLiveLike
+            forceRefresh: false
         )
     }
 
@@ -356,6 +376,105 @@ struct GameDetailView: View {
     }
 }
 
+// LiveSituationState 구조체는 live 주자상황/카운트를 단일 snapshot 단위로 교체하기 위한 값입니다.
+struct LiveSituationState: Equatable, Sendable {
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let runnerOnFirst: Bool
+    let runnerOnSecond: Bool
+    let runnerOnThird: Bool
+    let firstRunnerName: String?
+    let secondRunnerName: String?
+    let thirdRunnerName: String?
+    let currentBatterName: String?
+    let currentPitcherName: String?
+
+    var bases: RunnerState {
+        RunnerState(first: runnerOnFirst, second: runnerOnSecond, third: runnerOnThird)
+    }
+
+    var runnerNames: GameBaseRunners {
+        GameBaseRunners(
+            first: runnerOnFirst ? firstRunnerName?.nilIfBlank : nil,
+            second: runnerOnSecond ? secondRunnerName?.nilIfBlank : nil,
+            third: runnerOnThird ? thirdRunnerName?.nilIfBlank : nil
+        )
+    }
+
+    var optionalRunnerNames: GameBaseRunners? {
+        let names = runnerNames
+        guard names.first != nil || names.second != nil || names.third != nil else {
+            return nil
+        }
+        return names
+    }
+
+    var displayBaseRunners: [BaseRunnerDisplayItem] {
+        [
+            ("1B", runnerOnFirst, firstRunnerName),
+            ("2B", runnerOnSecond, secondRunnerName),
+            ("3B", runnerOnThird, thirdRunnerName)
+        ]
+        .compactMap { item in
+            guard item.1 else { return nil }
+            return BaseRunnerDisplayItem(base: item.0, name: renderedBaseRunnerName(item.2))
+        }
+    }
+
+    static func fromLatestSnapshot(
+        game: GameDetail,
+        currentBatterName: String?,
+        currentPitcherName: String?
+    ) -> LiveSituationState {
+        let bases = game.bases ?? .empty
+        return LiveSituationState(
+            balls: game.balls,
+            strikes: game.strikes,
+            outs: game.outs,
+            runnerOnFirst: bases.first,
+            runnerOnSecond: bases.second,
+            runnerOnThird: bases.third,
+            firstRunnerName: bases.first ? game.baseRunners?.first?.nilIfBlank : nil,
+            secondRunnerName: bases.second ? game.baseRunners?.second?.nilIfBlank : nil,
+            thirdRunnerName: bases.third ? game.baseRunners?.third?.nilIfBlank : nil,
+            currentBatterName: currentBatterName?.nilIfBlank,
+            currentPitcherName: currentPitcherName?.nilIfBlank
+        )
+    }
+
+    static func mergedFallback(
+        game: GameDetail,
+        summary: GameCenterSummary?,
+        currentBatterName: String?,
+        currentPitcherName: String?
+    ) -> LiveSituationState {
+        let bases = game.bases ?? summary?.bases ?? .empty
+        let officialBaseRunners = summary?.baseRunners
+        return LiveSituationState(
+            balls: game.balls ?? summary?.balls,
+            strikes: game.strikes ?? summary?.strikes,
+            outs: game.outs ?? summary?.outs,
+            runnerOnFirst: bases.first,
+            runnerOnSecond: bases.second,
+            runnerOnThird: bases.third,
+            firstRunnerName: bases.first ? (game.baseRunners?.first?.nilIfBlank ?? officialBaseRunners?.first?.nilIfBlank) : nil,
+            secondRunnerName: bases.second ? (game.baseRunners?.second?.nilIfBlank ?? officialBaseRunners?.second?.nilIfBlank) : nil,
+            thirdRunnerName: bases.third ? (game.baseRunners?.third?.nilIfBlank ?? officialBaseRunners?.third?.nilIfBlank) : nil,
+            currentBatterName: currentBatterName?.nilIfBlank,
+            currentPitcherName: currentPitcherName?.nilIfBlank
+        )
+    }
+
+    private func renderedBaseRunnerName(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, trimmed.isEmpty == false, trimmed != "주자" else {
+            return "점유"
+        }
+        return trimmed
+    }
+}
+
 // GameDetailPresentation 구조체는 GameDetailPresentation 타입의 역할과 값을 정의합니다.
 struct GameDetailPresentation {
     let game: GameDetail
@@ -371,6 +490,7 @@ struct GameDetailPresentation {
     let bases: RunnerState?
     let baseRunners: GameBaseRunners?
     let baseRunnerDisplay: BaseRunnerDisplayResolution
+    let liveSituation: LiveSituationState
     let currentBatterName: String?
     let currentPitcherName: String?
     let winningPitcher: String?
@@ -396,32 +516,75 @@ struct GameDetailPresentation {
     ) {
         let summary = payload?.summary
         self.game = game
-        status = summary?.status ?? game.status
+        let resolvedStatus = summary?.status ?? game.status
+        status = resolvedStatus
         stadium = summary?.stadium?.nilIfBlank ?? game.venue
         startTimeText = summary?.startTime?.nilIfBlank ?? game.scheduledStart.formatted(date: .omitted, time: .shortened)
-        if status.isLiveLike || status == .final {
+        if resolvedStatus.isLiveLike || resolvedStatus == .final {
             inningText = KBOInningFormatter.korean(summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank)
         } else {
             inningText = nil
         }
         awayScore = summary?.awayScore ?? game.awayScore
         homeScore = summary?.homeScore ?? game.homeScore
-        balls = summary?.balls ?? game.balls
-        strikes = summary?.strikes ?? game.strikes
-        outs = summary?.outs ?? game.outs
-        bases = summary?.bases ?? game.bases
         let officialBaseRunners = summary?.baseRunners.map {
             GameBaseRunners(first: $0.first, second: $0.second, third: $0.third)
         }
-        baseRunners = officialBaseRunners ?? game.baseRunners
-        self.baseRunnerDisplay = baseRunnerDisplay.mergingOfficialNames(
-            snapshot: game.baseRunners,
-            official: officialBaseRunners,
-            bases: summary?.bases ?? game.bases
+        let resolvedCurrentBatterName = game.currentBatterName?.nilIfBlank
+        let resolvedCurrentPitcherName = game.currentPitcherName?.nilIfBlank ??
+            (resolvedStatus.isLiveLike ? (game.awayStartingPitcherName?.nilIfBlank ?? game.homeStartingPitcherName?.nilIfBlank) : nil)
+        let liveSnapshotAuthoritative = resolvedStatus.isLiveLike
+        let resolvedLiveSituation = liveSnapshotAuthoritative
+            ? LiveSituationState.fromLatestSnapshot(
+                game: game,
+                currentBatterName: resolvedCurrentBatterName,
+                currentPitcherName: resolvedCurrentPitcherName
+            )
+            : LiveSituationState.mergedFallback(
+                game: game,
+                summary: summary,
+                currentBatterName: resolvedCurrentBatterName,
+                currentPitcherName: resolvedCurrentPitcherName
+            )
+        liveSituation = resolvedLiveSituation
+        balls = resolvedLiveSituation.balls
+        strikes = resolvedLiveSituation.strikes
+        outs = resolvedLiveSituation.outs
+        bases = resolvedLiveSituation.bases
+        baseRunners = resolvedLiveSituation.optionalRunnerNames
+        if liveSnapshotAuthoritative {
+            Self.logLatestSnapshotRawLiveSituation(game: game)
+            Self.logLiveSituationAtomicReplaced(resolvedLiveSituation)
+            if officialBaseRunners != nil || baseRunnerDisplay.source != "empty" {
+                Self.logOfficialRunnerNamesSkipped()
+            }
+            self.baseRunnerDisplay = BaseRunnerDisplayResolution(
+                runners: resolvedLiveSituation.runnerNames,
+                source: "latestSnapshotOnly"
+            )
+        } else {
+            self.baseRunnerDisplay = Self.resolvedBaseRunnerDisplay(
+                snapshot: game.baseRunners,
+                official: officialBaseRunners,
+                cached: baseRunnerDisplay,
+                bases: resolvedLiveSituation.bases
+            ).mergingOfficialNames(
+                snapshot: game.baseRunners,
+                official: officialBaseRunners,
+                bases: resolvedLiveSituation.bases
+            )
+        }
+        Self.logCountBaseRunnerApplication(
+            game: game,
+            summary: summary,
+            balls: balls,
+            strikes: strikes,
+            outs: outs,
+            bases: bases,
+            baseRunners: baseRunners
         )
-        currentBatterName = game.currentBatterName?.nilIfBlank
-        currentPitcherName = game.currentPitcherName?.nilIfBlank ??
-            (status.isLiveLike ? (game.awayStartingPitcherName?.nilIfBlank ?? game.homeStartingPitcherName?.nilIfBlank) : nil)
+        currentBatterName = resolvedLiveSituation.currentBatterName
+        currentPitcherName = resolvedLiveSituation.currentPitcherName
         winningPitcher = summary?.winningPitcher?.nilIfBlank
         losingPitcher = summary?.losingPitcher?.nilIfBlank
         savePitcher = summary?.savePitcher?.nilIfBlank
@@ -441,6 +604,123 @@ struct GameDetailPresentation {
             officialFallbackReview ??
             payload?.review
         preview = payload?.preview
+    }
+
+    private static func logCountBaseRunnerApplication(
+        game: GameDetail,
+        summary: GameCenterSummary?,
+        balls: Int?,
+        strikes: Int?,
+        outs: Int?,
+        bases: RunnerState?,
+        baseRunners: GameBaseRunners?
+    ) {
+        #if DEBUG
+        if balls != nil || strikes != nil || outs != nil {
+            print("[GameDetailPresentation] GameDetailPresentation count applied source=\(game.balls != nil || game.strikes != nil || game.outs != nil ? "latestSnapshot" : "official") count=\(balls.map(String.init) ?? "-")/\(strikes.map(String.init) ?? "-")/\(outs.map(String.init) ?? "-")")
+        } else {
+            print("[GameDetailPresentation] count/base update skipped reason=missingCountFields")
+        }
+        if let bases {
+            print("[GameDetailPresentation] GameDetailPresentation bases applied source=\(game.bases == nil ? "official" : "latestSnapshot") first=\(bases.first) second=\(bases.second) third=\(bases.third)")
+        } else {
+            print("[GameDetailPresentation] count/base update skipped reason=missingBases")
+        }
+        if let baseRunners {
+            print("[GameDetailPresentation] GameDetailPresentation runners applied source=\(game.baseRunners == nil ? "official" : "latestSnapshot") first=\(baseRunners.first ?? "<nil>") second=\(baseRunners.second ?? "<nil>") third=\(baseRunners.third ?? "<nil>")")
+        } else if bases?.first == true || bases?.second == true || bases?.third == true {
+            print("[GameDetailPresentation] runner names skipped reason=missingRunnerNames bases first=\(bases?.first == true) second=\(bases?.second == true) third=\(bases?.third == true)")
+        }
+        print("[GameDetailPresentation] merged bases first=\(boolDebugText(bases?.first)) second=\(boolDebugText(bases?.second)) third=\(boolDebugText(bases?.third))")
+        #endif
+    }
+
+    private static func boolDebugText(_ value: Bool?) -> String {
+        value.map(String.init) ?? "nil"
+    }
+
+    private static func logLatestSnapshotRawLiveSituation(game: GameDetail) {
+        #if DEBUG
+        print(
+            "[GameDetailPresentation] latestSnapshot raw liveSituation " +
+                "balls=\(game.balls.map(String.init) ?? "-") " +
+                "strikes=\(game.strikes.map(String.init) ?? "-") " +
+                "outs=\(game.outs.map(String.init) ?? "-") " +
+                "runner_on_first=\(boolDebugText(game.bases?.first)) " +
+                "runner_on_second=\(boolDebugText(game.bases?.second)) " +
+                "runner_on_third=\(boolDebugText(game.bases?.third)) " +
+                "firstRunner=\(game.baseRunners?.first ?? "<nil>") " +
+                "secondRunner=\(game.baseRunners?.second ?? "<nil>") " +
+                "thirdRunner=\(game.baseRunners?.third ?? "<nil>") " +
+                "batter=\(game.currentBatterName ?? "<nil>") " +
+                "pitcher=\(game.currentPitcherName ?? "<nil>")"
+        )
+        #endif
+    }
+
+    private static func logLiveSituationAtomicReplaced(_ state: LiveSituationState) {
+        #if DEBUG
+        print(
+            "[GameDetailPresentation] liveSituation atomic replaced " +
+                "balls=\(state.balls.map(String.init) ?? "-") " +
+                "strikes=\(state.strikes.map(String.init) ?? "-") " +
+                "outs=\(state.outs.map(String.init) ?? "-") " +
+                "runner_on_first=\(state.runnerOnFirst) " +
+                "runner_on_second=\(state.runnerOnSecond) " +
+                "runner_on_third=\(state.runnerOnThird) " +
+                "firstRunner=\(state.firstRunnerName ?? "<nil>") " +
+                "secondRunner=\(state.secondRunnerName ?? "<nil>") " +
+                "thirdRunner=\(state.thirdRunnerName ?? "<nil>")"
+        )
+        #endif
+    }
+
+    private static func logOfficialRunnerNamesSkipped() {
+        #if DEBUG
+        print("[BaseRunners] official runner names skipped reason=liveSnapshotAuthoritative")
+        #endif
+    }
+
+    private static func resolvedBaseRunnerDisplay(
+        snapshot: GameBaseRunners?,
+        official: GameBaseRunners?,
+        cached: BaseRunnerDisplayResolution,
+        bases: RunnerState?
+    ) -> BaseRunnerDisplayResolution {
+        guard let bases else {
+            return cached
+        }
+        let runners = GameBaseRunners(
+            first: resolvedRunnerName(
+                occupied: bases.first,
+                snapshot: snapshot?.first,
+                official: official?.first,
+                cached: cached.runners.first
+            ),
+            second: resolvedRunnerName(
+                occupied: bases.second,
+                snapshot: snapshot?.second,
+                official: official?.second,
+                cached: cached.runners.second
+            ),
+            third: resolvedRunnerName(
+                occupied: bases.third,
+                snapshot: snapshot?.third,
+                official: official?.third,
+                cached: cached.runners.third
+            )
+        )
+        return BaseRunnerDisplayResolution(runners: runners, source: "presentation")
+    }
+
+    private static func resolvedRunnerName(
+        occupied: Bool,
+        snapshot: String?,
+        official: String?,
+        cached: String?
+    ) -> String? {
+        guard occupied else { return nil }
+        return snapshot?.nilIfBlank ?? official?.nilIfBlank ?? cached?.nilIfBlank ?? "주자"
     }
 
     var scoreStatusText: String {
@@ -502,15 +782,7 @@ struct GameDetailPresentation {
     }
 
     var visibleBaseRunners: [BaseRunnerDisplayItem] {
-        [
-            ("1B", bases?.first == true, baseRunnerDisplay.runners.first),
-            ("2B", bases?.second == true, baseRunnerDisplay.runners.second),
-            ("3B", bases?.third == true, baseRunnerDisplay.runners.third)
-        ]
-        .compactMap { item in
-            guard item.1 else { return nil }
-            return BaseRunnerDisplayItem(base: item.0, name: renderedBaseRunnerName(item.2))
-        }
+        liveSituation.displayBaseRunners
     }
 
     var displayBaseRunners: [BaseRunnerDisplayItem] {
@@ -532,7 +804,7 @@ struct GameDetailPresentation {
     // logRenderedBaseRunnersIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func logRenderedBaseRunnersIfNeeded() {
         #if DEBUG
-        print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
+        print("[BaseRunners] snapshot names first=\(liveSituation.firstRunnerName ?? "<nil>") second=\(liveSituation.secondRunnerName ?? "<nil>") third=\(liveSituation.thirdRunnerName ?? "<nil>")")
         let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
             result[item.base] = item.name
         }
@@ -540,13 +812,14 @@ struct GameDetailPresentation {
         #endif
     }
 
-    // renderedBaseRunnerName 메서드는 이 타입의 주요 동작을 수행합니다.
-    private func renderedBaseRunnerName(_ value: String?) -> String {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let trimmed, trimmed.isEmpty == false, trimmed != "주자" else {
-            return "점유"
+    // logBaseRunnersBeforeRendering 메서드는 SwiftUI 렌더 직전 점유/표시 상태를 남깁니다.
+    func logBaseRunnersBeforeRendering() {
+        #if DEBUG
+        let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
+            result[item.base] = item.name
         }
-        return trimmed
+        print("[BaseRunners] renderWillUse firstOccupied=\(liveSituation.runnerOnFirst) first=\(rendered["1B"] ?? "empty") secondOccupied=\(liveSituation.runnerOnSecond) second=\(rendered["2B"] ?? "empty") thirdOccupied=\(liveSituation.runnerOnThird) third=\(rendered["3B"] ?? "empty")")
+        #endif
     }
 }
 
@@ -704,10 +977,11 @@ private struct LiveSituationSummaryContent: View {
     let presentation: GameDetailPresentation
 
     var body: some View {
+        let _ = presentation.logBaseRunnersBeforeRendering()
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 0) {
                 GameDetailBasesDiamondView(
-                    bases: presentation.bases ?? .empty,
+                    bases: presentation.liveSituation.bases,
                     tint: appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent,
                     borderTint: baseBorderTint
                 )
@@ -715,9 +989,9 @@ private struct LiveSituationSummaryContent: View {
                 Spacer(minLength: 36)
 
                 CountDotsStack(
-                    balls: KBOCountDisplay.balls(presentation.balls),
-                    strikes: KBOCountDisplay.strikes(presentation.strikes),
-                    outs: KBOCountDisplay.outs(presentation.outs)
+                    balls: KBOCountDisplay.balls(presentation.liveSituation.balls),
+                    strikes: KBOCountDisplay.strikes(presentation.liveSituation.strikes),
+                    outs: KBOCountDisplay.outs(presentation.liveSituation.outs)
                 )
                 .fixedSize(horizontal: true, vertical: false)
             }

@@ -397,6 +397,44 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+extension GameDetail {
+    nonisolated func shouldPollGameDetail(now: Date) -> Bool {
+        if status.isLiveLike {
+            return true
+        }
+        if status == .upcoming, scheduledStart <= now {
+            return true
+        }
+        return hasStartedInningState
+    }
+
+    nonisolated func gameDetailPollingSkipReason(now: Date) -> String? {
+        if shouldPollGameDetail(now: now) {
+            return nil
+        }
+        if status == .upcoming {
+            return "scheduledFuture"
+        }
+        if status.isFinishedLike {
+            return "finished"
+        }
+        return "notLiveLike"
+    }
+
+    private nonisolated var hasStartedInningState: Bool {
+        guard let normalized = inningText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              normalized.isEmpty == false else {
+            return false
+        }
+        if normalized.contains("top") || normalized.contains("bottom") || normalized.contains("초") || normalized.contains("말") {
+            return normalized.range(of: #"\d+"#, options: .regularExpression) != nil
+        }
+        return false
+    }
+}
+
 // GameBaseRunners 구조체는 GameBaseRunners 타입의 역할과 값을 정의합니다.
 nonisolated struct GameBaseRunners: Hashable, Codable, Sendable {
     let first: String?

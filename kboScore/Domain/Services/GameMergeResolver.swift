@@ -114,6 +114,7 @@ nonisolated enum GameMergeResolver {
         guard let existing else { return candidate }
         let stateSource = preferredGameStateSource(existing: existing, candidate: candidate)
         let supplementalSource = stateSource == candidate ? existing : candidate
+        let candidateSnapshotBasesAreAuthoritative = stateSource == candidate && candidate.bases != nil
         return GameDetail(
             id: existing.id,
             scheduledStart: stateSource.scheduledStart,
@@ -128,7 +129,7 @@ nonisolated enum GameMergeResolver {
             bases: stateSource.bases,
             baseRunners: mergedBaseRunners(
                 primary: stateSource.baseRunners,
-                supplemental: supplementalSource.baseRunners,
+                supplemental: candidateSnapshotBasesAreAuthoritative ? nil : supplementalSource.baseRunners,
                 bases: stateSource.bases
             ),
             balls: stateSource.balls,

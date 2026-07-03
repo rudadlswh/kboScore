@@ -1355,7 +1355,7 @@ struct kboScoreTests {
         #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "1B", name: "이유찬")])
     }
 
-    // gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback 메서드는 이 타입의 주요 동작을 수행합니다.
+    // gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback 메서드는 live 주자상황에서 official 이름을 차단하는지 검증합니다.
     @Test func gameDetailBaseSituationAppliesOfficialMappedRunnerNamesAfterInitialFallback() throws {
         var resolver = BaseRunnerDisplayResolver()
         let game = try makeBaseRunnerDisplayGame(
@@ -1378,13 +1378,13 @@ struct kboScoreTests {
         #expect(fallbackDisplay.runners.second == "주자")
         #expect(fallbackDisplay.runners.third == "주자")
         #expect(presentation.displayBaseRunners == [
-            BaseRunnerDisplayItem(base: "2B", name: "김주원"),
-            BaseRunnerDisplayItem(base: "3B", name: "최정원")
+            BaseRunnerDisplayItem(base: "2B", name: "점유"),
+            BaseRunnerDisplayItem(base: "3B", name: "점유")
         ])
-        #expect(presentation.baseRunnerDisplay.source == "official")
+        #expect(presentation.baseRunnerDisplay.source == "latestSnapshotOnly")
     }
 
-    // gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache 메서드는 이 타입의 주요 동작을 수행합니다.
+    // gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache 메서드는 live 주자상황에서 cache/official 이름을 재사용하지 않는지 검증합니다.
     @Test func gameDetailBaseSituationOfficialMappedAdvanceDoesNotReuseLowerBaseCache() throws {
         var resolver = BaseRunnerDisplayResolver()
         let before = try makeBaseRunnerDisplayGame(
@@ -1413,17 +1413,17 @@ struct kboScoreTests {
         )
 
         #expect(presentation.displayBaseRunners == [
-            BaseRunnerDisplayItem(base: "2B", name: "레이예스"),
-            BaseRunnerDisplayItem(base: "3B", name: "고승민")
+            BaseRunnerDisplayItem(base: "2B", name: "점유"),
+            BaseRunnerDisplayItem(base: "3B", name: "점유")
         ])
         #expect(presentation.displayBaseRunners != [
             BaseRunnerDisplayItem(base: "2B", name: "고승민"),
             BaseRunnerDisplayItem(base: "3B", name: "고승민")
         ])
         #expect(presentation.baseRunnerDisplay.runners.first == nil)
-        #expect(presentation.baseRunnerDisplay.runners.second == "레이예스")
-        #expect(presentation.baseRunnerDisplay.runners.third == "고승민")
-        #expect(presentation.baseRunnerDisplay.source == "official")
+        #expect(presentation.baseRunnerDisplay.runners.second == nil)
+        #expect(presentation.baseRunnerDisplay.runners.third == nil)
+        #expect(presentation.baseRunnerDisplay.source == "latestSnapshotOnly")
     }
 
     // gameDetailBaseSituationDoesNotHideCurrentBatterOrPitcher 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -1443,9 +1443,9 @@ struct kboScoreTests {
         #expect(presentation.currentPitcherName == "보쉴리")
     }
 
-    // gameDetailRefreshDoesNotEraseExistingRunnerNameWhenBaseStaysOccupied 메서드는 이 타입의 주요 동작을 수행합니다.
+    // gameDetailRefreshClearsExistingRunnerNameWhenSnapshotNameMissing 메서드는 live snapshot에 이름이 없으면 기존 이름을 유지하지 않는지 검증합니다.
     @MainActor
-    @Test func gameDetailRefreshDoesNotEraseExistingRunnerNameWhenBaseStaysOccupied() async throws {
+    @Test func gameDetailRefreshClearsExistingRunnerNameWhenSnapshotNameMissing() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-05-06T18:30:00+09:00"))
         let existing = try makeBaseRunnerDisplayGame(
             bases: RunnerState(first: true, second: false, third: false),
@@ -1470,7 +1470,7 @@ struct kboScoreTests {
 
         let refreshed = await model.refreshGameDetail(for: existing.canonicalGameIdentityValue, forceRefresh: true)
 
-        #expect(refreshed?.baseRunners?.first == "전민재")
+        #expect(refreshed?.baseRunners?.first == nil)
     }
 
     // gameDetailRefreshRecoversUnconfirmedFinalWhenIncomingLiveIsNewer 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -12130,6 +12130,385 @@ struct kboScoreTests {
         #expect(presentation.review?.awayBatting.lines.first?.name == "공식타자")
     }
 
+    // gameDetailPresentationPrefersLatestSnapshotCountOverOfficialPayload 메서드는 latestSnapshot 카운트가 공식 상세 캐시를 이기는지 검증합니다.
+    @Test func gameDetailPresentationPrefersLatestSnapshotCountOverOfficialPayload() throws {
+        let snapshotGame = try makeLiveBoxscoreDetailGame(
+            status: .live,
+            id: UUID(uuidString: "24242424-2424-2424-2424-242424242401")!
+        )
+        let staleOfficialGame = makeGameDetail(
+            id: snapshotGame.id,
+            scheduledStart: snapshotGame.scheduledStart,
+            venue: snapshotGame.venue,
+            awayTeam: snapshotGame.awayTeam,
+            homeTeam: snapshotGame.homeTeam,
+            awayScore: snapshotGame.awayScore,
+            homeScore: snapshotGame.homeScore,
+            status: .live,
+            inningText: snapshotGame.inningText,
+            note: snapshotGame.note,
+            providerGameID: snapshotGame.providerGameID,
+            bases: snapshotGame.bases,
+            balls: 0,
+            strikes: 0,
+            outs: 0
+        )
+
+        let presentation = GameDetailPresentation(
+            game: snapshotGame,
+            payload: sampleGameCenterDetailPayload(game: staleOfficialGame),
+            boxscore: nil
+        )
+
+        #expect(presentation.balls == snapshotGame.balls)
+        #expect(presentation.strikes == snapshotGame.strikes)
+        #expect(presentation.outs == snapshotGame.outs)
+    }
+
+    // gameDetailPresentationPrefersLatestSnapshotRunnersOverOfficialPayload 메서드는 latestSnapshot 주자 이름/점유가 공식 상세 캐시를 이기는지 검증합니다.
+    @Test func gameDetailPresentationPrefersLatestSnapshotRunnersOverOfficialPayload() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(
+            status: .live,
+            id: UUID(uuidString: "24242424-2424-2424-2424-242424242402")!
+        )
+        let snapshotGame = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Bottom 3",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: true, second: false, third: true),
+            baseRunners: GameBaseRunners(first: "윤준호", second: nil, third: nil),
+            balls: baseGame.balls,
+            strikes: baseGame.strikes,
+            outs: baseGame.outs
+        )
+        let officialPayload = sampleGameCenterDetailPayload(
+            game: makeGameDetail(
+                id: baseGame.id,
+                scheduledStart: baseGame.scheduledStart,
+                venue: baseGame.venue,
+                awayTeam: baseGame.awayTeam,
+                homeTeam: baseGame.homeTeam,
+                awayScore: baseGame.awayScore,
+                homeScore: baseGame.homeScore,
+                status: .live,
+                inningText: "Bottom 3",
+                bases: RunnerState(first: false, second: true, third: false)
+            ),
+            baseRunners: GameCenterBaseRunners(first: "공식1루", second: "공식2루", third: "공식3루")
+        )
+        var resolver = BaseRunnerDisplayResolver()
+        let display = resolver.resolve(gameIdentity: snapshotGame.stableDetailIdentity, game: snapshotGame)
+
+        let presentation = GameDetailPresentation(
+            game: snapshotGame,
+            payload: officialPayload,
+            boxscore: nil,
+            baseRunnerDisplay: display
+        )
+
+        #expect(presentation.bases == RunnerState(first: true, second: false, third: true))
+        #expect(presentation.baseRunners?.first == "윤준호")
+        #expect(presentation.displayBaseRunners.map(\.base) == ["1B", "3B"])
+        #expect(presentation.displayBaseRunners.first?.name == "윤준호")
+        #expect(presentation.displayBaseRunners.last?.name == "점유")
+    }
+
+    // gameDetailPresentationShowsOccupiedFirstBaseWhenSnapshotRunnerNameMissing 메서드는 runner_on_first만 true여도 1루 점유가 표시되는지 검증합니다.
+    @Test func gameDetailPresentationShowsOccupiedFirstBaseWhenSnapshotRunnerNameMissing() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let snapshotGame = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let presentation = GameDetailPresentation(game: snapshotGame, payload: nil, boxscore: nil)
+
+        #expect(presentation.bases?.first == true)
+        #expect(presentation.displayBaseRunners.map(\.base) == ["1B"])
+        #expect(presentation.displayBaseRunners.first?.name == "점유")
+    }
+
+    // gameDetailPresentationShowsOccupiedFirstAndSecondBases 메서드는 runner_on_first/second가 true이면 이름 없이도 1루/2루 점유를 표시하는지 검증합니다.
+    @Test func gameDetailPresentationShowsOccupiedFirstAndSecondBases() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let snapshotGame = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: true, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil)
+        )
+
+        let presentation = GameDetailPresentation(game: snapshotGame, payload: nil, boxscore: nil)
+
+        #expect(presentation.bases == RunnerState(first: true, second: true, third: false))
+        #expect(presentation.displayBaseRunners.map(\.base) == ["1B", "2B"])
+        #expect(presentation.displayBaseRunners.map(\.name) == ["점유", "점유"])
+    }
+
+    // gameDetailPresentationPrefersLatestSnapshotBasesOverCachedEmptyBases 메서드는 cached display가 비어 있어도 latestSnapshot bases를 우선하는지 검증합니다.
+    @Test func gameDetailPresentationPrefersLatestSnapshotBasesOverCachedEmptyBases() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let snapshotGame = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: true, second: true, third: false),
+            baseRunners: GameBaseRunners(first: "한동희", second: "레이예스", third: nil)
+        )
+
+        let presentation = GameDetailPresentation(
+            game: snapshotGame,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: .empty
+        )
+
+        #expect(presentation.bases == RunnerState(first: true, second: true, third: false))
+        #expect(presentation.displayBaseRunners.map(\.name) == ["한동희", "레이예스"])
+    }
+
+    // gameDetailPresentationKeepsLatestSnapshotBasesWithDatabaseRecordReview 메서드는 DB record review 병합 후에도 latestSnapshot bases가 유지되는지 검증합니다.
+    @Test func gameDetailPresentationKeepsLatestSnapshotBasesWithDatabaseRecordReview() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let snapshotGame = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: true, second: true, third: false),
+            baseRunners: GameBaseRunners(first: "한동희", second: "레이예스", third: nil)
+        )
+        let staleOfficialPayload = sampleGameCenterDetailPayload(
+            game: makeGameDetail(
+                id: baseGame.id,
+                scheduledStart: baseGame.scheduledStart,
+                venue: baseGame.venue,
+                awayTeam: baseGame.awayTeam,
+                homeTeam: baseGame.homeTeam,
+                awayScore: baseGame.awayScore,
+                homeScore: baseGame.homeScore,
+                status: .live,
+                inningText: "Top 4",
+                bases: .empty
+            )
+        )
+
+        let presentation = GameDetailPresentation(
+            game: snapshotGame,
+            payload: staleOfficialPayload,
+            boxscore: nil,
+            databaseRecordReview: sampleDatabaseRecordReview(game: snapshotGame, batterCount: 18, pitcherCount: 2)
+        )
+
+        #expect(presentation.bases == RunnerState(first: true, second: true, third: false))
+        #expect(presentation.displayBaseRunners.map(\.name) == ["한동희", "레이예스"])
+    }
+
+    // gameDetailPresentationReplacesStaleSecondRunnerNameFromNextSnapshot 메서드는 이전 2루 주자 이름을 다음 snapshot 이름으로 교체하는지 검증합니다.
+    @Test func gameDetailPresentationReplacesStaleSecondRunnerNameFromNextSnapshot() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let nextSnapshot = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: false, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: "양의지", third: nil),
+            balls: 1,
+            strikes: 1,
+            outs: 0,
+            currentPitcherName: "나균안",
+            currentBatterName: "안재석"
+        )
+        let staleDisplay = BaseRunnerDisplayResolution(
+            runners: GameBaseRunners(first: nil, second: "정수빈", third: nil),
+            source: "carryForward"
+        )
+
+        let presentation = GameDetailPresentation(
+            game: nextSnapshot,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: staleDisplay
+        )
+
+        #expect(presentation.liveSituation.secondRunnerName == "양의지")
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "양의지")])
+    }
+
+    // gameDetailPresentationClearsSecondRunnerWhenSnapshotBaseEmpty 메서드는 다음 snapshot에서 2루가 비면 이전 이름을 완전히 제거하는지 검증합니다.
+    @Test func gameDetailPresentationClearsSecondRunnerWhenSnapshotBaseEmpty() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let nextSnapshot = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: false, second: false, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil),
+            balls: 1,
+            strikes: 1,
+            outs: 1,
+            currentPitcherName: "나균안",
+            currentBatterName: "안재석"
+        )
+        let staleDisplay = BaseRunnerDisplayResolution(
+            runners: GameBaseRunners(first: nil, second: "정수빈", third: nil),
+            source: "carryForward"
+        )
+
+        let presentation = GameDetailPresentation(
+            game: nextSnapshot,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: staleDisplay
+        )
+
+        #expect(presentation.liveSituation.runnerOnSecond == false)
+        #expect(presentation.liveSituation.secondRunnerName == nil)
+        #expect(presentation.displayBaseRunners.isEmpty)
+    }
+
+    // gameDetailPresentationDoesNotCarryPreviousNameWhenSnapshotRunnerNameNil 메서드는 2루 점유만 있고 이름이 없을 때 이전 이름을 유지하지 않는지 검증합니다.
+    @Test func gameDetailPresentationDoesNotCarryPreviousNameWhenSnapshotRunnerNameNil() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let nextSnapshot = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: false, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil),
+            balls: 1,
+            strikes: 1,
+            outs: 2,
+            currentPitcherName: "나균안",
+            currentBatterName: "안재석"
+        )
+        let staleDisplay = BaseRunnerDisplayResolution(
+            runners: GameBaseRunners(first: nil, second: "정수빈", third: nil),
+            source: "carryForward"
+        )
+
+        let presentation = GameDetailPresentation(
+            game: nextSnapshot,
+            payload: nil,
+            boxscore: nil,
+            baseRunnerDisplay: staleDisplay
+        )
+
+        #expect(presentation.liveSituation.runnerOnSecond)
+        #expect(presentation.liveSituation.secondRunnerName == nil)
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "점유")])
+    }
+
+    // gameDetailPresentationBlocksOfficialRunnerNameOverLatestSnapshot 메서드는 official fallback이 latestSnapshot 주자 이름을 덮지 못하는지 검증합니다.
+    @Test func gameDetailPresentationBlocksOfficialRunnerNameOverLatestSnapshot() throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let nextSnapshot = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID,
+            bases: RunnerState(first: false, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: "양의지", third: nil),
+            balls: 1,
+            strikes: 1,
+            outs: 0,
+            currentPitcherName: "나균안",
+            currentBatterName: "안재석"
+        )
+        let officialPayload = sampleGameCenterDetailPayload(
+            game: nextSnapshot,
+            baseRunners: GameCenterBaseRunners(first: nil, second: "정수빈", third: nil)
+        )
+
+        let presentation = GameDetailPresentation(
+            game: nextSnapshot,
+            payload: officialPayload,
+            boxscore: nil,
+            baseRunnerDisplay: BaseRunnerDisplayResolution(
+                runners: GameBaseRunners(first: nil, second: "정수빈", third: nil),
+                source: "carryForward"
+            )
+        )
+
+        #expect(presentation.liveSituation.secondRunnerName == "양의지")
+        #expect(presentation.displayBaseRunners == [BaseRunnerDisplayItem(base: "2B", name: "양의지")])
+        #expect(presentation.baseRunnerDisplay.source == "latestSnapshotOnly")
+    }
+
     // invalidLiveOfficialDetailKeepsRecordStateEmptyWithoutBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func invalidLiveOfficialDetailKeepsRecordStateEmptyWithoutBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
@@ -12206,8 +12585,8 @@ struct kboScoreTests {
         #expect(model.cachedLineScore?.awayTotals.hits == "7")
     }
 
-    // gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForLiveLikeGames 메서드는 이 타입의 주요 동작을 수행합니다.
-    @Test func gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForLiveLikeGames() throws {
+    // gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForPollingEligibleGames 메서드는 이 타입의 주요 동작을 수행합니다.
+    @Test func gameDetailViewModelLiveRefreshTaskIDOnlyActivatesForPollingEligibleGames() throws {
         let live = GameDetailViewModel(gameIdentity: "live", initialGame: try makeLiveBoxscoreDetailGame(status: .live))
         let rainDelay = GameDetailViewModel(gameIdentity: "rain", initialGame: try makeLiveBoxscoreDetailGame(status: .rainDelay))
         let final = GameDetailViewModel(gameIdentity: "final", initialGame: try makeLiveBoxscoreDetailGame(status: .final))
@@ -12221,6 +12600,248 @@ struct kboScoreTests {
         #expect(final.liveRefreshTaskID.hasPrefix("idle:"))
         #expect(cancelled.shouldAutoRefreshLiveGame == false)
         #expect(cancelled.liveRefreshTaskID.hasPrefix("idle:"))
+    }
+
+    // liveGameDetailEntryStartsPolling 메서드는 상세 화면 진입 시 live 경기 polling이 시작되는지 검증합니다.
+    @Test func liveGameDetailEntryStartsPolling() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+
+        #expect(model.isGameDetailPollingActiveForTesting)
+        #expect(model.activeGameDetailPollingIdentityForTesting == game.stableDetailIdentity)
+        model.stopLiveGameDetailPolling()
+    }
+
+    // pastScheduledGameDetailEntryStartsPolling 메서드는 예정 시각이 지난 scheduled 경기 polling 시작을 검증합니다.
+    @Test func pastScheduledGameDetailEntryStartsPolling() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { game.scheduledStart.addingTimeInterval(60) }
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+
+        #expect(model.isGameDetailPollingActiveForTesting)
+        model.stopLiveGameDetailPolling()
+    }
+
+    // delayedAndSuspendedGameDetailEntryStartsPolling 메서드는 delayed/suspended 정규화 상태의 polling 시작을 검증합니다.
+    @Test func delayedAndSuspendedGameDetailEntryStartsPolling() async throws {
+        let delayed = try makeLiveBoxscoreDetailGame(status: KBODataMapper.mapGameStatus(code: "delayed", text: nil))
+        let suspended = try makeLiveBoxscoreDetailGame(
+            status: KBODataMapper.mapGameStatus(code: "suspended", text: nil),
+            id: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+        )
+        let delayedModel = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [delayed], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        let suspendedModel = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [suspended], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await delayedModel.startLiveGameDetailPolling(gameIdentity: delayed.stableDetailIdentity)
+        await suspendedModel.startLiveGameDetailPolling(gameIdentity: suspended.stableDetailIdentity)
+
+        #expect(delayedModel.isGameDetailPollingActiveForTesting)
+        #expect(suspendedModel.isGameDetailPollingActiveForTesting)
+        delayedModel.stopLiveGameDetailPolling()
+        suspendedModel.stopLiveGameDetailPolling()
+    }
+
+    // gameDetailDisappearStopsPolling 메서드는 상세 화면 disappear 시 polling 취소를 검증합니다.
+    @Test func gameDetailDisappearStopsPolling() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+        model.stopLiveGameDetailPolling()
+
+        #expect(model.isGameDetailPollingActiveForTesting == false)
+        #expect(model.activeGameDetailPollingIdentityForTesting == nil)
+    }
+
+    // gameDetailForegroundRefreshesImmediately 메서드는 foreground 복귀 시 polling tick 대기 없이 1회 refresh하는지 검증합니다.
+    @Test func gameDetailForegroundRefreshesImmediately() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        let state = RecordingGameDetailSnapshotState(result: .success(game))
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { game, identity, teams in
+                try await state.fetch(game: game, identity: identity, teams: teams)
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            gameDetailPollingIntervalNanoseconds: 5_000_000_000
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+        await model.resumeLiveGameDetailPollingIfNeeded()
+
+        #expect(await state.fetchCount == 1)
+        model.stopLiveGameDetailPolling()
+    }
+
+    // gameDetailPollingContinuesAfterRefreshFailure 메서드는 refresh 실패 후에도 다음 polling tick이 유지되는지 검증합니다.
+    @Test func gameDetailPollingContinuesAfterRefreshFailure() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        let state = RecordingGameDetailSnapshotState(result: .failure(TestRepositoryError.supabaseUnavailable))
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { game, identity, teams in
+                try await state.fetch(game: game, identity: identity, teams: teams)
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            gameDetailPollingIntervalNanoseconds: 10_000_000
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+        let didKeepPolling = await eventually(timeout: 1.0, interval: 10_000_000) {
+            await state.fetchCount >= 2
+        }
+
+        #expect(didKeepPolling)
+        model.stopLiveGameDetailPolling()
+    }
+
+    // manualRefreshAndPollingUseSameGameDetailPresentationMergeResult 메서드는 수동 새로고침과 polling이 같은 상세 병합 결과를 만드는지 검증합니다.
+    @Test func manualRefreshAndPollingUseSameGameDetailPresentationMergeResult() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        let latest = makeGameDetail(
+            id: game.id,
+            scheduledStart: game.scheduledStart,
+            venue: game.venue,
+            awayTeam: game.awayTeam,
+            homeTeam: game.homeTeam,
+            awayScore: game.awayScore,
+            homeScore: game.homeScore,
+            status: .live,
+            inningText: "Bottom 3",
+            note: game.note,
+            providerGameID: game.providerGameID,
+            bases: RunnerState(first: true, second: false, third: false),
+            baseRunners: GameBaseRunners(first: "윤준호", second: nil, third: nil),
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: "나균안",
+            currentBatterName: "정수빈"
+        )
+        let state = RecordingGameDetailSnapshotState(result: .success(latest))
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { game, identity, teams in
+                try await state.fetch(game: game, identity: identity, teams: teams)
+            }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            gameDetailPollingIntervalNanoseconds: 10_000_000
+        )
+
+        let manual = try #require(await model.refreshGameDetailResult(for: game.stableDetailIdentity, forceRefresh: true)?.game)
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+        let didPoll = await eventually(timeout: 1.0, interval: 10_000_000) {
+            await state.fetchCount >= 2
+        }
+        let polled = try #require(model.game(withIdentity: game.stableDetailIdentity))
+
+        #expect(didPoll)
+        #expect(polled.balls == manual.balls)
+        #expect(polled.strikes == manual.strikes)
+        #expect(polled.outs == manual.outs)
+        #expect(polled.bases == manual.bases)
+        #expect(polled.baseRunners == manual.baseRunners)
+        model.stopLiveGameDetailPolling()
+    }
+
+    // gameDetailRefreshPrefersLatestSnapshotBasesOverCachedEmptyBases 메서드는 AppModel refresh 후 저장소 캐시의 empty bases가 latestSnapshot bases를 덮지 못하는지 검증합니다.
+    @Test func gameDetailRefreshPrefersLatestSnapshotBasesOverCachedEmptyBases() async throws {
+        let cached = try makeLiveBoxscoreDetailGame(status: .live)
+        let cachedEmpty = makeGameDetail(
+            id: cached.id,
+            scheduledStart: cached.scheduledStart,
+            venue: cached.venue,
+            awayTeam: cached.awayTeam,
+            homeTeam: cached.homeTeam,
+            awayScore: cached.awayScore,
+            homeScore: cached.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: cached.note,
+            providerGameID: cached.providerGameID,
+            bases: .empty,
+            baseRunners: nil,
+            balls: cached.balls,
+            strikes: cached.strikes,
+            outs: cached.outs,
+            currentPitcherName: cached.currentPitcherName,
+            currentBatterName: cached.currentBatterName
+        )
+        let latest = makeGameDetail(
+            id: cached.id,
+            scheduledStart: cached.scheduledStart,
+            venue: cached.venue,
+            awayTeam: cached.awayTeam,
+            homeTeam: cached.homeTeam,
+            awayScore: cached.awayScore,
+            homeScore: cached.homeScore,
+            status: .live,
+            inningText: "Top 4",
+            note: cached.note,
+            providerGameID: cached.providerGameID,
+            bases: RunnerState(first: true, second: true, third: false),
+            baseRunners: GameBaseRunners(first: nil, second: nil, third: nil),
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            currentPitcherName: cached.currentPitcherName,
+            currentBatterName: cached.currentBatterName
+        )
+        let repository = DetailSnapshotStubRepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [cachedEmpty], notifications: [], settings: .default)
+            }),
+            fetchGameDetailSnapshot: { _, _, _ in latest }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [cachedEmpty], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = try #require(await model.refreshGameDetailResult(for: cachedEmpty.stableDetailIdentity, forceRefresh: true)?.game)
+
+        #expect(refreshed.bases == RunnerState(first: true, second: true, third: false))
+        #expect(refreshed.baseRunners?.first == nil)
+        #expect(refreshed.baseRunners?.second == nil)
+        #expect(GameDetailPresentation(game: refreshed, payload: nil, boxscore: nil).displayBaseRunners.map(\.base) == ["1B", "2B"])
     }
 
     // upcomingGameDetailSkipsAutomaticOfficialPreviewLoad 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -12316,6 +12937,61 @@ struct kboScoreTests {
         #expect(refreshed?.game.id == game.id)
         #expect(await tracker.singleLookups.isEmpty)
         #expect(await tracker.latestSnapshotGameIDs.isEmpty)
+    }
+
+    // snapshotAtNilRawLiveWithInningProgressDoesNotDowngradeToUpcoming 메서드는 timestamp 없는 live snapshot도 진행 증거가 있으면 live로 유지되는지 검증합니다.
+    @Test func snapshotAtNilRawLiveWithInningProgressDoesNotDowngradeToUpcoming() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .upcoming)
+        let awayTeamID = supabaseTeamUUID(for: "doosan")
+        let homeTeamID = supabaseTeamUUID(for: "ssg")
+        let row = try makeSupabaseGameRow(
+            id: game.id,
+            publicGameID: game.publicGameID ?? "20260510-DOO-SSG",
+            providerGameID: game.providerGameID ?? "20260510SKOB0",
+            gameDate: "2026-05-10",
+            scheduledAt: "2026-05-10T14:00:00+09:00",
+            status: "live",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 0,
+            homeScore: 0,
+            inningState: "Bottom 3"
+        )
+        let snapshot = try makeSupabaseLatestSnapshotRow(
+            gameID: game.id,
+            inningLabel: "Bottom 3",
+            currentPitcherName: nil,
+            currentBatterName: nil,
+            balls: 0,
+            strikes: 0,
+            outs: 0
+        )
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(fetchBootstrapData: {
+                KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+            }),
+            source: TrackingSupabaseSource(
+                teamRows: [
+                    supabaseTeamRow(code: "doosan", id: awayTeamID),
+                    supabaseTeamRow(code: "ssg", id: homeTeamID)
+                ],
+                gameRows: [row],
+                tracker: tracker,
+                latestSnapshotRows: [snapshot]
+            ),
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        let refreshed = await model.refreshGameDetailResult(for: game.stableDetailIdentity, forceRefresh: true)
+
+        #expect(refreshed?.game.status == .live)
+        #expect(refreshed?.game.inningText == "Bottom 3")
     }
 
     // failedBoxscoreFetchDoesNotFailDetailLoad 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -16931,6 +17607,22 @@ private struct FailingSupabaseSource: SupabaseKBOReading, Sendable {
 // TestRepositoryError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 private enum TestRepositoryError: Error, Sendable {
     case supabaseUnavailable
+}
+
+private actor RecordingGameDetailSnapshotState {
+    private let result: Result<GameDetail?, Error>
+    private(set) var fetchCount = 0
+
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
+    init(result: Result<GameDetail?, Error>) {
+        self.result = result
+    }
+
+    // fetch 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetch(game _: GameDetail, identity _: String, teams _: [Team]) async throws -> GameDetail? {
+        fetchCount += 1
+        return try result.get()
+    }
 }
 
 private actor RecordingBoxscoreState {
