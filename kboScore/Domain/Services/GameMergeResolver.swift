@@ -181,6 +181,12 @@ nonisolated enum GameMergeResolver {
         if shouldRecoverUnconfirmedFinal(existing: existing, candidate: candidate) {
             return candidate
         }
+        if shouldPreferCancellation(existing: existing, candidate: candidate) {
+            return candidate
+        }
+        if shouldKeepExistingCancellation(existing: existing, candidate: candidate) {
+            return existing
+        }
         let candidatePriority = gameStateMergePriority(candidate)
         let existingPriority = gameStateMergePriority(existing)
         if candidatePriority != existingPriority {
@@ -203,6 +209,16 @@ nonisolated enum GameMergeResolver {
             return candidateHasProvider ? candidate : existing
         }
         return candidate
+    }
+
+    // shouldPreferCancellation 메서드는 remote 취소/순연 상태가 오래된 예정/라이브 캐시를 덮도록 합니다.
+    private static func shouldPreferCancellation(existing: GameDetail, candidate: GameDetail) -> Bool {
+        candidate.status == .cancelled && existing.status != .final
+    }
+
+    // shouldKeepExistingCancellation 메서드는 이후 예정 응답이 이미 반영된 취소 상태를 되돌리지 못하게 합니다.
+    private static func shouldKeepExistingCancellation(existing: GameDetail, candidate: GameDetail) -> Bool {
+        existing.status == .cancelled && candidate.status != .final
     }
 
     // shouldRecoverUnconfirmedFinal 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.

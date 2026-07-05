@@ -63,7 +63,7 @@ final class ScheduleViewModel: ObservableObject {
     func loadDisplayedMonth(appModel: AppModel) async {
         await loadMonth(
             displayedMonth,
-            forceRefresh: false,
+            forceRefresh: true,
             appModel: appModel
         )
         await normalizeDisplayedMonth(appModel: appModel)

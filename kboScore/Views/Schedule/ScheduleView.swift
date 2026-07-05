@@ -700,6 +700,11 @@ private struct ScheduleGameRow: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                 }
+                if let cancelledText {
+                    Text(cancelledText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .secondary)
+                }
             }
 
             Spacer()
@@ -708,16 +713,16 @@ private struct ScheduleGameRow: View {
                 Text(game.scheduledStart.formatted(date: .omitted, time: .shortened))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .primary)
-                Text(game.status.title)
+                Text(statusBadgeText)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
+                    .foregroundStyle(statusBadgeTint)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(
-                        (appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
-                            .opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
+                        statusBadgeTint.opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
                         in: Capsule()
                     )
+                    
             }
         }
         .padding(10)
@@ -755,11 +760,37 @@ private struct ScheduleGameRow: View {
 
     private var finalResultText: String? {
         guard filter == .all,
+              game.status == .final,
               let winningTeam = game.finalWinningTeam,
               let scoreLine = game.finalScoreLine else {
             return nil
         }
         return "\(winningTeam.displayName) 승 · \(scoreLine)"
+    }
+    
+    private var isCancelledGame: Bool {
+        game.status == .cancelled
+    }
+
+    private var cancelledText: String? {
+        guard filter == .all, isCancelledGame else { return nil }
+        return "경기 취소"
+    }
+    
+    private var statusBadgeText: String {
+        if isCancelledGame {
+            return "취소"
+        }
+        return game.status.title
+    }
+
+    private var statusBadgeTint: Color {
+        if isCancelledGame {
+            return appModel.favoriteStadiumPalette?.textSecondary ?? .secondary
+        }
+        return appModel.favoriteStadiumPalette.map {
+            game.status.stadiumTintColor($0)
+        } ?? game.status.tintColor
     }
 
     private var liveScoreText: String? {
@@ -827,6 +858,8 @@ private struct ScheduleAttendanceAppIcon: View {
             .shadow(color: .black.opacity(0.16), radius: 1, y: 0.5)
     }
 }
+
+
 
 #Preview {
     ScheduleView()

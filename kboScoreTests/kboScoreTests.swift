@@ -15825,6 +15825,272 @@ struct kboScoreTests {
         #expect(selectedDayGames.map(\.currentPitcherName).allSatisfy { $0?.hasPrefix("투수") == true })
     }
 
+    // remoteCancelledStatusWinsOverCachedScheduledMonthGame 메서드는 Supabase 취소 상태가 로컬 예정 캐시를 덮는지 검증합니다.
+    @Test func remoteCancelledStatusWinsOverCachedScheduledMonthGame() async throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first { $0.id == "hanwha" })
+        let homeTeam = try #require(teams.first { $0.id == "lg" })
+        let cached = makeGameDetail(
+            id: UUID(uuidString: "97000000-0000-0000-0000-000000070501")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN provider_game_id=20260705LGHH0 updated_at=2026-07-05T10:00:00+09:00"
+        )
+        let remote = makeGameDetail(
+            id: UUID(uuidString: "97000000-0000-0000-0000-000000070502")!,
+            scheduledStart: cached.scheduledStart,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN provider_game_id=20260705LGHH0 updated_at=2026-07-05T16:00:00+09:00 status_reason=우천취소"
+        )
+
+        let merged = GameMergeResolver.preferredGame(existing: cached, candidate: remote)
+
+        #expect(merged.status == .cancelled)
+        #expect(merged.note?.contains("status_reason=우천취소") == true)
+    }
+
+    // cancelledMappingDoesNotRequireCancelledFlag 메서드는 status 문자열만 cancelled여도 UI 상태가 취소인지 검증합니다.
+    @Test func cancelledMappingDoesNotRequireCancelledFlag() throws {
+        let homeTeamID = UUID(uuidString: "97000000-0000-0000-0000-000000070511")!
+        let awayTeamID = UUID(uuidString: "97000000-0000-0000-0000-000000070512")!
+        let teamRows = try JSONDecoder().decode(
+            [SupabaseTeamRow].self,
+            from: """
+            [
+              { "id": "\(homeTeamID.uuidString)", "team_code": "lg", "name": "LG Twins", "short_name": "LG" },
+              { "id": "\(awayTeamID.uuidString)", "team_code": "hanwha", "name": "Hanwha Eagles", "short_name": "한화" }
+            ]
+            """.data(using: .utf8)!
+        )
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: """
+            [
+              {
+                "id": "97000000-0000-0000-0000-000000070513",
+                "public_game_id": "20260705-LG-HAN",
+                "provider": "kbo",
+                "provider_game_id": "20260705LGHH0",
+                "game_date": "2026-07-05",
+                "scheduled_at": "2026-07-05T18:00:00+09:00",
+                "stadium": "잠실",
+                "status": "cancelled",
+                "home_team_id": "\(homeTeamID.uuidString)",
+                "away_team_id": "\(awayTeamID.uuidString)",
+                "home_score": null,
+                "away_score": null,
+                "inning_state": null,
+                "is_cancelled": false,
+                "is_postponed": false,
+                "status_reason": "우천취소"
+              }
+            ]
+            """.data(using: .utf8)!
+        )
+
+        let games = SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows)
+
+        #expect(games.first?.status == .cancelled)
+    }
+
+    // cancelledFlagOverridesScheduledStatus 메서드는 is_cancelled=true가 status 문자열보다 우선인지 검증합니다.
+    @Test func cancelledFlagOverridesScheduledStatus() throws {
+        let homeTeamID = UUID(uuidString: "97000000-0000-0000-0000-000000070521")!
+        let awayTeamID = UUID(uuidString: "97000000-0000-0000-0000-000000070522")!
+        let teamRows = try JSONDecoder().decode(
+            [SupabaseTeamRow].self,
+            from: """
+            [
+              { "id": "\(homeTeamID.uuidString)", "team_code": "kia", "name": "KIA Tigers", "short_name": "KIA" },
+              { "id": "\(awayTeamID.uuidString)", "team_code": "nc", "name": "NC Dinos", "short_name": "NC" }
+            ]
+            """.data(using: .utf8)!
+        )
+        let gameRows = try JSONDecoder().decode(
+            [SupabaseGameRow].self,
+            from: """
+            [
+              {
+                "id": "97000000-0000-0000-0000-000000070523",
+                "public_game_id": "20260705-KIA-NC",
+                "provider": "kbo",
+                "provider_game_id": "20260705NCHT0",
+                "game_date": "2026-07-05",
+                "scheduled_at": "2026-07-05T18:00:00+09:00",
+                "stadium": "광주",
+                "status": "scheduled",
+                "home_team_id": "\(homeTeamID.uuidString)",
+                "away_team_id": "\(awayTeamID.uuidString)",
+                "home_score": null,
+                "away_score": null,
+                "inning_state": null,
+                "is_cancelled": true,
+                "is_postponed": false,
+                "status_reason": "우천취소"
+              }
+            ]
+            """.data(using: .utf8)!
+        )
+
+        let games = SupabaseKBOMapper.mapGames(gameRows: gameRows, teamRows: teamRows)
+
+        #expect(games.first?.status == .cancelled)
+    }
+
+    // todayLiveRefreshEmptyDoesNotClearMonthCache 메서드는 0건 daily refresh가 월간 캐시와 위젯 월 소스를 비우지 않는지 검증합니다.
+    @Test func todayLiveRefreshEmptyDoesNotClearMonthCache() async throws {
+        let selectedDate = isoDate("2026-07-05T12:00:00+09:00")
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first { $0.id == "hanwha" })
+        let homeTeam = try #require(teams.first { $0.id == "lg" })
+        let monthGame = makeGameDetail(
+            id: UUID(uuidString: "97000000-0000-0000-0000-000000070531")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN provider_game_id=20260705LGHH0 updated_at=2026-07-05T16:00:00+09:00 status_reason=우천취소"
+        )
+        let repository = StubRepository(
+            fetchBootstrapData: {
+                KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default)
+            },
+            fetchGames: { [] },
+            fetchMonthlySchedule: { key in key == monthKey ? [monthGame] : [] },
+            fetchScheduleBypassingCache: { _, _ in [] }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { selectedDate }
+        )
+        model.settings.favoriteTeamID = "lg"
+        let coordinator = ScheduleRefreshCoordinator()
+
+        await coordinator.loadMonth(monthKey, forceRefresh: true, appModel: model, callSite: "test", reason: "initialLoad")
+        await coordinator.refreshTodayLiveIfNeeded(selectedDate: selectedDate, displayedMonthKey: monthKey, appModel: model, callSite: "test")
+
+        #expect(coordinator.cachedMonthEntries[monthKey.yearMonthText]?.games.count == 1)
+        #expect(coordinator.cachedMonthEntries[monthKey.yearMonthText]?.games.first?.status == .cancelled)
+        #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: monthKey) == 1)
+    }
+
+    // scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists 메서드는 월 진입 시 캐시 hit여도 remote를 다시 확인하는지 검증합니다.
+    @Test func scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists() async throws {
+        let selectedDate = isoDate("2026-07-05T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first { $0.id == "hanwha" })
+        let homeTeam = try #require(teams.first { $0.id == "lg" })
+        let game = makeGameDetail(
+            id: UUID(uuidString: "97000000-0000-0000-0000-000000070541")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .cancelled,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN provider_game_id=20260705LGHH0 updated_at=2026-07-05T16:00:00+09:00 status_reason=우천취소"
+        )
+        let tracker = ScheduleTabMonthTestTracker()
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            scheduleTabGames: [game],
+            tracker: tracker
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { selectedDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = selectedDate
+        viewModel.selectedDate = selectedDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(await tracker.scheduleTabMonthFetches == 2)
+        #expect(await tracker.scheduleTabBypassingCacheValues == [true, true])
+        #expect(viewModel.selectedDateGames.first?.status == .cancelled)
+    }
+
+    // julyFifthRainoutsAppearCancelledInMonthlySchedule 메서드는 2026-07-05 취소 2건이 월간 일정에 표시되는지 검증합니다.
+    @Test func julyFifthRainoutsAppearCancelledInMonthlySchedule() async throws {
+        let selectedDate = isoDate("2026-07-05T12:00:00+09:00")
+        let teams = MockKBOData.makeBootstrap().teams
+        let hanwha = try #require(teams.first { $0.id == "hanwha" })
+        let lg = try #require(teams.first { $0.id == "lg" })
+        let nc = try #require(teams.first { $0.id == "nc" })
+        let kia = try #require(teams.first { $0.id == "kia" })
+        let rainouts = [
+            makeGameDetail(
+                id: UUID(uuidString: "97000000-0000-0000-0000-000000070551")!,
+                scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+                venue: "잠실",
+                awayTeam: hanwha,
+                homeTeam: lg,
+                awayScore: nil,
+                homeScore: nil,
+                status: .cancelled,
+                seasonClassification: .regularSeason,
+                note: "public_game_id=20260705-LG-HAN provider_game_id=20260705LGHH0 updated_at=2026-07-05T16:00:00+09:00 status_reason=우천취소"
+            ),
+            makeGameDetail(
+                id: UUID(uuidString: "97000000-0000-0000-0000-000000070552")!,
+                scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+                venue: "광주",
+                awayTeam: nc,
+                homeTeam: kia,
+                awayScore: nil,
+                homeScore: nil,
+                status: .cancelled,
+                seasonClassification: .regularSeason,
+                note: "public_game_id=20260705-KIA-NC provider_game_id=20260705NCHT0 updated_at=2026-07-05T16:00:00+09:00 status_reason=우천취소"
+            )
+        ]
+        let repository = ScheduleTabMonthTestRepository(
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            scheduleTabGames: rainouts,
+            tracker: ScheduleTabMonthTestTracker()
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { selectedDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = selectedDate
+        viewModel.selectedDate = selectedDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.selectedDateGames.count == 2)
+        #expect(viewModel.selectedDateGames.allSatisfy { $0.status == .cancelled })
+        #expect(Set(viewModel.selectedDateGames.compactMap(\.publicGameID)) == ["20260705-LG-HAN", "20260705-KIA-NC"])
+    }
+
     // scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleAppModelSyncSmallerSnapshotDoesNotReplaceFullRepositoryMonth() async throws {
         let selectedDate = isoDate("2026-05-26T09:00:00+09:00")
@@ -17551,10 +17817,12 @@ private actor ScheduleTabMonthTestTracker {
     private(set) var scheduleTabMonthFetches = 0
     private(set) var monthlyScheduleFetches = 0
     private(set) var dailyScheduleFetches = 0
+    private(set) var scheduleTabBypassingCacheValues: [Bool] = []
 
     // recordScheduleTabMonthFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
-    func recordScheduleTabMonthFetch() {
+    func recordScheduleTabMonthFetch(bypassingCache: Bool) {
         scheduleTabMonthFetches += 1
+        scheduleTabBypassingCacheValues.append(bypassingCache)
     }
 
     // recordMonthlyScheduleFetch 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
@@ -17600,9 +17868,9 @@ private struct ScheduleTabMonthTestRepository: KBORepository, KBOScheduleTabMont
     // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchScheduleTabMonth(
         for month: KBOMonthScheduleKey,
-        bypassingCache _: Bool
+        bypassingCache: Bool
     ) async throws -> [GameDetail] {
-        await tracker.recordScheduleTabMonthFetch()
+        await tracker.recordScheduleTabMonthFetch(bypassingCache: bypassingCache)
         return scheduleTabGames.filter {
             KBOMonthScheduleKey(date: $0.scheduledStart) == month
         }

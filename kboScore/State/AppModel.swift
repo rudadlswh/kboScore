@@ -3529,6 +3529,18 @@ final class AppModel {
             #if DEBUG
             print("[ScheduleSync] todayRefresh date=\(dayKey) fetched=\(fetched.count)")
             #endif
+            guard fetched.isEmpty == false else {
+                lastTodayLiveRefreshAt[dayKey] = Date()
+                #if DEBUG
+                print("[ScheduleSync] todayRefresh empty=true preserveMonthCache=true date=\(dayKey) month=\(monthKey.yearMonthText)")
+                #endif
+                await syncFavoriteTeamWidgetSnapshot(
+                    includePrefetch: false,
+                    reason: "todayLiveRefreshEmptyPreserveMonth",
+                    monthKey: monthKey
+                )
+                return []
+            }
             let upsertResult = upsertScheduleGamesIntoLocalStore(fetched, source: .todayLiveRefresh)
             let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache(fetched)
             await refreshLoadedScheduleMonthsFromLocalStore(

@@ -71,8 +71,11 @@ struct GameDetailView: View {
                 )
                 VStack(alignment: .leading, spacing: 12) {
                     GameStatusSummaryCard(presentation: presentation)
-                    actionButtons(for: game)
-                    overviewSection(presentation: presentation)
+
+                    if presentation.status != .cancelled {
+                        actionButtons(for: game)
+                        overviewSection(presentation: presentation)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -516,7 +519,22 @@ struct GameDetailPresentation {
     ) {
         let summary = payload?.summary
         self.game = game
-        let resolvedStatus = summary?.status ?? game.status
+//        let resolvedStatus = summary?.status ?? game.status
+        let resolvedStatus: GameStatus = {
+            if game.status == .cancelled {
+                return .cancelled
+            }
+
+            if game.status == .rainDelay {
+                return .rainDelay
+            }
+
+            if game.status == .final {
+                return .final
+            }
+
+            return summary?.status ?? game.status
+        }()
         status = resolvedStatus
         stadium = summary?.stadium?.nilIfBlank ?? game.venue
         startTimeText = summary?.startTime?.nilIfBlank ?? game.scheduledStart.formatted(date: .omitted, time: .shortened)
@@ -1327,6 +1345,10 @@ private struct GameLineScoreCard: View {
                 .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         case .live, .rainDelay:
             Text("이닝별 점수 데이터 준비 중")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        case .cancelled:
+            Text("취소된 경기입니다.")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         default:
