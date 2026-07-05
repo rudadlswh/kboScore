@@ -85,6 +85,10 @@ enum GameCenterRecordSource: String, Sendable {
     var isLimited: Bool {
         self == .keyplayerPartialLimited || self == .lineupLimited
     }
+
+    var isOfficialBoxscore: Bool {
+        self == .fullBoxscore || self == .scoreboardHTMLBoxscore
+    }
 }
 
 // GameCenterReview 구조체는 GameCenterReview 타입의 역할과 값을 정의합니다.

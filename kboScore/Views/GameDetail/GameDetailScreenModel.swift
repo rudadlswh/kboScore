@@ -280,9 +280,8 @@ final class GameDetailScreenModel {
             if loadedDatabaseRecordReview?.hasDisplayableRecords == true {
                 self.databaseRecordReview = loadedDatabaseRecordReview
                 #if DEBUG
-                print("[GameDetailLive] Official fetch skipped reason=dbRecordsPresent publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
+                print("[GameDetailLive] db records present publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
                 #endif
-                self.cancelOfficialFallbackLoad()
             } else if let preserveExistingReview, preserveExistingReview.hasDisplayableRecords {
                 self.databaseRecordReview = preserveExistingReview
             }
@@ -350,7 +349,6 @@ final class GameDetailScreenModel {
         let hasMappedRows = (result?.mappedBatterCount ?? 0) > 0 || (result?.mappedPitcherCount ?? 0) > 0
         if let review, review.hasDisplayableRecords, hasMappedRows {
             databaseRecordReview = review
-            cancelOfficialFallbackLoad()
         }
         if databaseRecordMergeInFlightGameIdentity == resolvedGame.stableDetailIdentity {
             databaseRecordMergeInFlightGameIdentity = nil
@@ -423,10 +421,10 @@ final class GameDetailScreenModel {
 
     // scheduleBoxscoreLoadIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleBoxscoreLoadIfNeeded(for game: GameDetail, forceRefresh: Bool) {
-        guard game.status == .final,
+        guard (game.status == .final || game.status.isLiveLike),
               let publicGameID = game.publicGameID?.nilIfBlank else {
             #if DEBUG
-            print("[GameBoxscore] skipped reason=notFinalOrMissingPublicID status=\(game.status.rawValue) publicGameID=\(game.publicGameID ?? "<nil>")")
+            print("[GameBoxscore] skipped reason=notRecordStatusOrMissingPublicID status=\(game.status.rawValue) publicGameID=\(game.publicGameID ?? "<nil>")")
             #endif
             activeBoxscoreGameID = nil
             boxscore = nil
@@ -508,13 +506,6 @@ final class GameDetailScreenModel {
     // scheduleOfficialRecordFallbackIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final || game.status.isLiveLike else { return }
-        guard databaseRecordReview?.hasDisplayableRecords != true else {
-            #if DEBUG
-            print("[GameDetailLive] Official fetch skipped reason=dbRecordsPresent publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
-            #endif
-            cancelOfficialFallbackLoad()
-            return
-        }
         guard databaseRecordMergeInFlightGameIdentity != game.stableDetailIdentity else {
             #if DEBUG
             print("[GameDetailLive] Official fetch skipped reason=dbRecordsInFlight publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
@@ -577,15 +568,13 @@ final class GameDetailScreenModel {
         lastLoadedOfficialFallbackGameKey = cacheKey
         guard activeOfficialFallbackGameKey == cacheKey,
               boxscore?.hasRecords != true else { return }
-        guard databaseRecordReview?.hasDisplayableRecords != true else {
-            cancelOfficialFallbackLoad()
-            return
-        }
 
         if let fetchedReview, fetchedReview.hasDisplayableRecords {
             Self.cachedOfficialFallbackReviews[cacheKey] = (Date(), fetchedReview)
             Self.recentFailedOfficialFallbacks[cacheKey] = nil
-            officialFallbackReview = fetchedReview
+            if databaseRecordReview?.hasDisplayableRecords != true || fetchedReview.recordSource.isOfficialBoxscore {
+                officialFallbackReview = fetchedReview
+            }
             #if DEBUG
             print("[GameDetailLive] official record fallback success gameKey=\(cacheKey) liveRecordPresent=true durationMs=\(Self.durationMilliseconds(since: stageStartedAt))")
             #endif

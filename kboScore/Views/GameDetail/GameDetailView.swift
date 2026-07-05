@@ -599,11 +599,34 @@ struct GameDetailPresentation {
         }()
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters ?? gameStarterMetadata
         lineScore = payload?.lineScore ?? cachedLineScore
-        review = databaseRecordReview?.enrichingBatterPositions(from: payload?.review) ??
-            boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
-            officialFallbackReview ??
-            payload?.review
+        review = Self.preferredRecordReview(
+            payloadReview: payload?.review,
+            boxscoreReview: boxscore?.gameCenterReview,
+            databaseRecordReview: databaseRecordReview,
+            officialFallbackReview: officialFallbackReview
+        )
         preview = payload?.preview
+    }
+
+    private static func preferredRecordReview(
+        payloadReview: GameCenterReview?,
+        boxscoreReview: GameCenterReview?,
+        databaseRecordReview: GameCenterReview?,
+        officialFallbackReview: GameCenterReview?
+    ) -> GameCenterReview? {
+        let positionSource = payloadReview ?? officialFallbackReview
+        let officialBoxscoreReview = [
+            boxscoreReview,
+            officialFallbackReview,
+            payloadReview
+        ]
+            .compactMap { $0 }
+            .first { $0.recordSource.isOfficialBoxscore }
+
+        return officialBoxscoreReview?.enrichingBatterPositions(from: positionSource) ??
+            databaseRecordReview?.enrichingBatterPositions(from: positionSource) ??
+            officialFallbackReview?.enrichingBatterPositions(from: payloadReview) ??
+            payloadReview
     }
 
     private static func logCountBaseRunnerApplication(
@@ -1653,9 +1676,7 @@ private struct BattingSectionTable: View {
                         ForEach(section.lines) { line in
                             BattingValueRow(line: line, isLiveLike: isLiveLike)
                         }
-                        if let totals = section.totals {
-                            BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
-                        } else if let totals = GameCenterBattingTotals.derived(from: section.lines) {
+                        if let totals = section.displayedRecordTotals {
                             BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
                         }
                     }
@@ -2352,6 +2373,12 @@ private extension GameCenterBattingSection {
 
     var totalStrikeouts: Int? {
         totals?.strikeouts.intValue ?? lines.sum(\.strikeouts)
+    }
+}
+
+extension GameCenterBattingSection {
+    var displayedRecordTotals: GameCenterBattingTotals? {
+        GameCenterBattingTotals.derived(from: lines) ?? totals
     }
 }
 

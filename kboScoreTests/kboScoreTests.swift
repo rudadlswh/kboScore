@@ -11649,12 +11649,13 @@ struct kboScoreTests {
         )
 
         await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
         await model.waitForOfficialFallbackLoadForTesting()
 
         #expect(model.databaseRecordReview?.recordSource == .dbLiveTextRecords)
         #expect(model.databaseRecordReview?.awayBatting.lines.first?.name == "황성빈")
         #expect(model.officialFallbackReview == nil)
-        #expect(await officialFallback.fetchCount == 0)
+        #expect(await officialFallback.fetchCount == 1)
     }
 
     // finalGameDetailChecksDatabaseRecordsBeforeOfficialFallback 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -11815,6 +11816,7 @@ struct kboScoreTests {
             fetchDatabaseRecordReviewResultByRawSupabaseID: { _, _, _ in nil }
         )
         await model.load(for: game, forceRefresh: true)
+        await model.waitForBoxscoreLoadForTesting()
         await model.waitForOfficialFallbackLoadForTesting()
 
         let presentation = GameDetailPresentation(
@@ -11826,7 +11828,7 @@ struct kboScoreTests {
         )
         #expect(presentation.review?.recordSource == .dbLiveTextRecords)
         #expect(model.officialFallbackReview == nil)
-        #expect(await officialFallback.fetchCount == 0)
+        #expect(await officialFallback.fetchCount == 1)
     }
 
     // gameDetailScreenModelPostFetchGameSingleKeepsFallbackWhenDatabaseRowsAreEmpty 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -12090,7 +12092,7 @@ struct kboScoreTests {
         await model.waitForBoxscoreLoadForTesting()
         await model.waitForOfficialFallbackLoadForTesting()
 
-        #expect(await boxscoreState.fetchCount == 0)
+        #expect(await boxscoreState.fetchCount == 1)
         #expect(await officialFallback.fetchCount == 1)
         #expect(model.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
     }
@@ -12111,7 +12113,9 @@ struct kboScoreTests {
         await model.load(for: try makeLiveBoxscoreDetailGame())
         await model.waitForOfficialFallbackLoadForTesting()
 
-        #expect(await boxscoreState.fetchCount == 0)
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(await boxscoreState.fetchCount == 1)
         #expect(model.detail?.review?.hasDisplayableRecords == true)
         #expect(model.officialFallbackReview == nil)
     }
@@ -12128,6 +12132,152 @@ struct kboScoreTests {
 
         #expect(presentation.review?.hasDisplayableRecords == true)
         #expect(presentation.review?.awayBatting.lines.first?.name == "공식타자")
+    }
+
+    @Test func liveGameLoadsBackendBoxscoreRecordsBeforeDatabaseRecords() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeLiveBoxscoreDetailGame()
+        let boxscoreState = RecordingBoxscoreState(result: .success(sampleOfficialPriorityBoxscoreResponse()))
+        let databaseReview = sampleDatabaseRecordReview(game: game, batterCount: 2, pitcherCount: 2)
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: boxscoreState),
+            fetchDetail: { game in sampleGameCenterDetailPayload(game: game, review: sampleLineupLimitedReview()) },
+            fetchDatabaseRecordReview: { _ in databaseReview },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForDatabaseRecordLoadForTesting()
+
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: model.detail,
+            boxscore: model.boxscore,
+            databaseRecordReview: model.databaseRecordReview,
+            officialFallbackReview: model.officialFallbackReview
+        )
+
+        #expect(await boxscoreState.fetchCount == 1)
+        #expect(presentation.review?.recordSource == .fullBoxscore)
+        #expect(presentation.review?.awayBatting.lines.first?.name == "김공식")
+        #expect(presentation.review?.awayBatting.lines.first?.atBats == "25")
+    }
+
+    @Test func officialBoxscoreRecordPreventsLineupOnlyStatsOverwrite() throws {
+        let game = try makeLiveBoxscoreDetailGame()
+        let lineupOnlyReview = GameCenterReview(
+            summaryItems: [],
+            awayBatting: GameCenterBattingSection(
+                lines: [
+                    GameCenterBattingLine(
+                        battingOrder: "1",
+                        position: "중",
+                        name: "김공식",
+                        atBats: nil,
+                        runs: nil,
+                        hits: nil,
+                        runsBattedIn: nil,
+                        homeRuns: nil,
+                        walks: nil,
+                        strikeouts: nil,
+                        average: nil
+                    )
+                ],
+                totals: nil
+            ),
+            homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+            awayPitching: GameCenterPitchingSection(lines: []),
+            homePitching: GameCenterPitchingSection(lines: []),
+            recordSource: .lineupLimited
+        )
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: sampleGameCenterDetailPayload(game: game, review: lineupOnlyReview),
+            boxscore: sampleOfficialPriorityBoxscoreResponse(),
+            databaseRecordReview: sampleDatabaseRecordReview(game: game, batterCount: 2, pitcherCount: 1),
+            officialFallbackReview: nil
+        )
+        let firstLine = try #require(presentation.review?.awayBatting.lines.first)
+
+        #expect(presentation.review?.recordSource == .fullBoxscore)
+        #expect(firstLine.name == "김공식")
+        #expect(firstLine.atBats == "25")
+        #expect(firstLine.runs == "2")
+        #expect(firstLine.hits == "6")
+        #expect(firstLine.runsBattedIn == "2")
+    }
+
+    @Test func liveBatterTotalsDeriveFromDisplayedOfficialRows() throws {
+        let game = try makeLiveBoxscoreDetailGame()
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: sampleGameCenterDetailPayload(game: game, review: sampleLineupLimitedReview()),
+            boxscore: sampleOfficialPriorityBoxscoreResponse(),
+            databaseRecordReview: sampleDatabaseRecordReview(game: game, batterCount: 2, pitcherCount: 1),
+            officialFallbackReview: nil
+        )
+        let totals = try #require(presentation.review?.awayBatting.displayedRecordTotals)
+
+        #expect(totals.atBats == "28")
+        #expect(totals.runs == "2")
+        #expect(totals.hits == "7")
+        #expect(totals.runsBattedIn == "2")
+    }
+
+    @Test func pitcherSnapshotDoesNotOverwriteOfficialPitcherRecord() throws {
+        let game = try makeLiveBoxscoreDetailGame(currentPitcherName: "스냅샷투수")
+        let snapshotPitcherFallback = GameCenterReview(
+            summaryItems: [],
+            awayBatting: GameCenterBattingSection(lines: [], totals: nil),
+            homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+            awayPitching: GameCenterPitchingSection(
+                lines: [
+                    GameCenterPitchingLine(
+                        name: "스냅샷투수",
+                        role: "현재",
+                        result: nil,
+                        innings: "0 1/3",
+                        pitches: nil,
+                        hitsAllowed: nil,
+                        walksAllowed: nil,
+                        hitBatters: nil,
+                        strikeouts: nil,
+                        homeRunsAllowed: nil,
+                        runsAllowed: nil,
+                        earnedRuns: nil,
+                        earnedRunAverage: nil
+                    )
+                ]
+            ),
+            homePitching: GameCenterPitchingSection(lines: []),
+            recordSource: .lineupLimited
+        )
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: sampleGameCenterDetailPayload(game: game),
+            boxscore: sampleOfficialPriorityBoxscoreResponse(),
+            databaseRecordReview: nil,
+            officialFallbackReview: snapshotPitcherFallback
+        )
+
+        #expect(presentation.review?.awayPitching.lines.map(\.name) == ["비슬리", "이이무라"])
+        #expect(presentation.review?.awayPitching.lines.first?.innings == "6")
+        #expect(presentation.review?.awayPitching.lines.dropFirst().first?.innings == "1")
+    }
+
+    @Test func substitutionPlayersFromOfficialBoxscoreRemainVisible() throws {
+        let game = try makeLiveBoxscoreDetailGame()
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: sampleGameCenterDetailPayload(game: game, review: sampleLineupLimitedReview()),
+            boxscore: sampleOfficialPriorityBoxscoreResponse(),
+            databaseRecordReview: nil,
+            officialFallbackReview: nil
+        )
+
+        #expect(presentation.review?.awayBatting.lines.map(\.name).contains("대타자") == true)
+        #expect(presentation.review?.awayBatting.lines.map(\.name).contains("대주자") == true)
     }
 
     // gameDetailPresentationPrefersLatestSnapshotCountOverOfficialPayload 메서드는 latestSnapshot 카운트가 공식 상세 캐시를 이기는지 검증합니다.
@@ -12534,9 +12684,10 @@ struct kboScoreTests {
         )
 
         await model.load(for: try makeLiveBoxscoreDetailGame())
+        await model.waitForBoxscoreLoadForTesting()
         await model.waitForOfficialFallbackLoadForTesting()
 
-        #expect(await boxscoreState.fetchCount == 0)
+        #expect(await boxscoreState.fetchCount == 1)
         #expect(model.detail == nil)
         #expect(model.officialFallbackReview == nil)
         #expect(model.errorMessage != nil)
@@ -12556,8 +12707,9 @@ struct kboScoreTests {
         )
 
         await model.load(for: try makeLiveBoxscoreDetailGame())
+        await model.waitForBoxscoreLoadForTesting()
 
-        #expect(await boxscoreState.fetchCount == 0)
+        #expect(await boxscoreState.fetchCount == 1)
         #expect(model.detail?.lineScore?.awayTotals.runs == "3")
         #expect(model.cachedLineScore?.homeTotals.walks == "2")
         #expect(model.boxscore == nil)
@@ -17861,6 +18013,130 @@ private func sampleGameBoxscoreJSON() -> Data {
     )
 }
 
+private func sampleOfficialPriorityBoxscoreResponse() -> GameBoxscoreResponse {
+    GameBoxscoreResponse(
+        gameId: "20260510-DOO-SSG",
+        awayBatters: [
+            GameBatterRecord(
+                sourceOrder: 0,
+                battingOrder: 1,
+                position: "좌",
+                playerName: "김공식",
+                atBats: 25,
+                runs: 2,
+                hits: 6,
+                rbi: 2,
+                homeRuns: 0,
+                walks: 1,
+                strikeouts: 3,
+                stolenBases: 0,
+                groundedIntoDoublePlay: 0,
+                errors: 0,
+                battingAverage: "0.240"
+            ),
+            GameBatterRecord(
+                sourceOrder: 1,
+                battingOrder: 2,
+                position: "一",
+                playerName: "박기록",
+                atBats: 3,
+                runs: 0,
+                hits: 1,
+                rbi: 0,
+                homeRuns: 0,
+                walks: 0,
+                strikeouts: 1,
+                stolenBases: 0,
+                groundedIntoDoublePlay: 0,
+                errors: 0,
+                battingAverage: "0.333"
+            ),
+            GameBatterRecord(
+                sourceOrder: 2,
+                battingOrder: nil,
+                position: "타",
+                playerName: "대타자",
+                atBats: 0,
+                runs: 0,
+                hits: 0,
+                rbi: 0,
+                homeRuns: 0,
+                walks: 0,
+                strikeouts: 0,
+                stolenBases: 0,
+                groundedIntoDoublePlay: 0,
+                errors: 0,
+                battingAverage: nil
+            ),
+            GameBatterRecord(
+                sourceOrder: 3,
+                battingOrder: nil,
+                position: "주",
+                playerName: "대주자",
+                atBats: 0,
+                runs: 0,
+                hits: 0,
+                rbi: 0,
+                homeRuns: 0,
+                walks: 0,
+                strikeouts: 0,
+                stolenBases: 0,
+                groundedIntoDoublePlay: 0,
+                errors: 0,
+                battingAverage: nil
+            )
+        ],
+        homeBatters: [],
+        awayPitchers: [
+            GamePitcherRecord(
+                sourceOrder: 0,
+                pitchingOrder: 1,
+                playerName: "비슬리",
+                appearance: "선발",
+                decisionResult: nil,
+                wins: nil,
+                losses: nil,
+                saves: nil,
+                inningsPitched: "6",
+                battersFaced: 22,
+                pitchCount: 81,
+                atBats: 21,
+                hits: 4,
+                homeRuns: 0,
+                walksOrHitByPitch: 1,
+                strikeouts: 5,
+                runs: 1,
+                earnedRuns: 1,
+                era: "3.00"
+            ),
+            GamePitcherRecord(
+                sourceOrder: 1,
+                pitchingOrder: 2,
+                playerName: "이이무라",
+                appearance: "구원",
+                decisionResult: nil,
+                wins: nil,
+                losses: nil,
+                saves: nil,
+                inningsPitched: "1",
+                battersFaced: 4,
+                pitchCount: 14,
+                atBats: 4,
+                hits: 1,
+                homeRuns: 0,
+                walksOrHitByPitch: 0,
+                strikeouts: 1,
+                runs: 0,
+                earnedRuns: 0,
+                era: "0.00"
+            )
+        ],
+        homePitchers: [],
+        updatedAt: "2026-05-10T16:15:00+09:00",
+        isStale: false
+    )
+}
+
 // makeBoxscoreDetailGame 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
 private func makeBoxscoreDetailGame() throws -> GameDetail {
     let teams = MockKBOData.makeBootstrap().teams
@@ -17884,7 +18160,8 @@ private func makeBoxscoreDetailGame() throws -> GameDetail {
 private func makeLiveBoxscoreDetailGame(
     status: GameStatus = .live,
     id: UUID = UUID(uuidString: "11111111-2222-3333-4444-555555555556")!,
-    providerGameID: String = "20260510SKOB0"
+    providerGameID: String = "20260510SKOB0",
+    currentPitcherName: String? = nil
 ) throws -> GameDetail {
     let teams = MockKBOData.makeBootstrap().teams
     let doosan = try #require(teams.first(where: { $0.id == "doosan" }))
@@ -17903,7 +18180,8 @@ private func makeLiveBoxscoreDetailGame(
         bases: RunnerState(first: true, second: false, third: false),
         balls: 1,
         strikes: 2,
-        outs: 1
+        outs: 1,
+        currentPitcherName: currentPitcherName
     )
 }
 
