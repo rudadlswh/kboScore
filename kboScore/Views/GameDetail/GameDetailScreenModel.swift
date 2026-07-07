@@ -506,6 +506,12 @@ final class GameDetailScreenModel {
     // scheduleOfficialRecordFallbackIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleOfficialRecordFallbackIfNeeded(for game: GameDetail, forceRefresh: Bool) {
         guard game.status == .final || game.status.isLiveLike else { return }
+        guard hasOfficialRequestIdentity(for: game) else {
+            #if DEBUG
+            print("[GameDetailLive] Official fetch skipped reason=missingOfficialIdentity publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
+            #endif
+            return
+        }
         guard databaseRecordMergeInFlightGameIdentity != game.stableDetailIdentity else {
             #if DEBUG
             print("[GameDetailLive] Official fetch skipped reason=dbRecordsInFlight publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
@@ -604,6 +610,12 @@ final class GameDetailScreenModel {
         ]
             .compactMap { $0 }
             .joined(separator: "::")
+    }
+
+    private func hasOfficialRequestIdentity(for game: GameDetail) -> Bool {
+        game.publicGameID?.nilIfBlank != nil ||
+            game.providerGameID?.nilIfBlank != nil ||
+            game.officialProviderGameID?.nilIfBlank != nil
     }
 
     // detailGame 메서드는 이 타입의 주요 동작을 수행합니다.

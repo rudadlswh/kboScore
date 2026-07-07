@@ -203,6 +203,14 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         Self.noteValue("public_game_id", from: note)
     }
 
+    nonisolated var supabaseGameID: UUID? {
+        Self.noteValue("supabase_game_id", from: note).flatMap(UUID.init(uuidString:))
+    }
+
+    nonisolated var attendanceCanonicalKey: String {
+        GameIdentifier.attendanceCanonicalKey(supabaseGameID ?? id)
+    }
+
     nonisolated var canonicalGameIdentityValue: String {
         GameIdentifier.canonicalRawValue(id: id, providerGameID: officialGameCenterID)
     }
@@ -276,18 +284,14 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 
     nonisolated var attendanceStorageKey: String {
-        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           providerGameID.isEmpty == false {
-            return GameIdentifier.providerKey(providerGameID)
-        }
-        if let officialGameCenterID = Self.providerGameID(from: note) {
-            return GameIdentifier.providerKey(officialGameCenterID)
-        }
-        return GameIdentifier.idKey(id)
+        attendanceCanonicalKey
     }
 
     nonisolated var attendanceStorageAliases: Set<String> {
-        var aliases: Set<String> = [GameIdentifier.idKey(id)]
+        var aliases: Set<String> = [
+            GameIdentifier.idKey(id),
+            attendanceCanonicalKey
+        ]
         if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
             aliases.insert(GameIdentifier.providerKey(providerGameID))
@@ -399,6 +403,9 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
 extension GameDetail {
     nonisolated func shouldPollGameDetail(now: Date) -> Bool {
+        if status.isFinishedLike {
+            return false
+        }
         if status.isLiveLike {
             return true
         }
@@ -416,7 +423,7 @@ extension GameDetail {
             return "scheduledFuture"
         }
         if status.isFinishedLike {
-            return "finished"
+            return "terminalStatus"
         }
         return "notLiveLike"
     }

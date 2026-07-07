@@ -89,6 +89,7 @@ struct SchedulePresentation: Sendable {
         let displayedKey = KBOMonthScheduleKey(date: displayedMonth, calendar: calendar)
         let displayedKeyText = displayedKey.yearMonthText
         let monthEntry = cachedMonthEntries[displayedKeyText]
+        let normalizedAttendedGameKeys = Set(attendedGameKeys.compactMap(GameIdentifier.attendanceCanonicalKey(from:)))
         let filteredGamesByDate = filteredGamesByDate(
             from: monthEntry,
             filter: filter,
@@ -110,9 +111,7 @@ struct SchedulePresentation: Sendable {
             dayKey: dayKey(for:),
             isToday: { _, cursorKey in cursorKey == todayKey },
             hasAttendedGame: { games in
-                games.contains {
-                    attendedGameKeys.isDisjoint(with: $0.attendanceStorageAliases) == false
-                }
+                games.contains { normalizedAttendedGameKeys.contains($0.attendanceCanonicalKey) }
             },
             favoriteTeamResult: calendarFavoriteTeamResult(for:favoriteTeamID:)
         )
@@ -128,6 +127,12 @@ struct SchedulePresentation: Sendable {
         }
 
 #if DEBUG
+        let matchedGameKeys = Set(monthEntry?.games.map(\.attendanceCanonicalKey) ?? [])
+            .intersection(normalizedAttendedGameKeys)
+        let visibleMarkedCount = monthEntry?.games.filter {
+            normalizedAttendedGameKeys.contains($0.attendanceCanonicalKey)
+        }.count ?? 0
+        print("[AttendanceMarker] merge month=\(displayedKey.yearMonthText) confirmedCount=\(normalizedAttendedGameKeys.count) matchedCount=\(matchedGameKeys.count) visibleMarkedCount=\(visibleMarkedCount)")
         return SchedulePresentation(
             calendarDays: days,
             selectedDateGames: selectedGames,

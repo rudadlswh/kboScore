@@ -216,6 +216,7 @@ final class ScheduleViewModel: ObservableObject {
             callSite: "ScheduleViewModel.loadMonth",
             reason: forceRefresh ? "refreshDisplayedMonth" : "loadDisplayedMonth"
         )
+        await appModel.refreshAttendanceRecordsFromServer()
 
         applyPendingAutomaticSelectionIfNeeded(for: key)
         await rebuildPresentation(

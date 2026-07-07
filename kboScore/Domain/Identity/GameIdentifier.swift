@@ -73,6 +73,34 @@ enum GameIdentifier {
         "id:\(id.uuidString.lowercased())"
     }
 
+    nonisolated static func attendanceCanonicalKey(_ id: UUID) -> String {
+        idKey(id)
+    }
+
+    nonisolated static func attendanceCanonicalKey(from rawValue: String?) -> String? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawValue.isEmpty == false else {
+            return nil
+        }
+        if rawValue.hasPrefix("id:") {
+            let rawID = String(rawValue.dropFirst("id:".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return UUID(uuidString: rawID).map(attendanceCanonicalKey)
+        }
+        if let uuid = UUID(uuidString: rawValue) {
+            return attendanceCanonicalKey(uuid)
+        }
+        return rawValue.lowercased()
+    }
+
+    nonisolated static func attendanceUUID(fromCanonicalKey key: String) -> UUID? {
+        guard let canonicalKey = attendanceCanonicalKey(from: key),
+              canonicalKey.hasPrefix("id:") else {
+            return nil
+        }
+        return UUID(uuidString: String(canonicalKey.dropFirst("id:".count)))
+    }
+
     // providerKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func providerKey(_ providerGameID: String) -> String {
         "provider:\(providerGameID)"

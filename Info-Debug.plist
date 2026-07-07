@@ -30,6 +30,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>KBOBackendBaseURL</key>
 	<string>$(KBO_BACKEND_BASE_URL)</string>
+	<key>KBOAttendanceBackendBaseURL</key>
+	<string>$(KBO_ATTENDANCE_BACKEND_BASE_URL)</string>
 	<key>KBO_APNS_ENVIRONMENT</key>
 	<string>$(KBO_APNS_ENVIRONMENT)</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -55,6 +57,8 @@
 	<string>$(KBO_NOTIFICATION_REGISTRATION_URL)</string>
 	<key>SupabasePublishableKey</key>
 	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
+	<key>SupabaseDBSchema</key>
+	<string>$(SUPABASE_DB_SCHEMA)</string>
 	<key>SupabaseURL</key>
 	<string>$(SUPABASE_URL)</string>
 	<key>UIApplicationSceneManifest</key>

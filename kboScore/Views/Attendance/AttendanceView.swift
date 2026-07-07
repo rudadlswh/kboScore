@@ -53,6 +53,9 @@ struct AttendanceView: View {
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
             }
+            .task {
+                await appModel.refreshAttendanceRecordsFromServer()
+            }
         }
     }
 
@@ -76,20 +79,34 @@ struct AttendanceView: View {
     @ViewBuilder
     private var attendedGamesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionTitleView(title: "직관 경기")
-            if dashboard.games.isEmpty {
+            if !dashboard.hasGames {
                 EmptyStateView(
                     systemImage: "checkmark.circle",
-                    title: "직관 완료 경기 없음",
+                    title: "직관 기록 없음",
                     message: "경기 상세에서 직관한 경기로 표시하면 이곳에 기록됩니다."
                 )
             } else {
-                LazyVStack(spacing: 8) {
-                    ForEach(dashboard.games) { record in
-                        NavigationLink(value: record.gameIdentity) {
-                            AttendanceGameRecordRow(record: record)
+                if !dashboard.upcomingGames.isEmpty {
+                    SectionTitleView(title: "예정된 직관")
+                    LazyVStack(spacing: 8) {
+                        ForEach(dashboard.upcomingGames) { record in
+                            NavigationLink(value: record.gameIdentity) {
+                                AttendanceGameRecordRow(record: record)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                }
+
+                if !dashboard.pastGames.isEmpty {
+                    SectionTitleView(title: "지난 직관")
+                    LazyVStack(spacing: 8) {
+                        ForEach(dashboard.pastGames) { record in
+                            NavigationLink(value: record.gameIdentity) {
+                                AttendanceGameRecordRow(record: record)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
@@ -172,7 +189,7 @@ private struct AttendanceGameRecordRow: View {
                         .padding(.vertical, 3)
                         .background(resultTint.opacity(0.12), in: Capsule())
                         .foregroundStyle(resultTint)
-                    Text("vs \(record.opponentName)")
+                    Text(record.matchupText)
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
                         .lineLimit(1)
@@ -187,7 +204,7 @@ private struct AttendanceGameRecordRow: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 5) {
-                Text(record.scoreText)
+                Text(trailingText)
                     .font(.footnote.weight(.heavy))
                     .monospacedDigit()
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
@@ -209,28 +226,50 @@ private struct AttendanceGameRecordRow: View {
     }
 
     private var dateText: String {
-        record.gameDate.formatted(.dateTime.month(.twoDigits).day(.twoDigits).weekday(.abbreviated))
+        if record.result == nil && record.isUpcomingAttendance {
+            return record.gameDate.formatted(.dateTime.month(.twoDigits).day(.twoDigits).weekday(.abbreviated).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        }
+        return record.gameDate.formatted(.dateTime.month(.twoDigits).day(.twoDigits).weekday(.abbreviated))
+    }
+
+    private var trailingText: String {
+        if record.result == nil && record.isUpcomingAttendance {
+            return record.gameDate.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+        }
+        return record.scoreText
     }
 
     private var resultText: String {
-        switch record.result {
+        guard let result = record.result else {
+            return record.gameStatus == .upcoming ? "경기 예정" : record.gameStatus.title
+        }
+        switch result {
         case .win:
-            "승"
+            return "승"
         case .loss:
-            "패"
+            return "패"
         case .tie:
-            "무"
+            return "무"
         }
     }
 
     private var resultTint: Color {
-        switch record.result {
+        guard let result = record.result else {
+            if record.gameStatus.isLiveLike {
+                return KBOLivePalette.live
+            }
+            if record.gameStatus.isFinishedLike {
+                return KBOLivePalette.final
+            }
+            return appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent
+        }
+        switch result {
         case .win:
-            KBOLivePalette.live
+            return KBOLivePalette.live
         case .loss:
-            KBOLivePalette.final
+            return KBOLivePalette.final
         case .tie:
-            .secondary
+            return .secondary
         }
     }
 }

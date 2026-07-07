@@ -61,6 +61,11 @@ final class ScheduleRefreshCoordinator {
                 cacheHit: true,
                 durationMs: Self.durationMilliseconds(since: startedAt)
             )
+            appModel.mergeScheduleTabMonthGamesForAttendance(
+                cachedEntry.games,
+                monthKey: key,
+                reason: "scheduleTabMonthCacheHit"
+            )
             await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
                 fromScheduleTabMonthGames: cachedEntry.games,
                 monthKey: key,
@@ -88,6 +93,11 @@ final class ScheduleRefreshCoordinator {
                 let entry = try await task.value
                 cachedMonths[key] = entry
                 failedMonths.remove(key)
+                appModel.mergeScheduleTabMonthGamesForAttendance(
+                    entry.games,
+                    monthKey: key,
+                    reason: "scheduleTabMonthInFlight"
+                )
                 await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
                     fromScheduleTabMonthGames: entry.games,
                     monthKey: key,
@@ -116,6 +126,11 @@ final class ScheduleRefreshCoordinator {
             let entry = try await task.value
             cachedMonths[key] = entry
             failedMonths.remove(key)
+            appModel.mergeScheduleTabMonthGamesForAttendance(
+                entry.games,
+                monthKey: key,
+                reason: "scheduleTabMonthLoad"
+            )
             await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
                 fromScheduleTabMonthGames: entry.games,
                 monthKey: key,

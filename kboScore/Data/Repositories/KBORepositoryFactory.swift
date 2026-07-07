@@ -41,11 +41,20 @@ struct AppRepositoryConfiguration: Sendable {
         let supabaseKeyEnvironmentValue = processInfo.environment["SUPABASE_PUBLISHABLE_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         let supabaseKeyInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabasePublishableKey") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchemaEnvironmentValue = processInfo.environment["SUPABASE_DB_SCHEMA"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchemaInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabaseDBSchema") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchema = resolvedSupabaseSchema(
+            environmentValue: supabaseSchemaEnvironmentValue,
+            infoDictionaryValue: supabaseSchemaInfoDictionaryValue,
+            isDebugBuild: isDebugBuild
+        )
         let supabaseConfiguration = firstValidSupabaseConfiguration(
             candidates: [
                 (url: supabaseEnvironmentValue, publishableKey: supabaseKeyEnvironmentValue),
                 (url: supabaseInfoDictionaryValue, publishableKey: supabaseKeyInfoDictionaryValue)
-            ]
+            ],
+            schema: supabaseSchema
         )
 #if DEBUG
         print("[SupabaseConfig] environmentURLPresent=\(hasValue(supabaseEnvironmentValue))")
@@ -53,6 +62,7 @@ struct AppRepositoryConfiguration: Sendable {
         print("[SupabaseConfig] environmentKeyPresent=\(hasValue(supabaseKeyEnvironmentValue))")
         print("[SupabaseConfig] plistKeyPresent=\(hasValue(supabaseKeyInfoDictionaryValue))")
         print("[SupabaseConfig] finalRuntimeHost=\(debugHostValue(supabaseConfiguration))")
+        print("[SupabaseConfig] schema=\(supabaseSchema)")
 #endif
         return AppRepositoryConfiguration(
             supabaseConfiguration: supabaseConfiguration
@@ -83,12 +93,14 @@ struct AppRepositoryConfiguration: Sendable {
 
     // firstValidSupabaseConfiguration 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func firstValidSupabaseConfiguration(
-        candidates: [(url: String?, publishableKey: String?)]
+        candidates: [(url: String?, publishableKey: String?)],
+        schema: String
     ) -> SupabaseConfiguration? {
         for candidate in candidates {
             if let configuration = supabaseConfiguration(
                 urlRawValue: candidate.url,
-                publishableKeyRawValue: candidate.publishableKey
+                publishableKeyRawValue: candidate.publishableKey,
+                schema: schema
             ) {
                 return configuration
             }
@@ -105,14 +117,46 @@ struct AppRepositoryConfiguration: Sendable {
     // supabaseConfiguration 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func supabaseConfiguration(
         urlRawValue: String?,
-        publishableKeyRawValue: String?
+        publishableKeyRawValue: String?,
+        schema: String
     ) -> SupabaseConfiguration? {
         guard let url = backendURL(from: urlRawValue),
               let publishableKey = publishableKeyRawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               publishableKey.isEmpty == false else {
             return nil
         }
-        return SupabaseConfiguration(url: url, publishableKey: publishableKey)
+        return SupabaseConfiguration(url: url, publishableKey: publishableKey, schema: schema)
+    }
+
+    // resolvedSupabaseSchema 메서드는 빌드 설정/환경에서 사용할 DB schema를 결정합니다.
+    nonisolated static func resolvedSupabaseSchema(
+        environmentValue: String?,
+        infoDictionaryValue: String?,
+        isDebugBuild: Bool
+    ) -> String {
+        let schema = [environmentValue, infoDictionaryValue]
+            .compactMap { value -> String? in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed?.isEmpty == false ? trimmed : nil
+            }
+            .first ?? SupabaseConfiguration.productionSchema
+
+        if isDebugBuild && schema == SupabaseConfiguration.productionSchema {
+            AppLog.warning(.supabase, "[SupabaseConfig] Debug build is using production schema.")
+        }
+        if !isDebugBuild && schema == SupabaseConfiguration.developmentSchema {
+            AppLog.error(.supabase, "[SupabaseConfig] Release build is configured with development schema.")
+            assertionFailure("Release build must not use \(SupabaseConfiguration.developmentSchema).")
+        }
+        return schema
+    }
+
+    private nonisolated static var isDebugBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 
 #if DEBUG
@@ -190,7 +234,7 @@ enum KBORepositoryFactory {
         #if canImport(Supabase)
         #if DEBUG
         print("[SupabaseConfig] supabase-swift linked=true")
-        print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>")")
+        print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>") schema=\(supabaseConfiguration.schema)")
         #endif
         let repository = SupabaseBackedKBORepository(
             base: baseRepository,

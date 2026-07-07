@@ -9,6 +9,7 @@
 // should not read developer-local overrides.
 SUPABASE_URL = https:/$()/pbfancqzynkialupleys.supabase.co
 SUPABASE_PUBLISHABLE_KEY = sb_publishable_8NIjpXX42Xq2ysXNdDHfXQ_ixXdC_da
+SUPABASE_DB_SCHEMA = kbo_crawler_api
 APS_ENVIRONMENT = production
 KBO_APNS_ENVIRONMENT = production
 
@@ -17,6 +18,7 @@ KBO_APNS_ENVIRONMENT = production
 // The Release build phase rejects empty, unresolved, non-HTTPS, and localhost URLs.
 KBO_PRODUCTION_BACKEND_BASE_URL = https:/$()/kboscore-back.onrender.com
 KBO_BACKEND_BASE_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)
+KBO_ATTENDANCE_BACKEND_BASE_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)
 KBO_NOTIFICATION_REGISTRATION_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)/devices/register
 KBO_LIVE_ACTIVITY_REGISTRATION_URL = $(KBO_PRODUCTION_BACKEND_BASE_URL)/devices/live-activities/register
 

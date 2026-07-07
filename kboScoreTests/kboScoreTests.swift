@@ -3561,6 +3561,74 @@ struct kboScoreTests {
         #expect(record.gameDate == game.scheduledStart)
     }
 
+    // attendanceDashboardShowsUpcomingAttendance 메서드는 경기 전 직관 기록이 목록에서 제외되지 않는지 검증합니다.
+    @Test func attendanceDashboardShowsUpcomingAttendance() throws {
+        let teams = try attendanceFixtureTeams()
+        let upcoming = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000115")!,
+            scheduledStart: isoDate("2026-07-07T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.doosan,
+            homeTeam: teams.lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+
+        let dashboard = AttendanceDashboardBuilder.build(attendedGames: [upcoming], favoriteTeamID: "lg")
+
+        #expect(dashboard.hasGames)
+        #expect(dashboard.overall.games == 0)
+        #expect(dashboard.upcomingGames.map(\.id) == [upcoming.attendanceStorageKey])
+        #expect(dashboard.pastGames.isEmpty)
+        #expect(dashboard.games.map(\.id) == [upcoming.attendanceStorageKey])
+    }
+
+    // attendanceDashboardSplitsUpcomingAndPastAttendance 메서드는 직관탭 섹션 분리와 정렬을 검증합니다.
+    @Test func attendanceDashboardSplitsUpcomingAndPastAttendance() throws {
+        let teams = try attendanceFixtureTeams()
+        let earlierUpcoming = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000116")!,
+            scheduledStart: isoDate("2026-07-07T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.doosan,
+            homeTeam: teams.lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let laterUpcoming = makeGameDetail(
+            id: UUID(uuidString: "95000000-0000-0000-0000-000000000117")!,
+            scheduledStart: isoDate("2026-07-08T18:30:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.samsung,
+            homeTeam: teams.lg,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason
+        )
+        let olderFinal = makeAttendanceFixtureGame(index: 16, awayTeam: teams.lotte, homeTeam: teams.lg, awayScore: 1, homeScore: 4)
+        let newerFinal = makeAttendanceFixtureGame(index: 17, awayTeam: teams.doosan, homeTeam: teams.lg, awayScore: 5, homeScore: 2)
+
+        let dashboard = AttendanceDashboardBuilder.build(
+            attendedGames: [newerFinal, laterUpcoming, olderFinal, earlierUpcoming],
+            favoriteTeamID: "lg"
+        )
+
+        #expect(dashboard.upcomingGames.map(\.id) == [earlierUpcoming.attendanceStorageKey, laterUpcoming.attendanceStorageKey])
+        #expect(dashboard.pastGames.map(\.id) == [newerFinal.attendanceStorageKey, olderFinal.attendanceStorageKey])
+        #expect(dashboard.overall.games == 2)
+        #expect(dashboard.games.map(\.id) == [
+            earlierUpcoming.attendanceStorageKey,
+            laterUpcoming.attendanceStorageKey,
+            newerFinal.attendanceStorageKey,
+            olderFinal.attendanceStorageKey
+        ])
+    }
+
     // attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func attendanceSummaryKeepsCompletedBootstrapGameWhenMonthlyDuplicateIsStale() async throws {
         let base = MockKBOData.makeBootstrap(now: isoDate("2026-04-05T09:00:00+09:00"))
@@ -10520,6 +10588,60 @@ struct kboScoreTests {
         #expect(snapshot?.baseURL == nil)
     }
 
+    // debugBuildSettingUsesDevelopmentSupabaseSchema 메서드는 Debug 빌드가 개발 schema를 사용하도록 고정합니다.
+    @Test func debugBuildSettingUsesDevelopmentSupabaseSchema() throws {
+        let xcconfig = try projectFileContents("kboScore/Config/Debug.xcconfig")
+        let plist = try projectFileContents("Info-Debug.plist")
+
+        #expect(xcconfig.contains("SUPABASE_DB_SCHEMA = kbo_crawler_api_dev"))
+        #expect(plist.contains("<key>SupabaseDBSchema</key>"))
+        #expect(plist.contains("<string>$(SUPABASE_DB_SCHEMA)</string>"))
+    }
+
+    // releaseBuildSettingUsesProductionSupabaseSchema 메서드는 Release/TestFlight/App Store 빌드가 운영 schema를 사용하도록 고정합니다.
+    @Test func releaseBuildSettingUsesProductionSupabaseSchema() throws {
+        let xcconfig = try projectFileContents("kboScore/Config/Release.xcconfig")
+        let plist = try projectFileContents("Info-Release.plist")
+
+        #expect(xcconfig.contains("SUPABASE_DB_SCHEMA = kbo_crawler_api"))
+        #expect(xcconfig.contains("SUPABASE_DB_SCHEMA = kbo_crawler_api_dev") == false)
+        #expect(plist.contains("<key>SupabaseDBSchema</key>"))
+        #expect(plist.contains("<string>$(SUPABASE_DB_SCHEMA)</string>"))
+    }
+
+    // supabaseSchemaResolverUsesBuildConfigurationValues 메서드는 plist/env schema 값을 설정으로 해석합니다.
+    @Test func supabaseSchemaResolverUsesBuildConfigurationValues() {
+        #expect(AppRepositoryConfiguration.resolvedSupabaseSchema(
+            environmentValue: nil,
+            infoDictionaryValue: "kbo_crawler_api_dev",
+            isDebugBuild: true
+        ) == "kbo_crawler_api_dev")
+        #expect(AppRepositoryConfiguration.resolvedSupabaseSchema(
+            environmentValue: nil,
+            infoDictionaryValue: "kbo_crawler_api",
+            isDebugBuild: false
+        ) == "kbo_crawler_api")
+        #expect(AppRepositoryConfiguration.resolvedSupabaseSchema(
+            environmentValue: nil,
+            infoDictionaryValue: nil,
+            isDebugBuild: false
+        ) == "kbo_crawler_api")
+    }
+
+#if canImport(Supabase)
+    // supabaseRepositoryUsesConfiguredSchema 메서드는 repository가 하드코딩 대신 configuration schema를 쓰도록 고정합니다.
+    @Test func supabaseRepositoryUsesConfiguredSchema() throws {
+        let configuration = SupabaseConfiguration(
+            url: try #require(URL(string: "https://example.supabase.co")),
+            publishableKey: "anon-key",
+            schema: "custom_schema"
+        )
+        let repository = SupabaseKBORepository(configuration: configuration)
+
+        #expect(repository.configuredSchemaName == "custom_schema")
+    }
+#endif
+
     // supabaseFailureFallsBackToLocalRepository 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func supabaseFailureFallsBackToLocalRepository() async throws {
         let bundledDirectory = try makeTemporaryDirectory()
@@ -12097,6 +12219,40 @@ struct kboScoreTests {
         #expect(model.officialFallbackReview?.awayBatting.lines.first?.name == "공식타자")
     }
 
+    // officialFallbackSkipsWhenOfficialIdentityMissing 메서드는 public/provider 식별자가 없으면 공식 KBO 요청을 하지 않는지 검증합니다.
+    @Test func officialFallbackSkipsWhenOfficialIdentityMissing() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let officialFallback = RecordingOfficialFallback(result: .success(sampleOfficialFallbackReview()))
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .live)
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .live,
+            inningText: "3초",
+            note: nil,
+            providerGameID: nil
+        )
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(state: RecordingBoxscoreState(result: .failure(TestRepositoryError.supabaseUnavailable))),
+            fetchDetail: { _ in nil },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { game in try await officialFallback.fetch(game: game) }
+        )
+
+        await model.load(for: game)
+        await model.waitForBoxscoreLoadForTesting()
+        await model.waitForDatabaseRecordLoadForTesting()
+        await model.waitForOfficialFallbackLoadForTesting()
+
+        #expect(await officialFallback.fetchCount == 0)
+        #expect(model.officialFallbackReview == nil)
+    }
+
     // liveGameDetailUsesOfficialRecordsFromDetailPayloadWithoutBackendBoxscore 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func liveGameDetailUsesOfficialRecordsFromDetailPayloadWithoutBackendBoxscore() async throws {
         GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
@@ -12767,6 +12923,33 @@ struct kboScoreTests {
         #expect(model.isGameDetailPollingActiveForTesting)
         #expect(model.activeGameDetailPollingIdentityForTesting == game.stableDetailIdentity)
         model.stopLiveGameDetailPolling()
+    }
+
+    // finalGameDetailEntryDoesNotStartPolling 메서드는 종료 경기에서 이닝 상태가 남아도 상세 polling을 시작하지 않는지 검증합니다.
+    @Test func finalGameDetailEntryDoesNotStartPolling() async throws {
+        let baseGame = try makeLiveBoxscoreDetailGame(status: .final)
+        let game = makeGameDetail(
+            id: baseGame.id,
+            scheduledStart: baseGame.scheduledStart,
+            venue: baseGame.venue,
+            awayTeam: baseGame.awayTeam,
+            homeTeam: baseGame.homeTeam,
+            awayScore: baseGame.awayScore,
+            homeScore: baseGame.homeScore,
+            status: .final,
+            inningText: "9말",
+            note: baseGame.note,
+            providerGameID: baseGame.providerGameID
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+
+        #expect(model.isGameDetailPollingActiveForTesting == false)
+        #expect(model.activeGameDetailPollingIdentityForTesting == nil)
     }
 
     // pastScheduledGameDetailEntryStartsPolling 메서드는 예정 시각이 지난 scheduled 경기 polling 시작을 검증합니다.
@@ -16220,6 +16403,772 @@ struct kboScoreTests {
         #expect(payload?["dates"] as? [String] == ["2026-03-12"])
     }
 
+    // backendAttendanceClientUsesExpectedEndpoints 메서드는 직관 API 계약을 검증합니다.
+    @Test func backendAttendanceClientUsesExpectedEndpoints() async throws {
+        let session = makeStubSession()
+        let client = BackendAttendanceClient(baseURL: URL(string: "http://192.168.45.140:8088")!, session: session)
+        let installationID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let gameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        URLProtocolStub.testResponses = [
+            "http://192.168.45.140:8088/api/v1/attendance": StubResponse(statusCode: 200, data: Data()),
+            "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111": StubResponse(
+                statusCode: 200,
+                data: Data(#"{"gameIds":["22222222-2222-2222-2222-222222222222"]}"#.utf8)
+            )
+        ]
+        URLProtocolStub.lastRequest = nil
+        defer {
+            URLProtocolStub.testResponses = [:]
+            URLProtocolStub.lastRequest = nil
+        }
+
+        try await client.setAttendance(
+            true,
+            installationID: installationID,
+            gameID: gameID,
+            publicGameID: "20260705-SSG-SAM",
+            providerGameID: "20260705SSHT0"
+        )
+        var request = try #require(URLProtocolStub.lastRequest)
+        var payload = try JSONSerialization.jsonObject(with: try #require(httpBodyData(from: request))) as? [String: String]
+        #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/attendance")
+        #expect(request.httpMethod == "POST")
+        #expect(payload?["installationId"] == installationID.uuidString)
+        #expect(payload?["gameId"] == gameID.uuidString)
+
+        try await client.setAttendance(
+            false,
+            installationID: installationID,
+            gameID: gameID,
+            publicGameID: "20260705-SSG-SAM",
+            providerGameID: "20260705SSHT0"
+        )
+        request = try #require(URLProtocolStub.lastRequest)
+        payload = try JSONSerialization.jsonObject(with: try #require(httpBodyData(from: request))) as? [String: String]
+        #expect(request.httpMethod == "DELETE")
+        #expect(payload?["installationId"] == installationID.uuidString)
+        #expect(payload?["gameId"] == gameID.uuidString)
+
+        let gameIDs = try await client.fetchAttendedGameIDs(installationID: installationID)
+        request = try #require(URLProtocolStub.lastRequest)
+        #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111")
+        #expect(request.httpMethod == "GET")
+        #expect(gameIDs == Set([gameID]))
+    }
+
+    // attendanceClientBaseURLPrefersDebugAttendancePlistOverBackendEnvironment 메서드는 Debug 직관 API 기본값이 로컬 백엔드를 향하는지 검증합니다.
+    @Test func attendanceClientBaseURLPrefersDebugAttendancePlistOverBackendEnvironment() throws {
+        let resolved = try #require(AttendanceClientFactory.resolveBaseURL(
+            attendanceEnvironmentValue: nil,
+            attendanceBundleValue: "http://localhost:8088",
+            backendEnvironmentValue: "https://kboscore-back.onrender.com",
+            backendBundleValue: "http://localhost:8088",
+            notificationEnvironmentValue: nil,
+            notificationBundleValue: nil,
+            buildConfiguration: "Debug"
+        ))
+
+        #expect(resolved.source == "attendancePlist")
+        #expect(resolved.url.absoluteString == "http://localhost:8088")
+    }
+
+    // attendanceClientBaseURLUsesDebugBackendPlistWhenAttendanceKeyMissing 메서드는 Attendance 전용 키가 없을 때 Debug 공통 backend 로컬 URL을 재사용하는지 검증합니다.
+    @Test func attendanceClientBaseURLUsesDebugBackendPlistWhenAttendanceKeyMissing() throws {
+        let resolved = try #require(AttendanceClientFactory.resolveBaseURL(
+            attendanceEnvironmentValue: nil,
+            attendanceBundleValue: nil,
+            backendEnvironmentValue: nil,
+            backendBundleValue: "http://localhost:8088",
+            notificationEnvironmentValue: nil,
+            notificationBundleValue: nil,
+            buildConfiguration: "Debug"
+        ))
+
+        #expect(resolved.source == "backendPlist")
+        #expect(resolved.url.absoluteString == "http://localhost:8088")
+    }
+
+    // attendanceClientBaseURLDoesNotUseRenderFallbackInDebug 메서드는 Debug 직관 API가 운영 backend 설정으로 떨어지지 않도록 검증합니다.
+    @Test func attendanceClientBaseURLDoesNotUseRenderFallbackInDebug() throws {
+        let resolved = try #require(AttendanceClientFactory.resolveBaseURL(
+            attendanceEnvironmentValue: nil,
+            attendanceBundleValue: nil,
+            backendEnvironmentValue: "https://kboscore-back.onrender.com",
+            backendBundleValue: "https://kboscore-back.onrender.com",
+            notificationEnvironmentValue: "https://kboscore-back.onrender.com/devices/register",
+            notificationBundleValue: "https://kboscore-back.onrender.com/devices/register",
+            buildConfiguration: "Debug"
+        ))
+
+        #expect(resolved.source == "developmentFallback")
+        #expect(resolved.url.absoluteString == "http://localhost:8088")
+    }
+
+    // attendanceClientBaseURLKeepsReleaseRenderURL 메서드는 Release 직관 API가 운영 Render URL을 유지하는지 검증합니다.
+    @Test func attendanceClientBaseURLKeepsReleaseRenderURL() throws {
+        let resolved = try #require(AttendanceClientFactory.resolveBaseURL(
+            attendanceEnvironmentValue: nil,
+            attendanceBundleValue: "https://kboscore-back.onrender.com",
+            backendEnvironmentValue: "http://localhost:8088",
+            backendBundleValue: "https://kboscore-back.onrender.com",
+            notificationEnvironmentValue: nil,
+            notificationBundleValue: nil,
+            buildConfiguration: "Release"
+        ))
+
+        #expect(resolved.source == "attendancePlist")
+        #expect(resolved.url.absoluteString == "https://kboscore-back.onrender.com")
+    }
+
+    // attendanceButtonAvailabilityStartsEnabledWithConfiguredClient 메서드는 baseURL이 있는 client 경로에서는 버튼 차단 상태가 아니어야 함을 검증합니다.
+    @Test func attendanceButtonAvailabilityStartsEnabledWithConfiguredClient() {
+        let model = AppModel(
+            attendanceClient: RecordingAttendanceClient(),
+            bootstrap: MockKBOData.makeBootstrap(),
+            usePersistedSettings: false
+        )
+
+        #expect(model.isAttendanceSyncAvailable)
+    }
+
+    // attendanceList404DoesNotMarkEveryGame 메서드는 목록 조회 실패가 전체 직관 상태로 번지지 않도록 검증합니다.
+    @Test func attendanceList404DoesNotMarkEveryGame() async throws {
+        let client = RecordingAttendanceClient(fetchError: .httpStatus(404))
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: MockKBOData.makeBootstrap(),
+            usePersistedSettings: false
+        )
+
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(model.attendedGameIDs.isEmpty)
+        #expect(model.games.allSatisfy { model.isGameAttended($0) == false })
+    }
+
+    // attendanceToggleSuccessAddsOnlySelectedDatabaseGameID 메서드는 체크 성공 시 해당 DB UUID만 직관 상태가 되는지 검증합니다.
+    @Test func attendanceToggleSuccessAddsOnlySelectedDatabaseGameID() async throws {
+        let client = RecordingAttendanceClient()
+        let teams = try attendanceFixtureTeams()
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let other = makeGameDetail(
+            id: UUID(uuidString: "2BB85FB1-EE5F-4748-93C0-17D38BC3F492")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "대구",
+            awayTeam: teams.samsung,
+            homeTeam: teams.lotte,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let games = [selected, other]
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: games, notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameAttendance(for: selected)
+        #expect(model.isGameAttended(selected) == false)
+        #expect(model.isGameAttended(other) == false)
+
+        let confirmed = await eventually(timeout: 1) {
+            let requests = await client.setRequests()
+            return requests.isEmpty == false && model.isGameAttended(selected)
+        }
+        #expect(confirmed)
+        #expect(model.attendedGameIDs == [selected.id])
+        let requests = await client.setRequests()
+        let request = try #require(requests.first)
+        #expect(request.isAttended)
+        #expect(request.gameID == selected.id)
+    }
+
+    // attendanceToggleFailureRollsBackOnlySelectedDatabaseGameID 메서드는 체크 실패 시 선택 경기만 롤백되는지 검증합니다.
+    @Test func attendanceToggleFailureRollsBackOnlySelectedDatabaseGameID() async throws {
+        let client = RecordingAttendanceClient(setError: AttendanceClientError.httpStatus(404))
+        let teams = try attendanceFixtureTeams()
+        let selected = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let other = makeGameDetail(
+            id: UUID(uuidString: "2BB85FB1-EE5F-4748-93C0-17D38BC3F492")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "대구",
+            awayTeam: teams.samsung,
+            homeTeam: teams.lotte,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let games = [selected, other]
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: games, notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.replaceAttendedGameIDsForTesting([other.id])
+        model.toggleGameAttendance(for: selected)
+        #expect(model.isGameAttended(selected) == false)
+        #expect(model.isGameAttended(other))
+
+        let rolledBack = await eventually(timeout: 1) {
+            model.isGameAttended(selected) == false && model.isGameAttended(other)
+        }
+        #expect(rolledBack)
+        #expect(model.attendedGameIDs == [other.id])
+    }
+
+    // gameDetailAttendanceButtonUsesSharedAttendanceState 메서드는 상세 버튼 selected 상태가 shared DB UUID 상태를 보는지 검증합니다.
+    @Test func gameDetailAttendanceButtonUsesSharedAttendanceState() throws {
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let bootstrap = KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+        let model = AppModel(
+            bootstrap: bootstrap,
+            usePersistedSettings: false
+        )
+
+        model.replaceAttendedGameIDsForTesting([game.id])
+
+        #expect(model.isGameDetailAttended(game))
+    }
+
+    // gameDetailAttendanceStateSurvivesDetailReentry 메서드는 상세 재생성 후에도 shared state 기준 selected가 유지되는지 검증합니다.
+    @Test func gameDetailAttendanceStateSurvivesDetailReentry() async throws {
+        let client = RecordingAttendanceClient()
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let recreatedDetailGame = game
+        let bootstrap = KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: bootstrap,
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: game)
+        let confirmed = await eventually(timeout: 1) {
+            model.isGameDetailAttended(recreatedDetailGame)
+        }
+
+        #expect(confirmed)
+        #expect(model.isGameDetailAttended(recreatedDetailGame))
+        #expect(model.attendedGameIDs == [game.id])
+    }
+
+    // attendanceNoOpSetDoesNotConfirmLocalDetailState 메서드는 서버 sync skip이 로컬 직관 상태를 확정하지 않도록 검증합니다.
+    @Test func attendanceNoOpSetDoesNotConfirmLocalDetailState() async throws {
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let bootstrap = KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default)
+        let model = AppModel(
+            attendanceClient: NoOpAttendanceClient(),
+            bootstrap: bootstrap,
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: game)
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(model.isGameDetailAttended(game) == false)
+        #expect(model.attendedGameIDs.isEmpty)
+        #expect(model.isAttendanceSyncAvailable == false)
+    }
+
+    // attendanceUnconfiguredDisablesRepeatedListSync 메서드는 baseURL 누락 시 목록 sync가 반복 요청되지 않도록 검증합니다.
+    @Test func attendanceUnconfiguredDisablesRepeatedListSync() async throws {
+        let client = RecordingAttendanceClient(fetchError: .unconfigured)
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: MockKBOData.makeBootstrap(),
+            usePersistedSettings: false
+        )
+
+        await model.refreshAttendanceRecordsFromServer()
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(await client.fetchCount() == 1)
+        #expect(model.attendedGameIDs.isEmpty)
+    }
+
+    // attendanceServerListReplacesConfirmedIDsWithCanonicalKeys 메서드는 서버 4건 응답이 canonical key 4건으로 반영되는지 검증합니다.
+    @Test func attendanceServerListReplacesConfirmedIDsWithCanonicalKeys() async throws {
+        let gameIDs: Set<UUID> = [
+            UUID(uuidString: "384cc6a7-af84-4658-b054-afea45637922")!,
+            UUID(uuidString: "f6ee5dcb-0912-47ca-bd8a-737ea4cea3f9")!,
+            UUID(uuidString: "2bb85fb1-ee5f-4748-93c0-17d38bc3f492")!,
+            UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!
+        ]
+        let client = RecordingAttendanceClient(fetchedGameIDs: gameIDs)
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: MockKBOData.makeBootstrap(),
+            usePersistedSettings: false
+        )
+
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(await client.fetchCount() == 1)
+        #expect(model.attendedGameIDs == gameIDs)
+        #expect(model.attendedGameKeys == Set(gameIDs.map { "id:\($0.uuidString.lowercased())" }))
+    }
+
+    // attendanceUnconfiguredDisablesRepeatedMarkRequests 메서드는 저장 설정 오류 후 같은 action 요청을 반복하지 않는지 검증합니다.
+    @Test func attendanceUnconfiguredDisablesRepeatedMarkRequests() async throws {
+        let client = RecordingAttendanceClient(setError: .unconfigured)
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: game)
+        _ = await eventually(timeout: 1) {
+            await client.setRequests().count == 1
+        }
+        model.toggleGameDetailAttendance(for: game)
+
+        #expect(await client.setRequests().count == 1)
+        #expect(model.attendedGameIDs.isEmpty)
+    }
+
+    // gameDetailAttendanceResolvesKnownDatabaseID 메서드는 detail snapshot id가 달라도 public/provider identity로 DB UUID를 API에 전달하는지 검증합니다.
+    @Test func gameDetailAttendanceResolvesKnownDatabaseID() async throws {
+        let client = RecordingAttendanceClient()
+        let teams = try attendanceFixtureTeams()
+        let databaseGameID = UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!
+        let providerGeneratedID = UUID(uuidString: "B59894BF-49CD-5BCB-9367-580C974982C7")!
+        let storedGame = makeGameDetail(
+            id: providerGeneratedID,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            note: "supabase_game_id=\(databaseGameID.uuidString) public_game_id=20260705-LG-DOO provider_game_id=20260705LGDO0",
+            providerGameID: "20260705LGDO0"
+        )
+        let detailSnapshot = makeGameDetail(
+            id: providerGeneratedID,
+            scheduledStart: storedGame.scheduledStart,
+            venue: storedGame.venue,
+            awayTeam: storedGame.awayTeam,
+            homeTeam: storedGame.homeTeam,
+            awayScore: storedGame.awayScore,
+            homeScore: storedGame.homeScore,
+            status: storedGame.status,
+            seasonClassification: storedGame.seasonClassification,
+            note: "public_game_id=20260705-LG-DOO provider_game_id=20260705LGDO0",
+            providerGameID: storedGame.providerGameID
+        )
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [storedGame], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: detailSnapshot)
+        let recorded = await eventually(timeout: 1) {
+            let requests = await client.setRequests()
+            return requests.isEmpty == false
+        }
+
+        #expect(recorded)
+        #expect(model.attendanceGameID(for: detailSnapshot) == databaseGameID)
+        let request = try #require(await client.setRequests().first)
+        #expect(request.gameID == databaseGameID)
+        #expect(request.gameID != providerGeneratedID)
+        #expect(model.attendedGameIDs == [databaseGameID])
+        #expect(model.isGameDetailAttended(detailSnapshot))
+    }
+
+    // attendanceGeneratedUUIDIsNotSentToAPI 메서드는 provider/generated UUID만 있는 경우 Attendance API 요청을 차단하는지 검증합니다.
+    @Test func attendanceGeneratedUUIDIsNotSentToAPI() async throws {
+        let client = RecordingAttendanceClient()
+        let teams = try attendanceFixtureTeams()
+        let generatedGame = makeGameDetail(
+            id: UUID(uuidString: "B59894BF-49CD-5BCB-9367-580C974982C7")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            providerGameID: "20260705LGDO0"
+        )
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [generatedGame], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameAttendance(for: generatedGame)
+
+        let noRequest = await eventually(timeout: 0.3) {
+            await client.setRequests().isEmpty
+        }
+        #expect(noRequest)
+        #expect(model.attendedGameIDs.isEmpty)
+    }
+
+    // schedulePresentationShowsAttendanceMarkerForServerGameId 메서드는 서버 UUID 직관 키가 일정 마커에 반영되는지 검증합니다.
+    @Test func schedulePresentationShowsAttendanceMarkerForServerGameId() async throws {
+        let selectedDate = isoDate("2026-07-05T18:00:00+09:00")
+        let gameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first { $0.id == "hanwha" })
+        let homeTeam = try #require(teams.first { $0.id == "lg" })
+        let game = makeGameDetail(
+            id: gameID,
+            scheduledStart: selectedDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN"
+        )
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let entry = await ScheduleMonthCacheEntry.build(key: monthKey, games: [game])
+
+        let presentation = await SchedulePresentation.build(
+            displayedMonth: selectedDate,
+            selectedDate: selectedDate,
+            filter: .all,
+            favoriteTeamID: nil,
+            attendedGameKeys: [GameIdentifier.idKey(gameID)],
+            cachedMonthEntries: [monthKey.yearMonthText: entry],
+            failedMonthKeys: [],
+            currentDate: selectedDate
+        )
+
+        let attendedDay = try #require(presentation.calendarDays.first {
+            SchedulePresentation.dayKey(for: $0.date) == "2026-07-05"
+        })
+        #expect(attendedDay.hasAttendedGame)
+        #expect(presentation.selectedDateGames.first?.id == gameID)
+    }
+
+    // attendanceCanonicalKeyMatchesLowercaseServerAndUppercaseAppUUIDs 메서드는 UUID 대소문자 차이를 제거합니다.
+    @Test func attendanceCanonicalKeyMatchesLowercaseServerAndUppercaseAppUUIDs() throws {
+        let lowercaseServerID = "384cc6a7-af84-4658-b054-afea45637922"
+        let uppercaseAppID = "384CC6A7-AF84-4658-B054-AFEA45637922"
+
+        #expect(GameIdentifier.attendanceCanonicalKey(from: lowercaseServerID) == "id:\(lowercaseServerID)")
+        #expect(GameIdentifier.attendanceCanonicalKey(from: uppercaseAppID) == "id:\(lowercaseServerID)")
+        #expect(GameIdentifier.attendanceCanonicalKey(from: "id:\(uppercaseAppID)") == "id:\(lowercaseServerID)")
+    }
+
+    // schedulePresentationMatchesFourLowercaseAttendanceIDsAgainstSupabaseGameNotes 메서드는 월간 일정 110건 중 서버 직관 4건이 모두 마커로 잡히는지 검증합니다.
+    @Test func schedulePresentationMatchesFourLowercaseAttendanceIDsAgainstSupabaseGameNotes() async throws {
+        let teams = try attendanceFixtureTeams()
+        let attendedDatabaseIDs = [
+            UUID(uuidString: "384cc6a7-af84-4658-b054-afea45637922")!,
+            UUID(uuidString: "f6ee5dcb-0912-47ca-bd8a-737ea4cea3f9")!,
+            UUID(uuidString: "2bb85fb1-ee5f-4748-93c0-17d38bc3f492")!,
+            UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!
+        ]
+        let games = (0..<110).map { index in
+            let isAttendedFixture = index < attendedDatabaseIDs.count
+            let localID = UUID(uuidString: String(format: "11111111-1111-4111-8111-%012d", index + 1))!
+            let databaseID = isAttendedFixture ? attendedDatabaseIDs[index] : localID
+            return makeGameDetail(
+                id: localID,
+                scheduledStart: isoDate(String(format: "2026-07-%02dT18:30:00+09:00", (index % 28) + 1)),
+                venue: "잠실",
+                awayTeam: index.isMultiple(of: 2) ? teams.doosan : teams.samsung,
+                homeTeam: teams.lg,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .regularSeason,
+                note: "supabase_game_id=\(databaseID.uuidString) public_game_id=202607\(String(format: "%02d", (index % 28) + 1))-LG-\(index)"
+            )
+        }
+        let selectedDate = isoDate("2026-07-01T18:30:00+09:00")
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let entry = await ScheduleMonthCacheEntry.build(key: monthKey, games: games)
+        let lowercaseServerKeys = Set(attendedDatabaseIDs.map { $0.uuidString.lowercased() })
+
+        let presentation = await SchedulePresentation.build(
+            displayedMonth: selectedDate,
+            selectedDate: selectedDate,
+            filter: .all,
+            favoriteTeamID: nil,
+            attendedGameKeys: lowercaseServerKeys,
+            cachedMonthEntries: [monthKey.yearMonthText: entry],
+            failedMonthKeys: [],
+            currentDate: selectedDate
+        )
+
+        let markedDays = presentation.calendarDays.filter(\.hasAttendedGame)
+        #expect(entry.games.count == 110)
+        #expect(markedDays.count == 4)
+    }
+
+    // scheduleRowsMarkOnlyGamesWhoseDatabaseIDIsAttended 메서드는 일정 row 직관 마커 조건이 DB UUID 하나에만 켜지는지 검증합니다.
+    @Test func scheduleRowsMarkOnlyGamesWhoseDatabaseIDIsAttended() throws {
+        let bootstrap = MockKBOData.makeBootstrap()
+        let games = Array(bootstrap.games.prefix(5))
+        #expect(games.count == 5)
+        let attendedGame = try #require(games.dropFirst(2).first)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: bootstrap.teams,
+                games: games,
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        model.replaceAttendedGameIDsForTesting([attendedGame.id])
+        #expect(games.filter { model.isGameAttended($0) }.map(\.id) == [attendedGame.id])
+
+        model.replaceAttendedGameIDsForTesting([])
+        #expect(games.allSatisfy { model.isGameAttended($0) == false })
+
+        model.replaceAttendedGameIDsForTesting([UUID()])
+        #expect(games.allSatisfy { model.isGameAttended($0) == false })
+    }
+
+    // schedulePresentationIgnoresProviderAttendanceAliasForServerMarkers 메서드는 UUID가 아닌 alias가 마커를 켜지 않도록 검증합니다.
+    @Test func schedulePresentationIgnoresProviderAttendanceAliasForServerMarkers() async throws {
+        let selectedDate = isoDate("2026-07-05T18:00:00+09:00")
+        let gameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let teams = MockKBOData.makeBootstrap().teams
+        let awayTeam = try #require(teams.first { $0.id == "hanwha" })
+        let homeTeam = try #require(teams.first { $0.id == "lg" })
+        let game = makeGameDetail(
+            id: gameID,
+            scheduledStart: selectedDate,
+            venue: "잠실",
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-HAN",
+            providerGameID: "20260705LGHH0"
+        )
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let entry = await ScheduleMonthCacheEntry.build(key: monthKey, games: [game])
+
+        let presentation = await SchedulePresentation.build(
+            displayedMonth: selectedDate,
+            selectedDate: selectedDate,
+            filter: .all,
+            favoriteTeamID: nil,
+            attendedGameKeys: ["provider:20260705LGHH0"],
+            cachedMonthEntries: [monthKey.yearMonthText: entry],
+            failedMonthKeys: [],
+            currentDate: selectedDate
+        )
+
+        let day = try #require(presentation.calendarDays.first {
+            SchedulePresentation.dayKey(for: $0.date) == "2026-07-05"
+        })
+        #expect(day.hasAttendedGame == false)
+    }
+
+    // attendanceDashboardUsesServerGameIDs 메서드는 직관탭 목록이 서버 UUID 상태 기준으로 구성되는지 검증합니다.
+    @Test func attendanceDashboardUsesServerGameIDs() throws {
+        let teams = MockKBOData.makeBootstrap().teams
+        let lg = try #require(teams.first { $0.id == "lg" })
+        let doosan = try #require(teams.first { $0.id == "doosan" })
+        let selectedID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let otherID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let selected = makeGameDetail(
+            id: selectedID,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 2,
+            homeScore: 5,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260705-LG-DOO"
+        )
+        let other = makeGameDetail(
+            id: otherID,
+            scheduledStart: isoDate("2026-07-06T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: doosan,
+            homeTeam: lg,
+            awayScore: 4,
+            homeScore: 1,
+            status: .final,
+            seasonClassification: .regularSeason,
+            note: "public_game_id=20260706-LG-DOO"
+        )
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(
+                teams: teams,
+                games: [selected, other],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false
+        )
+
+        model.replaceAttendedGameIDsForTesting([selectedID])
+
+        #expect(model.attendanceDashboard.games.map(\.gameIdentity) == [selected.stableDetailIdentity])
+    }
+
+    // attendanceDashboardShowsAllServerConfirmedGamesBySupabaseGameID 메서드는 로컬 generated id 대신 DB UUID key로 직관탭을 구성합니다.
+    @Test func attendanceDashboardShowsAllServerConfirmedGamesBySupabaseGameID() throws {
+        let teams = try attendanceFixtureTeams()
+        let databaseIDs = [
+            UUID(uuidString: "384cc6a7-af84-4658-b054-afea45637922")!,
+            UUID(uuidString: "f6ee5dcb-0912-47ca-bd8a-737ea4cea3f9")!,
+            UUID(uuidString: "2bb85fb1-ee5f-4748-93c0-17d38bc3f492")!,
+            UUID(uuidString: "6b1ef981-021c-4f41-9e65-31e25f7095ee")!
+        ]
+        let games = databaseIDs.enumerated().map { index, databaseID in
+            makeGameDetail(
+                id: UUID(uuidString: String(format: "22222222-2222-4222-8222-%012d", index + 1))!,
+                scheduledStart: isoDate(String(format: "2026-07-%02dT18:30:00+09:00", index + 1)),
+                venue: "잠실",
+                awayTeam: teams.doosan,
+                homeTeam: teams.lg,
+                awayScore: nil,
+                homeScore: nil,
+                status: .upcoming,
+                seasonClassification: .regularSeason,
+                note: "supabase_game_id=\(databaseID.uuidString) public_game_id=2026070\(index + 1)-LG-DOO"
+            )
+        }
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: games, notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "lg"
+
+        model.replaceAttendedGameIDsForTesting(Set(databaseIDs))
+
+        #expect(model.attendedGameKeys.count == 4)
+        #expect(model.attendanceDashboard.games.count == 4)
+        #expect(model.attendanceDashboard.upcomingGames.count == 4)
+    }
+
+    // attendanceDashboardUsesScheduleTabMonthCacheForAllConfirmedGames 메서드는 직관탭이 일정탭 월간 캐시 110건에서 4건을 모두 찾는지 검증합니다.
+    @Test func attendanceDashboardUsesScheduleTabMonthCacheForAllConfirmedGames() throws {
+        let teams = try attendanceFixtureTeams()
+        let databaseIDs = [
+            UUID(uuidString: "6e352a5f-f0a4-452e-8b62-a97b53aecef1")!,
+            UUID(uuidString: "d8be45a1-1517-4686-b9a6-40d61d05d685")!,
+            UUID(uuidString: "f6ee5dcb-0912-47ca-bd8a-737ea4cea3f9")!,
+            UUID(uuidString: "384cc6a7-af84-4658-b054-afea45637922")!
+        ]
+        let monthGames = (0..<110).map { index in
+            let localID = UUID(uuidString: String(format: "33333333-3333-4333-8333-%012d", index + 1))!
+            let databaseID = index < databaseIDs.count ? databaseIDs[index] : localID
+            let status: GameStatus = index < 2 ? .upcoming : .final
+            let awayScore: Int? = status == .final ? (index == 2 ? 2 : 6) : nil
+            let homeScore: Int? = status == .final ? (index == 2 ? 5 : 3) : nil
+            return makeGameDetail(
+                id: localID,
+                scheduledStart: isoDate(String(format: "2026-07-%02dT18:30:00+09:00", (index % 28) + 1)),
+                venue: "잠실",
+                awayTeam: index.isMultiple(of: 2) ? teams.doosan : teams.samsung,
+                homeTeam: teams.lg,
+                awayScore: awayScore,
+                homeScore: homeScore,
+                status: status,
+                seasonClassification: .regularSeason,
+                note: "supabase_game_id=\(databaseID.uuidString) public_game_id=202607\(String(format: "%02d", (index % 28) + 1))-LG-\(index)"
+            )
+        }
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [monthGames[0]], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+        model.settings.favoriteTeamID = "lg"
+        model.replaceAttendedGameIDsForTesting(Set(databaseIDs))
+
+        #expect(model.attendanceDashboard.games.count == 1)
+
+        model.mergeScheduleTabMonthGamesForAttendance(
+            monthGames,
+            monthKey: monthKey,
+            reason: "testScheduleTabMonth"
+        )
+
+        let dashboard = model.attendanceDashboard
+        #expect(dashboard.games.count == 4)
+        #expect(dashboard.upcomingGames.count == 2)
+        #expect(dashboard.pastGames.count == 2)
+        #expect(dashboard.overall.games == 2)
+        #expect(dashboard.overall.wins == 1)
+        #expect(dashboard.overall.losses == 1)
+        #expect(dashboard.overall.draws == 0)
+    }
+
     // scheduleStaleReconciliationAppFactoryUsesNoOpClient 메서드는 실행 환경에 맞는 구현체 생성을 검증합니다.
     @Test func scheduleStaleReconciliationAppFactoryUsesNoOpClient() {
         let client = ScheduleStaleGameReconciliationClientFactory.makeAppClient()
@@ -18944,6 +19893,75 @@ private actor RecordingNotificationRegistrationClient: NotificationRegistrationC
     }
 }
 
+private struct RecordedAttendanceRequest: Sendable {
+    let isAttended: Bool
+    let gameID: UUID
+    let publicGameID: String?
+    let providerGameID: String?
+}
+
+private actor RecordingAttendanceClient: AttendanceClient {
+    private let fetchedGameIDs: Set<UUID>
+    private let fetchError: AttendanceClientError?
+    private let setError: AttendanceClientError?
+    private var recordedFetchCount = 0
+    private var recordedSetRequests: [RecordedAttendanceRequest] = []
+
+    init(
+        fetchedGameIDs: Set<UUID> = [],
+        fetchError: AttendanceClientError? = nil,
+        setError: AttendanceClientError? = nil
+    ) {
+        self.fetchedGameIDs = fetchedGameIDs
+        self.fetchError = fetchError
+        self.setError = setError
+    }
+
+    nonisolated func fetchAttendedGameIDs(installationID _: UUID) async throws -> Set<UUID> {
+        try await fetch()
+    }
+
+    private func fetch() throws -> Set<UUID> {
+        recordedFetchCount += 1
+        if let fetchError {
+            throw fetchError
+        }
+        return fetchedGameIDs
+    }
+
+    nonisolated func setAttendance(
+        _ isAttended: Bool,
+        installationID _: UUID,
+        gameID: UUID,
+        publicGameID: String?,
+        providerGameID: String?
+    ) async throws {
+        try await recordSet(
+            RecordedAttendanceRequest(
+                isAttended: isAttended,
+                gameID: gameID,
+                publicGameID: publicGameID,
+                providerGameID: providerGameID
+            )
+        )
+    }
+
+    private func recordSet(_ request: RecordedAttendanceRequest) throws {
+        recordedSetRequests.append(request)
+        if let setError {
+            throw setError
+        }
+    }
+
+    func setRequests() -> [RecordedAttendanceRequest] {
+        recordedSetRequests
+    }
+
+    func fetchCount() -> Int {
+        recordedFetchCount
+    }
+}
+
 // notificationRegistrationSettings 메서드는 이 타입의 주요 동작을 수행합니다.
 private func notificationRegistrationSettings(
     favoriteTeamID: String?,
@@ -19222,6 +20240,13 @@ private func testFixturesDirectory() -> URL {
     URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .appendingPathComponent("Fixtures", isDirectory: true)
+}
+
+private func projectFileContents(_ relativePath: String) throws -> String {
+    let projectRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    return try String(contentsOf: projectRoot.appendingPathComponent(relativePath), encoding: .utf8)
 }
 
 // makeTemporaryDirectory 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.

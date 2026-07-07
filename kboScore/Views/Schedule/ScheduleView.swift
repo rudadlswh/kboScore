@@ -289,7 +289,10 @@ private struct ScheduleCalendarCardView: View {
                                 ScheduleGameRow(
                                     game: game,
                                     favoriteTeamID: appModel.settings.favoriteTeamID,
-                                    filter: viewModel.scheduleFilter
+                                    filter: viewModel.scheduleFilter,
+                                    onAttendanceToggle: {
+                                        appModel.toggleGameAttendance(for: game)
+                                    }
                                 )
                             }
                             .buttonStyle(.plain)
@@ -660,6 +663,7 @@ private struct ScheduleGameRow: View {
     let game: GameDetail
     let favoriteTeamID: String?
     let filter: ScheduleFilter
+    let onAttendanceToggle: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -719,10 +723,17 @@ private struct ScheduleGameRow: View {
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(
-                        statusBadgeTint.opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
+                            statusBadgeTint.opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
                         in: Capsule()
                     )
-                    
+
+                if appModel.isGameAttended(game) {
+                    Button(action: onAttendanceToggle) {
+//                        ScheduleAttendanceAppIcon(size: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("직관 해제")
+                }
             }
         }
         .padding(10)

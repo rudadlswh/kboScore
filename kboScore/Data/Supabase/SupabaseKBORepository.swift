@@ -1074,6 +1074,9 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     private let client: SupabaseClient
     private let calendar: Calendar
     private let teamCache = SupabaseTeamRowCache()
+    nonisolated var configuredSchemaName: String {
+        schemaName
+    }
     nonisolated static let gameSelectColumns = [
         "id",
         "public_game_id",
@@ -1157,7 +1160,7 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(configuration: SupabaseConfiguration) {
         self.baseURL = configuration.url
-        self.schemaName = SupabaseConfiguration.exposedSchema
+        self.schemaName = configuration.schema
         self.client = SupabaseClient(
             supabaseURL: configuration.url,
             supabaseKey: configuration.publishableKey,

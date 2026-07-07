@@ -74,6 +74,7 @@ struct ContentView: View {
         }
         .task {
             await appModel.loadIfNeeded()
+            await appModel.refreshAttendanceRecordsFromServer()
         }
         .sheet(
             isPresented: Binding(

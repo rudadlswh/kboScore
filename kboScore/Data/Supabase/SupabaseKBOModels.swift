@@ -13,10 +13,23 @@ import Foundation
 
 // SupabaseConfiguration 구조체는 SupabaseConfiguration 타입의 역할과 값을 정의합니다.
 nonisolated struct SupabaseConfiguration: Sendable {
-    nonisolated static let exposedSchema = "kbo_crawler_api"
+    nonisolated static let productionSchema = "kbo_crawler_api"
+    nonisolated static let developmentSchema = "kbo_crawler_api_dev"
 
     let url: URL
     let publishableKey: String
+    let schema: String
+
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
+    init(
+        url: URL,
+        publishableKey: String,
+        schema: String = Self.productionSchema
+    ) {
+        self.url = url
+        self.publishableKey = publishableKey
+        self.schema = schema
+    }
 }
 
 private extension Array where Element == SupabaseGameBatterRecordRow {
@@ -694,6 +707,7 @@ nonisolated enum SupabaseKBOMapper {
             highlightText: nil,
             events: [],
             note: makeNote(
+                supabaseGameID: row.id,
                 provider: row.provider,
                 publicGameID: row.publicGameID,
                 providerGameID: classifiedRow.providerGameID,
@@ -725,6 +739,7 @@ nonisolated enum SupabaseKBOMapper {
 
     // makeNote 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated private static func makeNote(
+        supabaseGameID: UUID,
         provider: String?,
         publicGameID: String?,
         providerGameID: String?,
@@ -736,6 +751,7 @@ nonisolated enum SupabaseKBOMapper {
         statusReason: String?
     ) -> String? {
         var components: [String] = []
+        components.append("supabase_game_id=\(supabaseGameID.uuidString)")
         if let provider = provider?.nilIfBlank {
             components.append("provider=\(provider)")
         }

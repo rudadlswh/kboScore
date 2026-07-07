@@ -106,12 +106,14 @@ struct kboScoreApp: App {
         let notificationRegistrationClient = NotificationRegistrationClientFactory.makeAppClient()
         let liveActivityPushToStartTokenRegistrationClient = LiveActivityPushToStartTokenRegistrationClientFactory.makeAppClient()
         let scheduleStaleGameReconciliationClient = ScheduleStaleGameReconciliationClientFactory.makeAppClient()
+        let attendanceClient = AttendanceClientFactory.makeAppClient()
         return AppModel(
             repository: bundle.repository,
             repositoryRuntimeState: bundle.runtimeState,
             notificationRegistrationClient: notificationRegistrationClient,
             liveActivityPushToStartTokenRegistrationClient: liveActivityPushToStartTokenRegistrationClient,
-            scheduleStaleGameReconciliationClient: scheduleStaleGameReconciliationClient
+            scheduleStaleGameReconciliationClient: scheduleStaleGameReconciliationClient,
+            attendanceClient: attendanceClient
         )
     }
 

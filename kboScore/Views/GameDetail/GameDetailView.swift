@@ -79,6 +79,9 @@ struct GameDetailView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
+                .onAppear {
+                    logAttendanceDetailAppear(game)
+                }
             } else if viewModel.isResolvingInitialGame || viewModel.hasAttemptedInitialResolution == false {
                 ProgressView("경기 정보를 불러오는 중")
                     .frame(maxWidth: .infinity, minHeight: 220)
@@ -345,13 +348,22 @@ struct GameDetailView: View {
     @ViewBuilder
     private func actionButtons(for game: GameDetail) -> some View {
         let palette = appModel.favoriteStadiumPalette
+        let attendanceGameID = appModel.attendanceGameID(for: game)
+        let isAttended = appModel.isGameDetailAttended(game)
+        let isAttendancePending = appModel.isAttendanceSyncPending(for: game)
+        let isAttendanceButtonDisabled = attendanceGameID == nil || appModel.isAttendanceSyncAvailable == false || isAttendancePending
         HStack(spacing: 10) {
             Button {
-                appModel.toggleGameAttendance(for: game)
+                guard let attendanceGameID else { return }
+                let before = appModel.isGameDetailAttended(game)
+                #if DEBUG
+                print("[AttendanceDetail] toggle rawGameID=\(attendanceGameID.uuidString) canonicalGameID=\(GameIdentifier.attendanceCanonicalKey(attendanceGameID)) publicGameID=\(game.publicGameID ?? "none") from=\(before) to=\(!before)")
+                #endif
+                appModel.toggleGameDetailAttendance(for: game)
             } label: {
                 Label(
-                    appModel.isGameAttended(game) ? "직관 해제" : "직관",
-                    systemImage: appModel.isGameAttended(game) ? "checkmark.circle.fill" : "checkmark.circle"
+                    isAttended ? "직관 해제" : "직관",
+                    systemImage: isAttended ? "checkmark.circle.fill" : "checkmark.circle"
                 )
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
@@ -360,9 +372,11 @@ struct GameDetailView: View {
                     palette?.elevatedCard ?? Color(.secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
-                .foregroundStyle(appModel.isGameAttended(game) ? (palette?.primary ?? appModel.currentTheme.accent) : (palette?.textPrimary ?? .primary))
+                .foregroundStyle(isAttended ? (palette?.primary ?? appModel.currentTheme.accent) : (palette?.textPrimary ?? .primary))
+                .opacity(isAttendanceButtonDisabled ? 0.55 : 1)
             }
             .buttonStyle(.plain)
+            .disabled(isAttendanceButtonDisabled)
 
 //            ShareLink(item: game.shareText) {
 //                Label("경기 공유하기", systemImage: "square.and.arrow.up")
@@ -376,6 +390,24 @@ struct GameDetailView: View {
 //                    .foregroundStyle(palette?.textPrimary ?? .primary)
 //            }
         }
+    }
+
+    private func logAttendanceDetailAppear(_ game: GameDetail) {
+        #if DEBUG
+        let attendanceGameID = appModel.attendanceGameID(for: game)
+        let reason: String
+        if attendanceGameID == nil {
+            reason = "missingAttendanceGameID"
+        } else if appModel.isAttendanceSyncAvailable == false {
+            reason = "missingBackendBaseURL"
+        } else if appModel.isAttendanceSyncPending(for: game) {
+            reason = "pending"
+        } else {
+            reason = "ready"
+        }
+        let enabled = attendanceGameID != nil && appModel.isAttendanceSyncAvailable && appModel.isAttendanceSyncPending(for: game) == false
+        print("[AttendanceDetail] button enabled=\(enabled) reason=\(reason) rawGameID=\(attendanceGameID?.uuidString ?? "nil") canonicalGameID=\(attendanceGameID.map(GameIdentifier.attendanceCanonicalKey) ?? "nil")")
+        #endif
     }
 }
 

@@ -58,10 +58,16 @@ struct AttendanceGameRecord: Identifiable, Hashable, Sendable {
     let gameIdentity: String
     let side: AttendanceGameSide
     let opponentName: String
+    let matchupText: String
     let stadium: String
     let scoreText: String
     let gameDate: Date
-    let result: TeamGameResult
+    let result: TeamGameResult?
+    let gameStatus: GameStatus
+
+    var isUpcomingAttendance: Bool {
+        !gameStatus.isFinishedLike
+    }
 }
 
 // AttendanceDashboard 구조체는 AttendanceDashboard 타입의 역할과 값을 정의합니다.
@@ -70,16 +76,20 @@ struct AttendanceDashboard: Hashable, Sendable {
     let home: AttendanceRecordSummary
     let away: AttendanceRecordSummary
     let games: [AttendanceGameRecord]
+    let upcomingGames: [AttendanceGameRecord]
+    let pastGames: [AttendanceGameRecord]
 
     static let empty = AttendanceDashboard(
         overall: .empty,
         home: .empty,
         away: .empty,
-        games: []
+        games: [],
+        upcomingGames: [],
+        pastGames: []
     )
 
     var hasGames: Bool {
-        overall.hasGames
+        !upcomingGames.isEmpty || !pastGames.isEmpty
     }
 }
 
@@ -96,7 +106,6 @@ struct AttendanceDashboardBuilder {
         for game in games.sorted(by: { $0.scheduledStart > $1.scheduledStart }) {
             guard seenKeys.insert(game.attendanceStorageKey).inserted,
                   let side = attendanceSide(for: game, favoriteTeamID: favoriteTeamID),
-                  let result = game.finalResult(for: favoriteTeamID),
                   let opponent = opponentTeam(for: game, favoriteTeamID: favoriteTeamID) else {
                 continue
             }
@@ -106,10 +115,12 @@ struct AttendanceDashboardBuilder {
                 gameIdentity: game.stableDetailIdentity,
                 side: side,
                 opponentName: opponent.displayName,
+                matchupText: "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName)",
                 stadium: game.venue,
                 scoreText: game.finalScoreLine ?? "---",
                 gameDate: game.scheduledStart,
-                result: result
+                result: game.finalResult(for: favoriteTeamID),
+                gameStatus: game.status
             )
 
             switch side {
@@ -120,14 +131,22 @@ struct AttendanceDashboardBuilder {
             }
         }
 
-        let allRecords = (homeRecords + awayRecords)
+        let displayRecords = homeRecords + awayRecords
+        let upcomingRecords = displayRecords
+            .filter(\.isUpcomingAttendance)
+            .sorted { $0.gameDate < $1.gameDate }
+        let pastRecords = displayRecords
+            .filter { !$0.isUpcomingAttendance }
             .sorted { $0.gameDate > $1.gameDate }
+        let allRecords = upcomingRecords + pastRecords
 
         return AttendanceDashboard(
-            overall: summary(for: allRecords),
+            overall: summary(for: displayRecords),
             home: summary(for: homeRecords),
             away: summary(for: awayRecords),
-            games: allRecords
+            games: allRecords,
+            upcomingGames: upcomingRecords,
+            pastGames: pastRecords
         )
     }
 
@@ -160,7 +179,8 @@ struct AttendanceDashboardBuilder {
         var draws = 0
 
         for record in records {
-            switch record.result {
+            guard let result = record.result else { continue }
+            switch result {
             case .win:
                 wins += 1
             case .loss:
@@ -171,7 +191,7 @@ struct AttendanceDashboardBuilder {
         }
 
         return AttendanceRecordSummary(
-            games: records.count,
+            games: wins + losses + draws,
             wins: wins,
             losses: losses,
             draws: draws
