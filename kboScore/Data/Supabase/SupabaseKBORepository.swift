@@ -472,7 +472,7 @@ struct SupabaseBackedKBORepository<Base: KBORepository, Source: SupabaseKBOReadi
 
 }
 
-extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource {
+extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameDetailLatestSnapshotDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource {
     // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReview(for game: GameDetail) async throws -> GameCenterReview? {
         try await fetchGameDetailDatabaseReviewResult(for: game)?.review
@@ -480,6 +480,12 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
 
     // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async throws -> GameDetailDatabaseReviewFetchResult? {
+        guard game.status == .final || game.status.isLiveLike else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=nonRecordStatus status=\(game.status.rawValue) inputLocalGameId=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
         #if DEBUG
         print("[GameDetailDBRecords] dbRecordFetch inputLocalGameId=\(game.id.uuidString) publicGameID=\(game.publicGameID ?? "<nil>") providerGameID=\(game.providerGameID ?? "<nil>")")
         #endif
@@ -507,7 +513,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         print("[GameDetailDBRecords] DB event count=\(eventRows.count) gameID=\(recordGameID.uuidString)")
         #endif
 
-        let review = await SupabaseKBOMapper.mapDetailedRecordReview(
+        let mappedReview = await SupabaseKBOMapper.mapDetailedRecordReview(
             game: game,
             recordGameID: recordGameID,
             awayTeamDatabaseID: gameRow.awayTeamID,
@@ -516,8 +522,10 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             pitcherRows: pitcherRows,
             eventRows: eventRows
         )
+        let latestRecordUpdatedAt = Self.latestRecordUpdatedAt(batterRows: batterRows, pitcherRows: pitcherRows)
+        let review = Self.reviewForStatus(game.status, review: mappedReview, latestRecordUpdatedAt: latestRecordUpdatedAt)
         #if DEBUG
-        print("[GameDetailDBRecords] dbRecordFetch resolvedSupabaseGameId=\(recordGameID.uuidString) providerGameID=\(gameRow.providerGameID ?? game.providerGameID ?? "<nil>") batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
+        print("[GameDetailDBRecords] dbRecordFetch resolvedSupabaseGameId=\(recordGameID.uuidString) providerGameID=\(gameRow.providerGameID ?? game.providerGameID ?? "<nil>") batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) latestRecordUpdatedAt=\(latestRecordUpdatedAt.map(SupabaseDateParser.debugTimestamp) ?? "<nil>") selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
         #endif
         return GameDetailDatabaseReviewFetchResult(
             review: review,
@@ -528,7 +536,8 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             publicGameID: gameRow.publicGameID ?? game.publicGameID,
             publicBatterRawRowCount: batterRows.count,
             publicPitcherRawRowCount: pitcherRows.count,
-            eventRawRowCount: eventRows.count
+            eventRawRowCount: eventRows.count,
+            latestRecordUpdatedAt: latestRecordUpdatedAt
         )
     }
 
@@ -624,7 +633,7 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         let pitcherRows = try await pitcherRowsTask
         let eventRows = await eventRowsTask
 
-        let review = await SupabaseKBOMapper.mapDetailedRecordReview(
+        let mappedReview = await SupabaseKBOMapper.mapDetailedRecordReview(
             game: mappedGame,
             recordGameID: supabaseGameId,
             awayTeamDatabaseID: gameRow.awayTeamID,
@@ -633,9 +642,11 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             pitcherRows: pitcherRows,
             eventRows: eventRows
         )
+        let latestRecordUpdatedAt = Self.latestRecordUpdatedAt(batterRows: batterRows, pitcherRows: pitcherRows)
+        let review = Self.reviewForStatus(mappedGame.status, review: mappedReview, latestRecordUpdatedAt: latestRecordUpdatedAt)
 
         #if DEBUG
-        print("[GameDetailDBRecords] explicitDbRecordFetch invokedFrom=\(invokedFrom) rawSupabaseGameId=\(supabaseGameId.uuidString) batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
+        print("[GameDetailDBRecords] explicitDbRecordFetch invokedFrom=\(invokedFrom) rawSupabaseGameId=\(supabaseGameId.uuidString) batterCount=\(batterRows.count) pitcherCount=\(pitcherRows.count) eventCount=\(eventRows.count) latestRecordUpdatedAt=\(latestRecordUpdatedAt.map(SupabaseDateParser.debugTimestamp) ?? "<nil>") selectedRecordSource=\(review?.recordSource.rawValue ?? "none")")
         #endif
         return GameDetailDatabaseReviewFetchResult(
             review: review,
@@ -646,8 +657,40 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
             publicGameID: gameRow.publicGameID ?? publicGameID,
             publicBatterRawRowCount: batterRows.count,
             publicPitcherRawRowCount: pitcherRows.count,
-            eventRawRowCount: eventRows.count
+            eventRawRowCount: eventRows.count,
+            latestRecordUpdatedAt: latestRecordUpdatedAt
         )
+    }
+
+    nonisolated private static func reviewForStatus(
+        _ status: GameStatus,
+        review: GameCenterReview?,
+        latestRecordUpdatedAt: Date?,
+        now: Date = Date()
+    ) -> GameCenterReview? {
+        guard let review else { return nil }
+        guard status.isLiveLike else { return review }
+        guard let latestRecordUpdatedAt,
+              now.timeIntervalSince(latestRecordUpdatedAt) <= GameDetailDatabaseReviewFetchResult.liveRecordFreshnessThreshold else {
+            return review.withRecordSource(.staleDbRecordsIgnored)
+        }
+        return review.withRecordSource(.dbLiveRecordsFresh)
+    }
+
+    nonisolated private static func latestRecordUpdatedAt(
+        batterRows: [SupabaseGameBatterRecordRow],
+        pitcherRows: [SupabaseGamePitcherRecordRow]
+    ) -> Date? {
+        let dates = batterRows.compactMap { recordUpdatedAt(sourceUpdatedAt: $0.sourceUpdatedAt, updatedAt: $0.updatedAt) } +
+            pitcherRows.compactMap { recordUpdatedAt(sourceUpdatedAt: $0.sourceUpdatedAt, updatedAt: $0.updatedAt) }
+        return dates.max()
+    }
+
+    nonisolated private static func recordUpdatedAt(sourceUpdatedAt: String?, updatedAt: String?) -> Date? {
+        [sourceUpdatedAt, updatedAt]
+            .compactMap { $0 }
+            .compactMap(SupabaseDateParser.parseTimestamp)
+            .max()
     }
 
     // resolveSupabaseGameRowForDatabaseRecords 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
@@ -841,6 +884,25 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         return snapshot
     }
 
+    nonisolated func fetchLatestGameSnapshotResult(
+        gameID: UUID,
+        fallbackGame: GameDetail
+    ) async throws -> GameDetailSnapshotFetchResult? {
+        let snapshot = try await source.fetchLatestSnapshot(gameID: gameID)
+        guard let snapshot else { return nil }
+        #if DEBUG
+        print("[GameDetailLiveSituation] latest snapshot-only fetched source=public_latest_game_snapshots game_id=\(gameID.uuidString) created_at=\(snapshot.createdAt.map(SupabaseDateParser.debugTimestamp) ?? "<nil>") updated_at=\((snapshot.updatedAt ?? snapshot.sourceUpdatedAt ?? snapshot.fetchedAt).map(SupabaseDateParser.debugTimestamp) ?? "<nil>")")
+        #endif
+        return GameDetailSnapshotFetchResult(
+            game: fallbackGame.applyingLatestSupabaseSnapshot(snapshot),
+            rawSupabaseGameID: gameID,
+            providerGameID: fallbackGame.providerGameID,
+            publicGameID: fallbackGame.publicGameID,
+            snapshotCreatedAt: snapshot.createdAt,
+            snapshotUpdatedAt: snapshot.updatedAt ?? snapshot.sourceUpdatedAt ?? snapshot.fetchedAt
+        )
+    }
+
     // identityFallbackDetailLookups 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func identityFallbackDetailLookups(for identity: String) -> [SupabaseGameLookup] {
         let trimmed = identity.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1007,6 +1069,55 @@ extension SupabaseBackedKBORepository: KBOScheduleRemoteSyncDataSource {
 }
 
 private extension GameDetail {
+    nonisolated func applyingLatestSupabaseSnapshot(_ snapshot: SupabaseLatestGameSnapshotRow) -> GameDetail {
+        let bases = RunnerState(
+            first: snapshot.runnerOnFirst ?? false,
+            second: snapshot.runnerOnSecond ?? false,
+            third: snapshot.runnerOnThird ?? false
+        )
+        let snapshotAwayScore: Int? = snapshot.awayScore ?? awayScore
+        let snapshotHomeScore: Int? = snapshot.homeScore ?? homeScore
+        let snapshotInningText: String? = Self.cleanSnapshotText(snapshot.inningLabel) ?? inningText
+        let snapshotBaseRunners = GameBaseRunners(
+            first: bases.first ? Self.cleanSnapshotText(snapshot.firstBaseRunnerName) : nil,
+            second: bases.second ? Self.cleanSnapshotText(snapshot.secondBaseRunnerName) : nil,
+            third: bases.third ? Self.cleanSnapshotText(snapshot.thirdBaseRunnerName) : nil
+        )
+        let snapshotCurrentPitcherName: String? = Self.cleanSnapshotText(snapshot.currentPitcherName)
+        let snapshotCurrentBatterName: String? = Self.cleanSnapshotText(snapshot.currentBatterName)
+        return GameDetail(
+            id: id,
+            scheduledStart: scheduledStart,
+            venue: venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: snapshotAwayScore,
+            homeScore: snapshotHomeScore,
+            status: status,
+            seasonClassification: seasonClassification,
+            inningText: snapshotInningText,
+            bases: bases,
+            baseRunners: snapshotBaseRunners,
+            balls: snapshot.balls,
+            strikes: snapshot.strikes,
+            outs: snapshot.outs,
+            highlightText: highlightText,
+            events: events,
+            note: note,
+            providerGameID: providerGameID,
+            awayStartingPitcherName: awayStartingPitcherName,
+            homeStartingPitcherName: homeStartingPitcherName,
+            currentPitcherName: snapshotCurrentPitcherName,
+            currentBatterName: snapshotCurrentBatterName
+        )
+    }
+
+    nonisolated static func cleanSnapshotText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     // supabaseNoteToken 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated func supabaseNoteToken(_ key: String) -> String? {
         guard let note,
@@ -1120,7 +1231,8 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         "stolen_bases",
         "grounded_into_double_play",
         "errors",
-        "batting_average"
+        "batting_average",
+        "updated_at"
     ].joined(separator: ",")
     nonisolated static let pitcherRecordSelectColumns = [
         "id",
@@ -1144,7 +1256,8 @@ struct SupabaseKBORepository: SupabaseKBOReading, Sendable {
         "strikeouts",
         "runs",
         "earned_runs",
-        "era"
+        "era",
+        "updated_at"
     ].joined(separator: ",")
     nonisolated static let gameEventSelectColumns = [
         "id",

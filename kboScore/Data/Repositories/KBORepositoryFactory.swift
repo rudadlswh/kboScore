@@ -63,6 +63,7 @@ struct AppRepositoryConfiguration: Sendable {
         print("[SupabaseConfig] plistKeyPresent=\(hasValue(supabaseKeyInfoDictionaryValue))")
         print("[SupabaseConfig] finalRuntimeHost=\(debugHostValue(supabaseConfiguration))")
         print("[SupabaseConfig] schema=\(supabaseSchema)")
+        logBackendSchemaMismatchWarning(supabaseSchema: supabaseSchema, processInfo: processInfo, bundle: bundle)
 #endif
         return AppRepositoryConfiguration(
             supabaseConfiguration: supabaseConfiguration
@@ -172,6 +173,32 @@ struct AppRepositoryConfiguration: Sendable {
     private nonisolated static func debugHostValue(_ configuration: SupabaseConfiguration?) -> String {
         configuration?.url.host ?? "<none>"
     }
+
+    nonisolated static func logBackendSchemaMismatchWarning(
+        supabaseSchema: String,
+        processInfo: ProcessInfo,
+        bundle: Bundle
+    ) {
+        let processValue = processInfo.environment["KBO_BACKEND_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleValue = (bundle.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawBackendURL = [processValue, bundleValue]
+            .compactMap { value -> String? in
+                guard let value, value.isEmpty == false else { return nil }
+                return value
+            }
+            .first
+        let backendHost = rawBackendURL.flatMap { URL(string: $0)?.host } ?? "<none>"
+        let backendEnvironment = backendHost.contains("onrender.com") ? "production" :
+            (backendHost == "localhost" || backendHost == "127.0.0.1" ? "local" : "unknown")
+        print("[BackendConfig] backendEnvironment=\(backendEnvironment) backendHost=\(backendHost) supabaseSchema=\(supabaseSchema)")
+        if supabaseSchema == SupabaseConfiguration.developmentSchema,
+           backendEnvironment == "production" {
+            AppLog.warning(.supabase, "[BackendConfig] Debug Supabase schema is development but backend API is production.")
+            print("[BackendConfig] warning=schemaBackendMismatch supabaseSchema=\(supabaseSchema) backendEnvironment=\(backendEnvironment) backendHost=\(backendHost)")
+        }
+    }
 #endif
 }
 
@@ -235,6 +262,11 @@ enum KBORepositoryFactory {
         #if DEBUG
         print("[SupabaseConfig] supabase-swift linked=true")
         print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>") schema=\(supabaseConfiguration.schema)")
+        AppRepositoryConfiguration.logBackendSchemaMismatchWarning(
+            supabaseSchema: supabaseConfiguration.schema,
+            processInfo: .processInfo,
+            bundle: .main
+        )
         #endif
         let repository = SupabaseBackedKBORepository(
             base: baseRepository,

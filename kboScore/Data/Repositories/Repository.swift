@@ -153,6 +153,8 @@ struct GameDetailSnapshotFetchResult: Sendable {
     let rawSupabaseGameID: UUID?
     let providerGameID: String?
     let publicGameID: String?
+    var snapshotCreatedAt: Date? = nil
+    var snapshotUpdatedAt: Date? = nil
 }
 
 protocol KBOGameDetailSnapshotResultDataSource: KBOGameDetailSnapshotDataSource {
@@ -161,6 +163,13 @@ protocol KBOGameDetailSnapshotResultDataSource: KBOGameDetailSnapshotDataSource 
         for game: GameDetail,
         identity: String,
         cachedTeams: [Team]
+    ) async throws -> GameDetailSnapshotFetchResult?
+}
+
+protocol KBOGameDetailLatestSnapshotDataSource: Sendable {
+    nonisolated func fetchLatestGameSnapshotResult(
+        gameID: UUID,
+        fallbackGame: GameDetail
     ) async throws -> GameDetailSnapshotFetchResult?
 }
 
@@ -179,6 +188,8 @@ protocol KBOGameDetailDatabaseRecordDataSource: Sendable {
 
 // GameDetailDatabaseReviewFetchResult 구조체는 GameDetailDatabaseReviewFetchResult 타입의 역할과 값을 정의합니다.
 struct GameDetailDatabaseReviewFetchResult: Sendable {
+    nonisolated static let liveRecordFreshnessThreshold: TimeInterval = 30
+
     let review: GameCenterReview?
     let inputLocalGameID: UUID
     let rawSupabaseGameID: UUID?
@@ -188,6 +199,7 @@ struct GameDetailDatabaseReviewFetchResult: Sendable {
     let publicBatterRawRowCount: Int
     let publicPitcherRawRowCount: Int
     let eventRawRowCount: Int
+    var latestRecordUpdatedAt: Date? = nil
 
     var mappedBatterCount: Int {
         (review?.awayBatting.lines.count ?? 0) + (review?.homeBatting.lines.count ?? 0)
@@ -195,6 +207,14 @@ struct GameDetailDatabaseReviewFetchResult: Sendable {
 
     var mappedPitcherCount: Int {
         (review?.awayPitching.lines.count ?? 0) + (review?.homePitching.lines.count ?? 0)
+    }
+
+    func hasFreshLiveRecords(now: Date = Date()) -> Bool {
+        guard mappedBatterCount > 0 || mappedPitcherCount > 0,
+              let latestRecordUpdatedAt else {
+            return false
+        }
+        return now.timeIntervalSince(latestRecordUpdatedAt) <= Self.liveRecordFreshnessThreshold
     }
 }
 

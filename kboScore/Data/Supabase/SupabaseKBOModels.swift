@@ -186,8 +186,12 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
     let thirdBaseRunnerName: String?
     let currentPitcherName: String?
     let currentBatterName: String?
+    let homeScore: Int?
+    let awayScore: Int?
+    let sourceUpdatedAt: Date?
     let fetchedAt: Date?
     let createdAt: Date?
+    let updatedAt: Date?
 #if DEBUG
     let debugAvailableFieldNames: Set<String>
 #endif
@@ -223,8 +227,12 @@ nonisolated struct SupabaseLatestGameSnapshotRow: Decodable, Sendable {
             in: container,
             keys: ["current_batter_name", "batter_name", "current_hitter_name", "hitter_name", "batter", "hitter", "currentBatterName", "batterName"]
         )
+        homeScore = try container.decodeIfPresent(Int.self, forKey: DynamicCodingKey("home_score"))
+        awayScore = try container.decodeIfPresent(Int.self, forKey: DynamicCodingKey("away_score"))
+        sourceUpdatedAt = Self.firstDate(in: container, keys: ["source_updated_at", "sourceUpdatedAt"])
         fetchedAt = Self.firstDate(in: container, keys: ["fetched_at", "fetchedAt", "source_updated_at", "sourceUpdatedAt"])
         createdAt = Self.firstDate(in: container, keys: ["snapshot_created_at", "snapshotCreatedAt", "created_at", "createdAt", "updated_at", "updatedAt"])
+        updatedAt = Self.firstDate(in: container, keys: ["updated_at", "updatedAt", "snapshot_updated_at", "snapshotUpdatedAt"])
 #if DEBUG
         debugAvailableFieldNames = Set(container.allKeys.map(\.stringValue))
 #endif
@@ -284,6 +292,8 @@ struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
     let groundedIntoDoublePlay: Int?
     let errors: Int?
     let battingAverage: String?
+    var sourceUpdatedAt: String? = nil
+    var updatedAt: String? = nil
 
 // CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
@@ -305,6 +315,8 @@ struct SupabaseGameBatterRecordRow: Decodable, Sendable, Equatable {
         case groundedIntoDoublePlay = "grounded_into_double_play"
         case errors
         case battingAverage = "batting_average"
+        case sourceUpdatedAt = "source_updated_at"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -332,6 +344,8 @@ struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
     let runs: Int?
     let earnedRuns: Int?
     let era: String?
+    var sourceUpdatedAt: String? = nil
+    var updatedAt: String? = nil
 
 // CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
@@ -357,6 +371,8 @@ struct SupabaseGamePitcherRecordRow: Decodable, Sendable, Equatable {
         case runs
         case earnedRuns = "earned_runs"
         case era
+        case sourceUpdatedAt = "source_updated_at"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -533,7 +549,7 @@ nonisolated enum SupabaseKBOMapper {
             homeBatting: GameCenterBattingSection(lines: homeBatters.map(mapBatterRecord), totals: nil),
             awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(mapPitcherRecord)),
             homePitching: GameCenterPitchingSection(lines: homePitchers.map(mapPitcherRecord)),
-            recordSource: .dbLiveTextRecords
+            recordSource: .dbLiveRecordsFresh
         )
     }
 

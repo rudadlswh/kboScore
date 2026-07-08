@@ -76,11 +76,14 @@ struct GameCenterTeamLineTotals: Sendable {
 // GameCenterRecordSource 열거형는 GameCenterRecordSource 타입의 역할과 값을 정의합니다.
 enum GameCenterRecordSource: String, Sendable {
     case unknown
-    case dbLiveTextRecords
+    case dbLiveRecordsFresh
     case fullBoxscore
     case scoreboardHTMLBoxscore
     case keyplayerPartialLimited
     case lineupLimited
+    case staleDbRecordsIgnored
+    case limitedOfficialRecordsIgnored
+    case noLiveRecordsAvailable
 
     var isLimited: Bool {
         self == .keyplayerPartialLimited || self == .lineupLimited
@@ -88,6 +91,10 @@ enum GameCenterRecordSource: String, Sendable {
 
     var isOfficialBoxscore: Bool {
         self == .fullBoxscore || self == .scoreboardHTMLBoxscore
+    }
+
+    var isLiveRecordTabSource: Bool {
+        self == .dbLiveRecordsFresh || self == .fullBoxscore
     }
 }
 
@@ -101,7 +108,7 @@ struct GameCenterReview: Sendable {
     let recordSource: GameCenterRecordSource
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
-    init(
+    nonisolated init(
         summaryItems: [GameCenterSummaryItem],
         awayBatting: GameCenterBattingSection,
         homeBatting: GameCenterBattingSection,
@@ -123,6 +130,17 @@ struct GameCenterReview: Sendable {
             awayPitching.lines.isEmpty == false ||
             homePitching.lines.isEmpty == false ||
             summaryItems.isEmpty == false
+    }
+
+    nonisolated func withRecordSource(_ source: GameCenterRecordSource) -> GameCenterReview {
+        GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: awayBatting,
+            homeBatting: homeBatting,
+            awayPitching: awayPitching,
+            homePitching: homePitching,
+            recordSource: source
+        )
     }
 }
 

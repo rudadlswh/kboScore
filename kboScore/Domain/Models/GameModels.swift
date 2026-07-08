@@ -163,7 +163,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
             isMyTeamGame: isMyTeamGame,
             awayStartingPitcherName: awayStartingPitcherName,
             homeStartingPitcherName: homeStartingPitcherName,
-            currentPitcherName: currentPitcherName ?? (status.isLiveLike ? (awayStartingPitcherName ?? homeStartingPitcherName) : nil),
+            currentPitcherName: currentPitcherName,
             currentBatterName: currentBatterName,
             bases: bases,
             baseRunners: baseRunners,
