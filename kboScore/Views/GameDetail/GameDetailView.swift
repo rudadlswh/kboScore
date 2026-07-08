@@ -207,7 +207,7 @@ struct GameDetailView: View {
             rawSupabaseGameID: viewModel.rawSupabaseGameID,
             rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
             rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-            forceRefresh: false
+            forceRefresh: updatedGame.shouldPollGameDetail(now: Date())
         )
     }
 
@@ -463,6 +463,9 @@ struct LiveSituationState: Equatable, Sendable {
         currentPitcherName: String?
     ) -> LiveSituationState {
         let bases = game.bases ?? .empty
+        let firstRunnerName = bases.first ? game.baseRunners?.first?.nilIfBlank : nil
+        let secondRunnerName = bases.second ? game.baseRunners?.second?.nilIfBlank : nil
+        let thirdRunnerName = bases.third ? game.baseRunners?.third?.nilIfBlank : nil
         return LiveSituationState(
             balls: game.balls,
             strikes: game.strikes,
@@ -470,9 +473,9 @@ struct LiveSituationState: Equatable, Sendable {
             runnerOnFirst: bases.first,
             runnerOnSecond: bases.second,
             runnerOnThird: bases.third,
-            firstRunnerName: bases.first ? game.baseRunners?.first?.nilIfBlank : nil,
-            secondRunnerName: bases.second ? game.baseRunners?.second?.nilIfBlank : nil,
-            thirdRunnerName: bases.third ? game.baseRunners?.third?.nilIfBlank : nil,
+            firstRunnerName: firstRunnerName,
+            secondRunnerName: secondRunnerName,
+            thirdRunnerName: thirdRunnerName,
             currentBatterName: currentBatterName?.nilIfBlank,
             currentPitcherName: currentPitcherName?.nilIfBlank
         )
@@ -570,21 +573,24 @@ struct GameDetailPresentation {
         status = resolvedStatus
         stadium = summary?.stadium?.nilIfBlank ?? game.venue
         startTimeText = summary?.startTime?.nilIfBlank ?? game.scheduledStart.formatted(date: .omitted, time: .shortened)
-        if resolvedStatus.isLiveLike || resolvedStatus == .final {
+        if resolvedStatus.isLiveLike {
+            inningText = KBOInningFormatter.korean(game.inningText?.nilIfBlank)
+        } else if resolvedStatus == .final {
             inningText = KBOInningFormatter.korean(summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank)
         } else {
             inningText = nil
         }
-        awayScore = summary?.awayScore ?? game.awayScore
-        homeScore = summary?.homeScore ?? game.homeScore
+        awayScore = resolvedStatus.isLiveLike ? game.awayScore : (summary?.awayScore ?? game.awayScore)
+        homeScore = resolvedStatus.isLiveLike ? game.homeScore : (summary?.homeScore ?? game.homeScore)
         let officialBaseRunners = summary?.baseRunners.map {
             GameBaseRunners(first: $0.first, second: $0.second, third: $0.third)
         }
         let resolvedCurrentBatterName = game.currentBatterName?.nilIfBlank
-        let resolvedCurrentPitcherName = game.currentPitcherName?.nilIfBlank ??
-            (resolvedStatus.isLiveLike ? (game.awayStartingPitcherName?.nilIfBlank ?? game.homeStartingPitcherName?.nilIfBlank) : nil)
+        let resolvedCurrentPitcherName = resolvedStatus.isLiveLike
+            ? game.currentPitcherName?.nilIfBlank
+            : game.currentPitcherName?.nilIfBlank
         let liveSnapshotAuthoritative = resolvedStatus.isLiveLike
-        let resolvedLiveSituation = liveSnapshotAuthoritative
+        let rawLiveSituation = liveSnapshotAuthoritative
             ? LiveSituationState.fromLatestSnapshot(
                 game: game,
                 currentBatterName: resolvedCurrentBatterName,
@@ -596,24 +602,30 @@ struct GameDetailPresentation {
                 currentBatterName: resolvedCurrentBatterName,
                 currentPitcherName: resolvedCurrentPitcherName
             )
+        let officialOverride = liveSnapshotAuthoritative
+            ? Self.liveSituationApplyingOfficialOverrides(
+                rawLiveSituation,
+                snapshot: game.baseRunners,
+                official: officialBaseRunners
+            )
+            : nil
+        let resolvedLiveSituation = officialOverride?.state ?? rawLiveSituation
         liveSituation = resolvedLiveSituation
         balls = resolvedLiveSituation.balls
         strikes = resolvedLiveSituation.strikes
         outs = resolvedLiveSituation.outs
         bases = resolvedLiveSituation.bases
         baseRunners = resolvedLiveSituation.optionalRunnerNames
+        let resolvedBaseRunnerDisplay: BaseRunnerDisplayResolution
         if liveSnapshotAuthoritative {
             Self.logLatestSnapshotRawLiveSituation(game: game)
             Self.logLiveSituationAtomicReplaced(resolvedLiveSituation)
-            if officialBaseRunners != nil || baseRunnerDisplay.source != "empty" {
-                Self.logOfficialRunnerNamesSkipped()
-            }
-            self.baseRunnerDisplay = BaseRunnerDisplayResolution(
+            resolvedBaseRunnerDisplay = officialOverride?.display ?? BaseRunnerDisplayResolution(
                 runners: resolvedLiveSituation.runnerNames,
                 source: "latestSnapshotOnly"
             )
         } else {
-            self.baseRunnerDisplay = Self.resolvedBaseRunnerDisplay(
+            resolvedBaseRunnerDisplay = Self.resolvedBaseRunnerDisplay(
                 snapshot: game.baseRunners,
                 official: officialBaseRunners,
                 cached: baseRunnerDisplay,
@@ -624,6 +636,7 @@ struct GameDetailPresentation {
                 bases: resolvedLiveSituation.bases
             )
         }
+        self.baseRunnerDisplay = resolvedBaseRunnerDisplay
         Self.logCountBaseRunnerApplication(
             game: game,
             summary: summary,
@@ -631,7 +644,8 @@ struct GameDetailPresentation {
             strikes: strikes,
             outs: outs,
             bases: bases,
-            baseRunners: baseRunners
+            baseRunners: baseRunners,
+            baseRunnerSource: resolvedBaseRunnerDisplay.source
         )
         currentBatterName = resolvedLiveSituation.currentBatterName
         currentPitcherName = resolvedLiveSituation.currentPitcherName
@@ -650,6 +664,7 @@ struct GameDetailPresentation {
         probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters ?? gameStarterMetadata
         lineScore = payload?.lineScore ?? cachedLineScore
         review = Self.preferredRecordReview(
+            status: resolvedStatus,
             payloadReview: payload?.review,
             boxscoreReview: boxscore?.gameCenterReview,
             databaseRecordReview: databaseRecordReview,
@@ -659,11 +674,31 @@ struct GameDetailPresentation {
     }
 
     private static func preferredRecordReview(
+        status: GameStatus,
         payloadReview: GameCenterReview?,
         boxscoreReview: GameCenterReview?,
         databaseRecordReview: GameCenterReview?,
         officialFallbackReview: GameCenterReview?
     ) -> GameCenterReview? {
+        if status == .upcoming {
+            return nil
+        }
+        if status.isLiveLike {
+            if let databaseRecordReview,
+               databaseRecordReview.recordSource == .dbLiveRecordsFresh {
+                return databaseRecordReview
+            }
+            return [
+                boxscoreReview,
+                officialFallbackReview,
+                payloadReview
+            ]
+                .compactMap { $0 }
+                .first { $0.recordSource == .fullBoxscore }
+        }
+        if status == .final, let databaseRecordReview {
+            return databaseRecordReview.enrichingBatterPositions(from: payloadReview ?? officialFallbackReview)
+        }
         let positionSource = payloadReview ?? officialFallbackReview
         let officialBoxscoreReview = [
             boxscoreReview,
@@ -686,7 +721,8 @@ struct GameDetailPresentation {
         strikes: Int?,
         outs: Int?,
         bases: RunnerState?,
-        baseRunners: GameBaseRunners?
+        baseRunners: GameBaseRunners?,
+        baseRunnerSource: String
     ) {
         #if DEBUG
         if balls != nil || strikes != nil || outs != nil {
@@ -700,7 +736,7 @@ struct GameDetailPresentation {
             print("[GameDetailPresentation] count/base update skipped reason=missingBases")
         }
         if let baseRunners {
-            print("[GameDetailPresentation] GameDetailPresentation runners applied source=\(game.baseRunners == nil ? "official" : "latestSnapshot") first=\(baseRunners.first ?? "<nil>") second=\(baseRunners.second ?? "<nil>") third=\(baseRunners.third ?? "<nil>")")
+            print("[GameDetailPresentation] GameDetailPresentation runners applied source=\(baseRunnerSource) first=\(baseRunners.first ?? "<nil>") second=\(baseRunners.second ?? "<nil>") third=\(baseRunners.third ?? "<nil>")")
         } else if bases?.first == true || bases?.second == true || bases?.third == true {
             print("[GameDetailPresentation] runner names skipped reason=missingRunnerNames bases first=\(bases?.first == true) second=\(bases?.second == true) third=\(bases?.third == true)")
         }
@@ -748,10 +784,69 @@ struct GameDetailPresentation {
         #endif
     }
 
-    private static func logOfficialRunnerNamesSkipped() {
-        #if DEBUG
-        print("[BaseRunners] official runner names skipped reason=liveSnapshotAuthoritative")
-        #endif
+    private static func liveSituationApplyingOfficialOverrides(
+        _ state: LiveSituationState,
+        snapshot: GameBaseRunners?,
+        official: GameBaseRunners?
+    ) -> (state: LiveSituationState, display: BaseRunnerDisplayResolution)? {
+        guard let official else { return nil }
+        let first = resolvedOfficialRunnerName(occupied: state.runnerOnFirst, snapshot: snapshot?.first, official: official.first)
+        let second = resolvedOfficialRunnerName(occupied: state.runnerOnSecond, snapshot: snapshot?.second, official: official.second)
+        let third = resolvedOfficialRunnerName(occupied: state.runnerOnThird, snapshot: snapshot?.third, official: official.third)
+        guard first.usedOfficial || second.usedOfficial || third.usedOfficial else {
+            return nil
+        }
+        if first.conflict || second.conflict || third.conflict {
+            #if DEBUG
+            print(
+                "[BaseRunners] official runner names override snapshot reason=conflict " +
+                    "firstSnapshot=\(displayName(snapshot?.first)) firstOfficial=\(displayName(official.first)) " +
+                    "secondSnapshot=\(displayName(snapshot?.second)) secondOfficial=\(displayName(official.second)) " +
+                    "thirdSnapshot=\(displayName(snapshot?.third)) thirdOfficial=\(displayName(official.third))"
+            )
+            #endif
+        }
+        let runners = GameBaseRunners(first: first.name, second: second.name, third: third.name)
+        return (
+            LiveSituationState(
+                balls: state.balls,
+                strikes: state.strikes,
+                outs: state.outs,
+                runnerOnFirst: state.runnerOnFirst,
+                runnerOnSecond: state.runnerOnSecond,
+                runnerOnThird: state.runnerOnThird,
+                firstRunnerName: first.name,
+                secondRunnerName: second.name,
+                thirdRunnerName: third.name,
+                currentBatterName: state.currentBatterName,
+                currentPitcherName: state.currentPitcherName
+            ),
+            BaseRunnerDisplayResolution(
+                runners: runners,
+                source: first.conflict || second.conflict || third.conflict ? "officialOverride" : "latestSnapshotWithOfficialNames"
+            )
+        )
+    }
+
+    private static func resolvedOfficialRunnerName(
+        occupied: Bool,
+        snapshot: String?,
+        official: String?
+    ) -> (name: String?, usedOfficial: Bool, conflict: Bool) {
+        guard occupied else { return (nil, false, false) }
+        let snapshotName = snapshot?.nilIfBlank
+        let officialName = official?.nilIfBlank
+        if let snapshotName {
+            return (snapshotName, false, false)
+        }
+        if let officialName {
+            return (officialName, true, false)
+        }
+        return (nil, false, false)
+    }
+
+    private static func displayName(_ value: String?) -> String {
+        value?.nilIfBlank ?? "<nil>"
     }
 
     private static func resolvedBaseRunnerDisplay(

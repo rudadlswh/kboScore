@@ -78,6 +78,7 @@ final class GameDetailScreenModel {
     private var databaseRecordLoadTask: Task<Void, Never>?
     private var activeDatabaseRecordGameKey: String?
     private var databaseRecordMergeInFlightGameIdentity: String?
+    private var lastIgnoredLiveRecordSource: GameCenterRecordSource?
 
     var detail: GameCenterDetailPayload?
     var cachedLineScore: GameCenterLineScore?
@@ -124,8 +125,14 @@ final class GameDetailScreenModel {
         guard forceRefresh || lastLoadedGameKey != gameKey else { return }
         let previousGame = currentGame
         let previousDatabaseRecordReview = databaseRecordReview
+        let previousOfficialFallbackReview = officialFallbackReview
         let shouldPreserveExistingDatabaseReview =
             previousDatabaseRecordReview?.hasDisplayableRecords == true &&
+            previousGame?.stableDetailIdentity == game.stableDetailIdentity &&
+            (game.status == .final || (game.status.isLiveLike && previousDatabaseRecordReview?.recordSource == .dbLiveRecordsFresh))
+        let shouldPreserveExistingOfficialReview =
+            game.status.isLiveLike &&
+            previousOfficialFallbackReview?.recordSource == .fullBoxscore &&
             previousGame?.stableDetailIdentity == game.stableDetailIdentity
         currentGame = game
 
@@ -137,7 +144,10 @@ final class GameDetailScreenModel {
         errorMessage = nil
         hasAttemptedLoad = true
 
-        officialFallbackReview = nil
+        if shouldPreserveExistingOfficialReview == false {
+            officialFallbackReview = nil
+        }
+        lastIgnoredLiveRecordSource = nil
         if shouldPreserveExistingDatabaseReview == false {
             databaseRecordReview = nil
         }
@@ -148,6 +158,9 @@ final class GameDetailScreenModel {
         lastLoadedGameKey = gameKey
         if shouldPreserveExistingDatabaseReview {
             databaseRecordReview = previousDatabaseRecordReview
+        }
+        if shouldPreserveExistingOfficialReview {
+            officialFallbackReview = previousOfficialFallbackReview
         }
 
         if game.status == .upcoming {
@@ -313,6 +326,16 @@ final class GameDetailScreenModel {
         }
         let stageStartedAt = Date()
         let review = await fetcher(game)
+        if game.status.isLiveLike,
+           let review,
+           review.hasDisplayableRecords,
+           review.recordSource != .dbLiveRecordsFresh {
+            lastIgnoredLiveRecordSource = .staleDbRecordsIgnored
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=staleDbRecordsIgnored mappedBatterCount=\(review.awayBatting.lines.count + review.homeBatting.lines.count) mappedPitcherCount=\(review.awayPitching.lines.count + review.homePitching.lines.count) durationMs=\(Self.durationMilliseconds(since: stageStartedAt))")
+            #endif
+            return nil
+        }
         #if DEBUG
         let batterCount = (review?.awayBatting.lines.count ?? 0) + (review?.homeBatting.lines.count ?? 0)
         let pitcherCount = (review?.awayPitching.lines.count ?? 0) + (review?.homePitching.lines.count ?? 0)
@@ -331,7 +354,7 @@ final class GameDetailScreenModel {
         fetchDatabaseRecordReviewResult: @Sendable (GameDetail) async -> GameDetailDatabaseReviewFetchResult?,
         fetchDatabaseRecordReviewResultByRawSupabaseID: @Sendable (UUID, String?, String?) async -> GameDetailDatabaseReviewFetchResult?
     ) async {
-        guard resolvedGame.status == .final || resolvedGame.status.isLiveLike else { return }
+        guard resolvedGame.status == .final else { return }
         currentGame = resolvedGame
         let previousRecordSource = selectedRecordSourceDebugValue
         databaseRecordMergeInFlightGameIdentity = resolvedGame.stableDetailIdentity
@@ -366,7 +389,20 @@ final class GameDetailScreenModel {
     }
 
     private var selectedRecordSourceDebugValue: String {
-        databaseRecordReview?.recordSource.rawValue ??
+        if currentGame?.status.isLiveLike == true {
+            if let databaseRecordReview,
+               databaseRecordReview.recordSource == .dbLiveRecordsFresh {
+                return GameCenterRecordSource.dbLiveRecordsFresh.rawValue
+            }
+            if boxscore?.gameCenterReview?.recordSource == .fullBoxscore {
+                return GameCenterRecordSource.fullBoxscore.rawValue
+            }
+            if let ignored = lastIgnoredLiveRecordSource {
+                return ignored.rawValue
+            }
+            return GameCenterRecordSource.noLiveRecordsAvailable.rawValue
+        }
+        return databaseRecordReview?.recordSource.rawValue ??
             detail?.review?.recordSource.rawValue ??
             officialFallbackReview?.recordSource.rawValue ??
             "none"
@@ -432,11 +468,12 @@ final class GameDetailScreenModel {
             return
         }
         activeBoxscoreGameID = publicGameID
+        let shouldBypassCache = game.status.isLiveLike || forceRefresh
         let boxscoreCacheKey = "\(publicGameID)::\(boxscoreClient.cacheIdentity)"
-        if forceRefresh == false, lastLoadedBoxscoreGameID == boxscoreCacheKey {
+        if shouldBypassCache == false, lastLoadedBoxscoreGameID == boxscoreCacheKey {
             return
         }
-        if forceRefresh == false, let cached = Self.cachedBoxscores[boxscoreCacheKey] {
+        if shouldBypassCache == false, let cached = Self.cachedBoxscores[boxscoreCacheKey] {
             boxscore = cached
             lastLoadedBoxscoreGameID = boxscoreCacheKey
             if cached.hasRecords {
@@ -446,7 +483,7 @@ final class GameDetailScreenModel {
             }
             return
         }
-        if forceRefresh == false,
+        if shouldBypassCache == false,
            let failedAt = Self.recentFailedBoxscoreFetches[boxscoreCacheKey],
            Date().timeIntervalSince(failedAt) < Self.failedBoxscoreCooldown {
             boxscoreErrorMessage = "박스스코어 기록은 현재 데이터로 표시하고 있습니다."
@@ -456,7 +493,7 @@ final class GameDetailScreenModel {
 
         boxscoreLoadTask?.cancel()
         boxscoreLoadTask = Task { [weak self] in
-            await self?.loadBoxscoreIfNeeded(gameID: publicGameID, cacheKey: boxscoreCacheKey, forceRefresh: forceRefresh)
+            await self?.loadBoxscoreIfNeeded(gameID: publicGameID, cacheKey: boxscoreCacheKey, forceRefresh: shouldBypassCache)
         }
     }
 
@@ -488,7 +525,9 @@ final class GameDetailScreenModel {
         if let fetchedBoxscore {
             Self.cachedBoxscores[cacheKey] = fetchedBoxscore
             Self.recentFailedBoxscoreFetches[cacheKey] = nil
-            boxscore = fetchedBoxscore
+            if fetchedBoxscore.hasRecords || detailGame(publicGameID: publicGameID)?.status.isLiveLike != true {
+                boxscore = fetchedBoxscore
+            }
             if fetchedBoxscore.hasRecords {
                 cancelOfficialFallbackLoad()
             } else if let currentGame = detailGame(publicGameID: publicGameID) {
@@ -532,7 +571,11 @@ final class GameDetailScreenModel {
         if forceRefresh == false,
            let cached = Self.cachedOfficialFallbackReviews[cacheKey],
            Date().timeIntervalSince(cached.date) < Self.officialFallbackCacheTTL {
-            officialFallbackReview = cached.review
+            if game.status.isLiveLike, cached.review.recordSource != .fullBoxscore {
+                lastIgnoredLiveRecordSource = .limitedOfficialRecordsIgnored
+            } else {
+                officialFallbackReview = cached.review
+            }
             lastLoadedOfficialFallbackGameKey = cacheKey
             return
         }
@@ -578,7 +621,12 @@ final class GameDetailScreenModel {
         if let fetchedReview, fetchedReview.hasDisplayableRecords {
             Self.cachedOfficialFallbackReviews[cacheKey] = (Date(), fetchedReview)
             Self.recentFailedOfficialFallbacks[cacheKey] = nil
-            if databaseRecordReview?.hasDisplayableRecords != true || fetchedReview.recordSource.isOfficialBoxscore {
+            if game.status.isLiveLike, fetchedReview.recordSource != .fullBoxscore {
+                lastIgnoredLiveRecordSource = .limitedOfficialRecordsIgnored
+                #if DEBUG
+                print("[GameDetailLive] official record fallback ignored selectedRecordSource=limitedOfficialRecordsIgnored source=\(fetchedReview.recordSource.rawValue) gameKey=\(cacheKey)")
+                #endif
+            } else if databaseRecordReview?.hasDisplayableRecords != true || fetchedReview.recordSource.isOfficialBoxscore {
                 officialFallbackReview = fetchedReview
             }
             #if DEBUG
@@ -778,6 +826,7 @@ final class GameDetailViewModel: ObservableObject {
         }
         guard let currentGame = game else { return nil }
         let refreshIdentity = requestedIdentity
+        let shouldForceLatestSnapshot = manual || currentGame.status.isLiveLike
         if manual == false, currentGame.status == .upcoming {
             hasAttemptedInitialResolution = true
             #if DEBUG
@@ -785,7 +834,7 @@ final class GameDetailViewModel: ObservableObject {
             #endif
         }
 
-        if manual == false, bypassAutomaticThrottle == false {
+        if shouldForceLatestSnapshot == false, bypassAutomaticThrottle == false {
             if let lastAutomaticRefreshAt,
                Date().timeIntervalSince(lastAutomaticRefreshAt) < Self.automaticRefreshInterval {
                 return game
@@ -814,7 +863,7 @@ final class GameDetailViewModel: ObservableObject {
             return game
         }
 
-        if manual == false {
+        if shouldForceLatestSnapshot == false {
             lastAutomaticRefreshAt = Date()
         }
 
@@ -825,13 +874,13 @@ final class GameDetailViewModel: ObservableObject {
             await appModel.refreshGameDetailResult(
                 for: refreshIdentity,
                 initialGame: currentGame,
-                forceRefresh: manual
+                forceRefresh: shouldForceLatestSnapshot
             )
         }
         Self.inFlightRefreshesByStableIdentity[refreshIdentity] = task
         let fetched = await task.value
         Self.inFlightRefreshesByStableIdentity[refreshIdentity] = nil
-        if manual == false {
+        if shouldForceLatestSnapshot == false {
             let cachedResult = fetched ?? GameDetailRefreshResult(
                 game: currentGame,
                 rawSupabaseGameID: rawSupabaseGameID,
@@ -869,9 +918,6 @@ final class GameDetailViewModel: ObservableObject {
 
     private static func liveSnapshotOnlyDisplayIfNeeded(_ game: GameDetail) -> BaseRunnerDisplayResolution? {
         guard game.status.isLiveLike else { return nil }
-        #if DEBUG
-        print("[BaseRunners] official runner names skipped reason=liveSnapshotAuthoritative")
-        #endif
         return BaseRunnerDisplayResolution(
             runners: GameBaseRunners(
                 first: game.bases?.first == true ? game.baseRunners?.first : nil,
