@@ -204,8 +204,15 @@ final class ScheduleViewModel: ObservableObject {
         appModel: AppModel
     ) async {
         let key = monthKey(for: month)
+        let hasCachedMonth = refreshCoordinator.hasCachedMonth(key)
 
-        setLoadingDisplayedMonth(forceRefresh || refreshCoordinator.hasCachedMonth(key) == false)
+        setLoadingDisplayedMonth(hasCachedMonth == false)
+        if forceRefresh, hasCachedMonth {
+            await rebuildPresentation(
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+        }
         defer {
             setLoadingDisplayedMonth(false)
         }

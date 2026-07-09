@@ -259,6 +259,10 @@ protocol KBOLocalGameCacheUpserting: Sendable {
     nonisolated func upsertLocalGames(_ games: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int)
 }
 
+protocol KBOLocalMonthlyScheduleCacheDataSource: Sendable {
+    nonisolated func fetchCachedMonthlySchedule(for month: KBOMonthScheduleKey) async -> [GameDetail]?
+}
+
 // KBOBootstrapData 구조체는 KBOBootstrapData 타입의 역할과 값을 정의합니다.
 nonisolated struct KBOBootstrapData: Sendable {
     let teams: [Team]

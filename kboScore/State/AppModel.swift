@@ -1584,6 +1584,27 @@ final class AppModel {
         return sorted
     }
 
+    func fetchCachedScheduleTabMonth(
+        for key: KBOMonthScheduleKey,
+        callSite: String,
+        reason: String
+    ) async -> [GameDetail]? {
+        ensureCatalogTeamsLoadedIfNeeded()
+        guard let cacheSource = repository as? any KBOLocalMonthlyScheduleCacheDataSource,
+              let cached = await cacheSource.fetchCachedMonthlySchedule(for: key),
+              cached.isEmpty == false else {
+            #if DEBUG
+            print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) repositoryHit=false diskHit=false displayCacheUsed=false")
+            #endif
+            return nil
+        }
+        let sorted = cached.sorted { $0.scheduledStart < $1.scheduledStart }
+        #if DEBUG
+        print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) repositoryHit=true displayCacheUsed=true count=\(sorted.count)")
+        #endif
+        return sorted
+    }
+
     // refreshTodayScheduleGamesForScheduleCache 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshTodayScheduleGamesForScheduleCache(
         selectedDate: Date,
@@ -1618,6 +1639,14 @@ final class AppModel {
         let sortedGames = mergeEquivalentGames(games)
             .filter { scheduleMonthKey(for: $0.scheduledStart) == monthKey }
             .sorted { $0.scheduledStart < $1.scheduledStart }
+        if sortedGames.isEmpty,
+           let existingSource = favoriteTeamWidgetMonthSources[monthKey],
+           existingSource.games.isEmpty == false {
+            #if DEBUG
+            print("[WidgetSnapshot] skipped reason=emptySchedulePreserved source=scheduleTabMonth month=\(monthKey.yearMonthText) existing=\(existingSource.games.count)")
+            #endif
+            return
+        }
         favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
             monthKey: monthKey,
             games: sortedGames,
@@ -4704,6 +4733,30 @@ final class AppModel {
             preferredMonthKey: monthKey,
             preferredMonthGames: preferredMonthGames
         )
+        let sourceMonthlyGames = favoriteTeamWidgetSourceMonthlyGames(
+            for: widgetMonthKey,
+            preferredMonthGames: preferredMonthGames
+        )
+        let incomingSourceMonthlyCount = sourceMonthlyGames.count
+        let incomingMyTeamCount = settings.favoriteTeamID.map { favoriteTeamID in
+            sourceMonthlyGames.filter { $0.involves(teamID: favoriteTeamID) }.count
+        } ?? 0
+        if shouldSkipPartialWidgetSnapshotStore(
+            snapshot: snapshot,
+            monthKey: widgetMonthKey,
+            incomingSource: resolvedIncomingSource,
+            incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+            incomingMyTeamCount: incomingMyTeamCount,
+            reason: reason
+        ) {
+            return
+        }
+        if shouldPreserveExistingWidgetSnapshot(over: snapshot, incomingSource: resolvedIncomingSource) {
+            #if DEBUG
+            print("[WidgetSnapshot] skipped reason=emptySchedulePreserved source=\(reason)")
+            #endif
+            return
+        }
         let semanticKey = FavoriteTeamWidgetSnapshotBuilder.semanticKey(
             favoriteTeamID: settings.favoriteTeamID,
             snapshot: snapshot
@@ -4718,9 +4771,16 @@ final class AppModel {
             reason: reason,
             monthKey: widgetMonthKey,
             snapshot: snapshot,
-            sourceMonthlyGames: preferredMonthGames
+            sourceMonthlyGames: sourceMonthlyGames
         )
-        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: settings.favoriteTeamID, snapshot: snapshot)
+        FavoriteTeamScheduleWidgetShared.saveState(
+            favoriteTeamID: settings.favoriteTeamID,
+            snapshot: snapshot,
+            sourceMonthlyCount: incomingSourceMonthlyCount,
+            myTeamCount: incomingMyTeamCount,
+            source: reason,
+            monthKey: widgetMonthKey.yearMonthText
+        )
         lastFavoriteTeamWidgetSemanticKey = semanticKey
         lastFavoriteTeamWidgetSnapshot = snapshot
         reloadFavoriteTeamWidgetTimelines()
@@ -4861,24 +4921,14 @@ final class AppModel {
         reason: String,
         monthKey: KBOMonthScheduleKey?,
         snapshot: FavoriteTeamScheduleWidgetSnapshot?,
-        sourceMonthlyGames: [GameDetail]? = nil
+        sourceMonthlyGames: [GameDetail] = []
     ) {
         #if DEBUG
         guard let favoriteTeamID = settings.favoriteTeamID else { return }
         let resolvedMonthKey = monthKey ?? snapshot.map {
             KBOMonthScheduleKey(date: $0.displayedMonth, calendar: widgetScheduleCalendar())
         }
-        let sourceGames: [GameDetail]
-        if let sourceMonthlyGames {
-            sourceGames = sourceMonthlyGames
-        } else if let resolvedMonthKey, let widgetMonthSource = favoriteTeamWidgetMonthSources[resolvedMonthKey] {
-            sourceGames = widgetMonthSource.games
-        } else if let resolvedMonthKey {
-            sourceGames = monthlyScheduleGames[resolvedMonthKey] ?? fallbackMonthSchedule(for: resolvedMonthKey)
-        } else {
-            sourceGames = []
-        }
-        let myTeamGames = sourceGames
+        let myTeamGames = sourceMonthlyGames
             .filter { $0.involves(teamID: favoriteTeamID) }
             .sorted { $0.scheduledStart < $1.scheduledStart }
         let firstDate = myTeamGames.first.map { scheduleDayKey(for: $0.scheduledStart) } ?? "nil"
@@ -4887,11 +4937,27 @@ final class AppModel {
             "[WidgetScheduleStore] save reason=\(reason) " +
             "month=\(resolvedMonthKey?.yearMonthText ?? "nil") " +
             "favoriteTeam=\(favoriteTeamID) " +
-            "sourceMonthlyCount=\(sourceGames.count) " +
+            "sourceMonthlyCount=\(sourceMonthlyGames.count) " +
             "myTeamCount=\(myTeamGames.count) " +
             "first=\(firstDate) last=\(lastDate)"
         )
         #endif
+    }
+
+    private func favoriteTeamWidgetSourceMonthlyGames(
+        for monthKey: KBOMonthScheduleKey?,
+        preferredMonthGames: [GameDetail]?
+    ) -> [GameDetail] {
+        if let preferredMonthGames {
+            return preferredMonthGames
+        }
+        if let monthKey, let widgetMonthSource = favoriteTeamWidgetMonthSources[monthKey] {
+            return widgetMonthSource.games
+        }
+        if let monthKey {
+            return monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+        }
+        return []
     }
 
     private func widgetSourceMonthlyGames(for monthKey: KBOMonthScheduleKey) -> [GameDetail] {
@@ -4931,6 +4997,178 @@ final class AppModel {
         WidgetCenter.shared.reloadTimelines(ofKind: FavoriteTeamScheduleWidgetShared.widgetKind)
         WidgetCenter.shared.reloadAllTimelines()
         #endif
+    }
+
+    private func shouldPreserveExistingWidgetSnapshot(
+        over snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource
+    ) -> Bool {
+        guard let snapshot else {
+            return false
+        }
+        let incomingCount = snapshotDisplayedMonthGameCount(snapshot)
+
+        if let lastFavoriteTeamWidgetSnapshot,
+           shouldPreserveWidgetSnapshot(
+            existing: lastFavoriteTeamWidgetSnapshot,
+            incoming: snapshot,
+            incomingCount: incomingCount,
+            incomingSource: incomingSource
+           ) {
+            return true
+        }
+
+        guard let persisted = FavoriteTeamScheduleWidgetShared.loadSnapshot(),
+              persisted.teamID == snapshot.teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: persisted.displayedMonth) ==
+                FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: snapshot.displayedMonth) else {
+            return false
+        }
+        return shouldPreserveWidgetSnapshot(
+            existing: persisted,
+            incoming: snapshot,
+            incomingCount: incomingCount,
+            incomingSource: incomingSource
+        )
+    }
+
+    private func shouldPreserveWidgetSnapshot(
+        existing: FavoriteTeamScheduleWidgetSnapshot,
+        incoming: FavoriteTeamScheduleWidgetSnapshot,
+        incomingCount: Int,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource
+    ) -> Bool {
+        guard existing.teamID == incoming.teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: existing.displayedMonth) ==
+                FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: incoming.displayedMonth) else {
+            return false
+        }
+
+        let existingCount = snapshotDisplayedMonthGameCount(existing)
+        guard existingCount > 0,
+              incomingCount < existingCount,
+              incomingSource != .scheduleTabCurrentMonth,
+              incomingSource != .appModelMonthly else {
+            return false
+        }
+        #if DEBUG
+        print("[WidgetSnapshot] skipped reason=partialSnapshotPreserved incomingSource=\(incomingSource.logName) incomingCount=\(incomingCount) existingCount=\(existingCount)")
+        #endif
+        return true
+    }
+
+    private func snapshotDisplayedMonthGameCount(_ snapshot: FavoriteTeamScheduleWidgetSnapshot) -> Int {
+        snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+    }
+
+    private func shouldSkipPartialWidgetSnapshotStore(
+        snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        monthKey: KBOMonthScheduleKey?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource,
+        incomingSourceMonthlyCount: Int,
+        incomingMyTeamCount: Int,
+        reason: String
+    ) -> Bool {
+        guard incomingSource != .scheduleTabCurrentMonth,
+              incomingSource != .appModelMonthly,
+              snapshot != nil,
+              let monthKey,
+              let favoriteTeamID = settings.favoriteTeamID,
+              let existing = existingWidgetSnapshotForPartialStoreCheck(
+                teamID: favoriteTeamID,
+                monthKey: monthKey
+              ) else {
+            return false
+        }
+
+        if incomingSource == .homeFavoriteRefresh,
+           incomingSourceMonthlyCount <= 1 {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        if let existingSourceMonthlyCount = existing.sourceMonthlyCount,
+           incomingSourceMonthlyCount < existingSourceMonthlyCount {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        if let existingMyTeamCount = existing.myTeamCount,
+           incomingMyTeamCount < existingMyTeamCount {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        return false
+    }
+
+    private func logPartialWidgetSnapshotStoreSkipped(
+        reason: String,
+        monthKey: KBOMonthScheduleKey,
+        favoriteTeamID: String,
+        incomingSourceMonthlyCount: Int,
+        existingSourceMonthlyCount: Int?
+    ) {
+        #if DEBUG
+        let existingSourceMonthlyCountText = existingSourceMonthlyCount.map(String.init) ?? "unknown"
+        print(
+            "[WidgetScheduleStore] skipped reason=partialSnapshotWouldOverwriteExisting " +
+            "source=\(reason) " +
+            "month=\(monthKey.yearMonthText) " +
+            "favoriteTeam=\(favoriteTeamID) " +
+            "incomingSourceMonthlyCount=\(incomingSourceMonthlyCount) " +
+            "existingSourceMonthlyCount=\(existingSourceMonthlyCountText) " +
+            "skipped=true"
+        )
+        #endif
+    }
+
+    private func existingWidgetSnapshotForPartialStoreCheck(
+        teamID: String,
+        monthKey: KBOMonthScheduleKey
+    ) -> (snapshot: FavoriteTeamScheduleWidgetSnapshot, sourceMonthlyCount: Int?, myTeamCount: Int?)? {
+        let persistedMetadata = FavoriteTeamScheduleWidgetShared.loadSnapshotMetadata()
+        if let lastFavoriteTeamWidgetSnapshot,
+           lastFavoriteTeamWidgetSnapshot.teamID == teamID,
+           FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: lastFavoriteTeamWidgetSnapshot.displayedMonth) == monthKey.yearMonthText {
+            let count = favoriteTeamWidgetMonthSources[monthKey]?.games.count
+                ?? FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount()
+                ?? persistedMetadata?.sourceMonthlyCount
+            let myTeamCount = persistedMetadata?.myTeamCount
+                ?? snapshotDisplayedMonthGameCount(lastFavoriteTeamWidgetSnapshot)
+            return (lastFavoriteTeamWidgetSnapshot, count, myTeamCount)
+        }
+
+        guard let persisted = FavoriteTeamScheduleWidgetShared.loadSnapshot(),
+              persisted.teamID == teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: persisted.displayedMonth) == monthKey.yearMonthText else {
+            return nil
+        }
+        let count = FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount()
+            ?? persistedMetadata?.sourceMonthlyCount
+        let myTeamCount = persistedMetadata?.myTeamCount
+            ?? snapshotDisplayedMonthGameCount(persisted)
+        return (persisted, count, myTeamCount)
     }
 
     // persistSettings 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.

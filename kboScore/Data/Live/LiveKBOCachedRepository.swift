@@ -12,7 +12,7 @@
 import Foundation
 
 // CachedKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
-struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
+struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOLocalMonthlyScheduleCacheDataSource, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     let base: Base
     let configuration: RepositoryCacheConfiguration
     let runtimeState: RepositoryRuntimeState?
@@ -124,6 +124,17 @@ struct CachedKBORepository<Base: KBORepository>: KBORepository, KBOScheduleTabMo
         if result.isCacheHit {
             await runtimeState?.recordCacheHit(refreshedAt: result.cachedAt, isStale: result.isStale)
         }
+        return result.value
+    }
+
+    nonisolated func fetchCachedMonthlySchedule(for month: KBOMonthScheduleKey) async -> [GameDetail]? {
+        guard let result = await cache.cachedMonthlyScheduleValue(for: month) else {
+            return nil
+        }
+        await runtimeState?.recordCacheHit(refreshedAt: result.cachedAt, isStale: true)
+#if DEBUG
+        print("[RepositorySource] monthlySchedule displayCacheUsed repositoryHit=true \(result.source)Hit=true month=\(month.yearMonthText) count=\(result.value.count)")
+#endif
         return result.value
     }
 

@@ -12,7 +12,7 @@
 import Foundation
 
 // AnyKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
-struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
+struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavoriteTeamScheduleDataSource, KBOStandingsGameDataSource, KBOTeamRankDataSource, KBOLocalTeamRankCacheDataSource, KBOLocalTeamRankCacheUpserting, KBOScheduleRemoteSyncDataSource, KBOLocalGameCacheUpserting, KBOLocalMonthlyScheduleCacheDataSource, KBOGameDetailSnapshotDataSource, KBOGameDetailSnapshotResultDataSource, KBOGameIdentityResolutionDataSource, KBOGameDetailDatabaseRecordDataSource, KBOGameDetailDatabaseRecordDiagnosticDataSource, Sendable {
     private let fetchBootstrapDataBlock: @Sendable () async throws -> KBOBootstrapData
     private let fetchGamesBlock: @Sendable () async throws -> [GameDetail]
     private let fetchNotificationsBlock: @Sendable () async throws -> [NotificationItem]
@@ -36,6 +36,7 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
     private let fetchRemoteGameCountBlock: (@Sendable () async throws -> Int)?
     private let fetchMissingScheduleGamesBlock: (@Sendable ([GameDetail]) async throws -> KBOScheduleMissingGamesResult)?
     private let upsertLocalGamesBlock: (@Sendable ([GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int))?
+    private let fetchCachedMonthlyScheduleBlock: (@Sendable (KBOMonthScheduleKey) async -> [GameDetail]?)?
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(_ base: any KBORepository) {
@@ -52,6 +53,13 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
             }
         } else {
             fetchScheduleTabMonthBlock = nil
+        }
+        if let localMonthlyCacheSource = base as? any KBOLocalMonthlyScheduleCacheDataSource {
+            fetchCachedMonthlyScheduleBlock = { month in
+                await localMonthlyCacheSource.fetchCachedMonthlySchedule(for: month)
+            }
+        } else {
+            fetchCachedMonthlyScheduleBlock = nil
         }
         fetchScheduleByDateBlock = { date, bypassingCache in
             try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
@@ -364,5 +372,10 @@ struct AnyKBORepository: KBORepository, KBOScheduleTabMonthDataSource, KBOFavori
             return (0, 0, games.count)
         }
         return await upsertLocalGamesBlock(games)
+    }
+
+    nonisolated func fetchCachedMonthlySchedule(for month: KBOMonthScheduleKey) async -> [GameDetail]? {
+        guard let fetchCachedMonthlyScheduleBlock else { return nil }
+        return await fetchCachedMonthlyScheduleBlock(month)
     }
 }

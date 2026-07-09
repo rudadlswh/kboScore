@@ -53,25 +53,36 @@ final class ScheduleRefreshCoordinator {
     ) async {
         let startedAt = Date()
         AppLog.info(.schedule, "[Schedule] refresh start month=\(key.yearMonthText) callSite=\(callSite) reason=\(reason) forceRefresh=\(forceRefresh)")
-        if forceRefresh == false, let cachedEntry = cachedMonths[key] {
-            logLocalMonth(
-                key,
+        if let cachedEntry = cachedMonths[key] {
+            await applyDisplayCacheEntry(
+                cachedEntry,
+                key: key,
+                appModel: appModel,
                 callSite: callSite,
                 reason: reason,
-                cacheHit: true,
+                source: "memory",
+                forceRefresh: forceRefresh,
                 durationMs: Self.durationMilliseconds(since: startedAt)
             )
-            appModel.mergeScheduleTabMonthGamesForAttendance(
-                cachedEntry.games,
-                monthKey: key,
-                reason: "scheduleTabMonthCacheHit"
+            guard forceRefresh else { return }
+        } else if forceRefresh,
+                  let cachedGames = await appModel.fetchCachedScheduleTabMonth(
+                    for: key,
+                    callSite: callSite,
+                    reason: reason
+                  ) {
+            let cachedEntry = await ScheduleMonthCacheEntry.build(key: key, games: cachedGames)
+            cachedMonths[key] = cachedEntry
+            await applyDisplayCacheEntry(
+                cachedEntry,
+                key: key,
+                appModel: appModel,
+                callSite: callSite,
+                reason: reason,
+                source: "repository",
+                forceRefresh: true,
+                durationMs: Self.durationMilliseconds(since: startedAt)
             )
-            await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
-                fromScheduleTabMonthGames: cachedEntry.games,
-                monthKey: key,
-                reason: "scheduleTabMonth"
-            )
-            return
         }
 
         let monthKey = key.yearMonthText
@@ -91,15 +102,15 @@ final class ScheduleRefreshCoordinator {
             )
             do {
                 let entry = try await task.value
-                cachedMonths[key] = entry
+                let resolvedEntry = entryPreservingExistingCacheIfNeeded(entry, for: key, callSite: callSite, reason: reason)
                 failedMonths.remove(key)
                 appModel.mergeScheduleTabMonthGamesForAttendance(
-                    entry.games,
+                    resolvedEntry.games,
                     monthKey: key,
                     reason: "scheduleTabMonthInFlight"
                 )
                 await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
-                    fromScheduleTabMonthGames: entry.games,
+                    fromScheduleTabMonthGames: resolvedEntry.games,
                     monthKey: key,
                     reason: "scheduleTabMonth"
                 )
@@ -124,22 +135,22 @@ final class ScheduleRefreshCoordinator {
 
         do {
             let entry = try await task.value
-            cachedMonths[key] = entry
+            let resolvedEntry = entryPreservingExistingCacheIfNeeded(entry, for: key, callSite: callSite, reason: reason)
             failedMonths.remove(key)
             appModel.mergeScheduleTabMonthGamesForAttendance(
-                entry.games,
+                resolvedEntry.games,
                 monthKey: key,
                 reason: "scheduleTabMonthLoad"
             )
             await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
-                fromScheduleTabMonthGames: entry.games,
+                fromScheduleTabMonthGames: resolvedEntry.games,
                 monthKey: key,
                 reason: "scheduleTabMonth"
             )
             #if DEBUG
-            print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(monthKey) source=repository gameCount=\(entry.games.count) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
+            print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(monthKey) source=repository gameCount=\(resolvedEntry.games.count) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
             #endif
-            AppLog.info(.schedule, "[Schedule] refresh completed month=\(monthKey) source=supabase games=\(entry.games.count) \(statusCountsText(entry.games)) durationMs=\(Self.durationMilliseconds(since: startedAt))")
+            AppLog.info(.schedule, "[Schedule] refresh completed month=\(monthKey) source=supabase games=\(resolvedEntry.games.count) \(statusCountsText(resolvedEntry.games)) durationMs=\(Self.durationMilliseconds(since: startedAt))")
         } catch {
             failedMonths.insert(key)
             #if DEBUG
@@ -147,6 +158,56 @@ final class ScheduleRefreshCoordinator {
             #endif
             AppLog.warning(.schedule, "[Schedule] refresh failed month=\(monthKey) source=supabase durationMs=\(Self.durationMilliseconds(since: startedAt)) error=\(error)")
         }
+    }
+
+    private func applyDisplayCacheEntry(
+        _ entry: ScheduleMonthCacheEntry,
+        key: KBOMonthScheduleKey,
+        appModel: AppModel,
+        callSite: String,
+        reason: String,
+        source: String,
+        forceRefresh: Bool,
+        durationMs: Int
+    ) async {
+        logDisplayCache(
+            key,
+            callSite: callSite,
+            reason: reason,
+            source: source,
+            forceRefresh: forceRefresh,
+            durationMs: durationMs
+        )
+        appModel.mergeScheduleTabMonthGamesForAttendance(
+            entry.games,
+            monthKey: key,
+            reason: "scheduleTabMonthCacheHit"
+        )
+        await appModel.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: entry.games,
+            monthKey: key,
+            reason: "scheduleTabMonth"
+        )
+    }
+
+    private func entryPreservingExistingCacheIfNeeded(
+        _ entry: ScheduleMonthCacheEntry,
+        for key: KBOMonthScheduleKey,
+        callSite: String,
+        reason: String
+    ) -> ScheduleMonthCacheEntry {
+        guard entry.games.isEmpty,
+              let existingEntry = cachedMonths[key],
+              existingEntry.games.isEmpty == false else {
+            cachedMonths[key] = entry
+            return entry
+        }
+
+#if DEBUG
+        print("[ScheduleCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) emptyRefreshPreserved existing=\(existingEntry.games.count)")
+#endif
+        AppLog.info(.schedule, "[Schedule] empty refresh preserved month=\(key.yearMonthText) games=\(existingEntry.games.count)")
+        return existingEntry
     }
 
     // refreshTodayLiveIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
@@ -179,6 +240,12 @@ final class ScheduleRefreshCoordinator {
             selectedDate: selectedDate,
             reason: "scheduleTodayLiveRefresh"
         )
+        guard refreshedGames.isEmpty == false else {
+            #if DEBUG
+            print("[ScheduleLiveOverlay] callSite=\(callSite) reason=todayLiveRefresh emptyResultIgnored=true date=\(selectedDayKey) month=\(displayedMonthKey.yearMonthText)")
+            #endif
+            return
+        }
         AppLog.info(.schedule, "[Schedule] refresh today completed date=\(selectedDayKey) source=supabase games=\(refreshedGames.count) \(statusCountsText(refreshedGames))")
         await syncStartersIntoMonthCache(
             refreshedGames,
@@ -357,6 +424,22 @@ final class ScheduleRefreshCoordinator {
         print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) hit=\(cacheHit) source=local durationMs=\(durationMs)")
         #endif
         AppLog.info(.schedule, "[Schedule] refresh completed month=\(key.yearMonthText) source=local cacheHit=\(cacheHit) games=\(cachedMonths[key]?.games.count ?? 0) durationMs=\(durationMs)")
+    }
+
+    private func logDisplayCache(
+        _ key: KBOMonthScheduleKey,
+        callSite: String,
+        reason: String,
+        source: String,
+        forceRefresh: Bool,
+        durationMs: Int
+    ) {
+        #if DEBUG
+        let memoryHit = source == "memory"
+        let repositoryHit = source == "repository"
+        print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) hit=true memoryHit=\(memoryHit) repositoryHit=\(repositoryHit) forceRefresh=\(forceRefresh) displayCacheUsed=true durationMs=\(durationMs)")
+        #endif
+        AppLog.info(.schedule, "[Schedule] display cache used month=\(key.yearMonthText) source=\(source) games=\(cachedMonths[key]?.games.count ?? 0) durationMs=\(durationMs)")
     }
 
     // logMonthCache 메서드는 이 타입의 주요 동작을 수행합니다.

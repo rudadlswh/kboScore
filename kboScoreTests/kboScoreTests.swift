@@ -15160,6 +15160,27 @@ struct kboScoreTests {
         #expect(cachedSchedule == expectedSchedule)
     }
 
+    @Test func cachedRepositoryPreservesMonthlyScheduleWhenRefreshReturnsEmpty() async throws {
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 5)
+        let fullMonthGames = try makeScheduleMonthGames()
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [fullMonthGames, []])
+        let repository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in
+                await fetchSequence.next()
+            }),
+            configuration: RepositoryCacheConfiguration(bootstrapTTL: 1, gamesTTL: 1, notificationsTTL: 1, monthlyScheduleTTL: 60),
+            runtimeState: nil
+        )
+
+        let seeded = try await repository.fetchMonthlySchedule(for: monthKey)
+        let refreshed = try await repository.fetchMonthlySchedule(for: monthKey, bypassingCache: true)
+        let cachedAfterRefresh = try await repository.fetchMonthlySchedule(for: monthKey)
+
+        #expect(seeded.count == fullMonthGames.count)
+        #expect(refreshed.count == fullMonthGames.count)
+        #expect(cachedAfterRefresh.count == fullMonthGames.count)
+    }
+
     // appModelKeepsExistingGamesWhenRefreshFails 메서드는 이 타입의 주요 동작을 수행합니다.
     @Test func appModelKeepsExistingGamesWhenRefreshFails() async throws {
         let repository = StubRepository(
@@ -15482,6 +15503,177 @@ struct kboScoreTests {
         #expect(afterTodaySnapshot.monthSummaryText == fullSnapshot.monthSummaryText)
     }
 
+    @Test func homeFavoritePartialSnapshotDoesNotOverwriteFullMonthWidgetSnapshot() async throws {
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+        defer { FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil) }
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let juneSchedule = try makeScheduleMonthGames(count: 110, year: 2026, month: 6)
+        let partialGame = try #require(juneSchedule.first { $0.involves(teamID: "lotte") })
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let fullMonthModel = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        fullMonthModel.settings.favoriteTeamID = "lotte"
+        await fullMonthModel.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let fullSnapshot = try #require(FavoriteTeamScheduleWidgetShared.loadSnapshot())
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == juneSchedule.count)
+
+        let partialModel = AppModel(
+            repository: FavoriteScheduleStubRepository(
+                base: StubRepository(fetchMonthlySchedule: { _ in juneSchedule }),
+                fetchFavoriteTeamSchedule: { _, _, _ in [partialGame] }
+            ),
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        partialModel.settings.favoriteTeamID = "lotte"
+        await partialModel.refreshHome()
+        let afterHomeSnapshot = try #require(FavoriteTeamScheduleWidgetShared.loadSnapshot())
+
+        #expect(fullSnapshot.monthSummaryText == afterHomeSnapshot.monthSummaryText)
+        #expect(afterHomeSnapshot.state == .ready)
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == juneSchedule.count)
+    }
+
+    @Test func homeFavoritePartialSnapshotDoesNotOverwriteExistingWidgetSnapshotWithoutSourceCount() async throws {
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+        defer { FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil) }
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let juneSchedule = try makeScheduleMonthGames(count: 110, year: 2026, month: 6)
+        let partialGame = try #require(juneSchedule.first { $0.involves(teamID: "lotte") })
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let fullMonthModel = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        fullMonthModel.settings.favoriteTeamID = "lotte"
+        await fullMonthModel.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let fullSnapshot = try #require(FavoriteTeamScheduleWidgetShared.loadSnapshot())
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: "lotte", snapshot: fullSnapshot)
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == nil)
+
+        let partialModel = AppModel(
+            repository: FavoriteScheduleStubRepository(
+                base: StubRepository(fetchMonthlySchedule: { _ in juneSchedule }),
+                fetchFavoriteTeamSchedule: { _, _, _ in [partialGame] }
+            ),
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        partialModel.settings.favoriteTeamID = "lotte"
+        await partialModel.refreshHome()
+        let afterHomeSnapshot = try #require(FavoriteTeamScheduleWidgetShared.loadSnapshot())
+
+        #expect(fullSnapshot.monthSummaryText == afterHomeSnapshot.monthSummaryText)
+        #expect(afterHomeSnapshot.state == .ready)
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == nil)
+    }
+
+    @Test func homeFavoritePartialSnapshotAllowedWhenNoExistingWidgetSnapshot() async throws {
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+        defer { FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil) }
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let juneSchedule = try makeScheduleMonthGames(count: 110, year: 2026, month: 6)
+        let partialGame = try #require(juneSchedule.first { $0.involves(teamID: "lotte") })
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            repository: FavoriteScheduleStubRepository(
+                base: StubRepository(fetchMonthlySchedule: { _ in [] }),
+                fetchFavoriteTeamSchedule: { _, _, _ in [partialGame] }
+            ),
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.refreshHome()
+        let snapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+        let snapshotCount = snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+
+        #expect(snapshotCount == 1)
+        #expect(snapshot.state == .ready)
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == 1)
+    }
+
+    @Test func scheduleTabCurrentMonthFullSnapshotStoresSourceMonthlyCount() async throws {
+        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
+        defer { FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil) }
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let juneSchedule = try makeScheduleMonthGames(count: 110, year: 2026, month: 6)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let snapshot = try #require(FavoriteTeamScheduleWidgetShared.loadSnapshot())
+
+        #expect(snapshot.state == .ready)
+        #expect(FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount() == juneSchedule.count)
+    }
+
+    @Test func emptyScheduleTabMonthDoesNotOverwriteFavoriteTeamWidgetSnapshot() async throws {
+        let referenceDate = isoDate("2026-06-21T09:00:00+09:00")
+        let currentMonthKey = KBOMonthScheduleKey(year: 2026, month: 6)
+        let juneSchedule = try makeScheduleMonthGames(count: 135, year: 2026, month: 6)
+        let bootstrap = MockKBOData.makeBootstrap(now: referenceDate)
+        let model = AppModel(
+            bootstrap: KBOBootstrapData(teams: bootstrap.teams, games: [], notifications: [], settings: bootstrap.settings),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+
+        model.settings.favoriteTeamID = "lotte"
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: juneSchedule,
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let fullSnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+
+        await model.updateFavoriteTeamScheduleWidgetSnapshot(
+            fromScheduleTabMonthGames: [],
+            monthKey: currentMonthKey,
+            reason: "scheduleTabMonth"
+        )
+        let afterEmptySnapshot = try #require(model.favoriteTeamScheduleWidgetSnapshotForTesting())
+
+        #expect(fullSnapshot.monthSummaryText != "등록 경기 없음")
+        #expect(afterEmptySnapshot.monthSummaryText == fullSnapshot.monthSummaryText)
+        #expect(afterEmptySnapshot.state == .ready)
+    }
+
     // scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleLoadFetchesMonthlyDataWithoutFavoriteTeamSelection() async throws {
         let counter = FetchCounter()
@@ -15613,6 +15805,157 @@ struct kboScoreTests {
 
         await gate.release()
         await refreshTask.value
+    }
+
+    @Test func scheduleForceRefreshKeepsExistingMonthPresentationWhileFetchIsInFlight() async throws {
+        let gate = ScheduleFetchGate()
+        let referenceDate = isoDate("2026-07-21T09:00:00+09:00")
+        let fullMonthGames = try makeScheduleMonthGames(count: 110, year: 2026, month: 7)
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [fullMonthGames, fullMonthGames])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            let count = await fetchSequence.count
+            if count > 0 {
+                await gate.wait()
+            }
+            return await fetchSequence.next()
+        })
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: MockKBOData.makeBootstrap().teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        let refreshTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
+        await gate.waitUntilStarted()
+
+        #expect(viewModel.monthGameCount == fullMonthGames.count)
+        #expect(viewModel.selectedGamesContentState == .loaded)
+
+        await gate.release()
+        await refreshTask.value
+    }
+
+    @Test func scheduleReentryUsesRepositoryMonthCacheBeforeForceRefreshCompletes() async throws {
+        let gate = ScheduleFetchGate()
+        let referenceDate = isoDate("2026-07-21T09:00:00+09:00")
+        let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
+        let fullMonthGames = try makeScheduleMonthGames(count: 110, year: 2026, month: 7)
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [fullMonthGames, fullMonthGames])
+        let cacheDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: cacheDirectory) }
+        let configuration = RepositoryCacheConfiguration(
+            bootstrapTTL: 1,
+            gamesTTL: 1,
+            notificationsTTL: 1,
+            monthlyScheduleTTL: 60,
+            diskCacheDirectory: cacheDirectory
+        )
+        let repository = CachedKBORepository(
+            base: StubRepository(fetchMonthlySchedule: { _ in
+                let count = await fetchSequence.count
+                if count > 0 {
+                    await gate.wait()
+                }
+                return await fetchSequence.next()
+            }),
+            configuration: configuration,
+            runtimeState: nil
+        )
+        _ = try await repository.fetchScheduleTabMonth(for: monthKey, bypassingCache: true)
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: MockKBOData.makeBootstrap().teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        let loadTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
+        await gate.waitUntilStarted()
+
+        #expect(viewModel.monthGameCount == fullMonthGames.count)
+        #expect(viewModel.selectedGamesContentState == .loaded)
+
+        await gate.release()
+        await loadTask.value
+    }
+
+    @Test func scheduleMonthRefreshEmptyResponsePreservesDisplayedMonthCache() async throws {
+        let referenceDate = isoDate("2026-05-26T09:00:00+09:00")
+        let fullMonthGames = try makeScheduleMonthGames()
+        let fetchSequence = ScheduleMonthFetchSequence(responses: [fullMonthGames, []])
+        let repository = StubRepository(fetchMonthlySchedule: { _ in
+            await fetchSequence.next()
+        })
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: MockKBOData.makeBootstrap().teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await viewModel.loadDisplayedMonth(appModel: model)
+
+        #expect(viewModel.monthGameCount == fullMonthGames.count)
+        #expect(viewModel.selectedDateGames.count == 5)
+        #expect(await fetchSequence.count == 2)
+    }
+
+    @Test func scheduleTodayLiveRecentEmptyResultDoesNotClearMonthPresentation() async throws {
+        let referenceDate = isoDate("2026-05-26T09:00:00+09:00")
+        let fullMonthGames = try makeScheduleMonthGames()
+        let repository = StubRepository(
+            fetchMonthlySchedule: { _ in fullMonthGames },
+            fetchScheduleBypassingCache: { _, _ in [] }
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(
+                teams: MockKBOData.makeBootstrap().teams,
+                games: [],
+                notifications: [],
+                settings: .default
+            ),
+            usePersistedSettings: false,
+            currentDateProvider: { referenceDate }
+        )
+        let viewModel = ScheduleViewModel()
+        viewModel.displayedMonth = referenceDate
+        viewModel.selectedDate = referenceDate
+
+        await viewModel.loadDisplayedMonth(appModel: model)
+        await viewModel.refreshLiveScoresIfNeeded(appModel: model)
+        await viewModel.refreshLiveScoresIfNeeded(appModel: model)
+
+        #expect(viewModel.monthGameCount == fullMonthGames.count)
+        #expect(viewModel.selectedDateGames.count == 5)
     }
 
     // failedScheduleInitialLoadDoesNotStayLoading 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -20690,6 +21033,65 @@ private struct FavoriteScheduleCountingRepository: KBORepository, KBOFavoriteTea
     ) async throws -> [GameDetail] {
         await recorder.record(favoriteTeamID: favoriteTeamId)
         return []
+    }
+}
+
+// FavoriteScheduleStubRepository 구조체는 테스트에서 응원팀 일정 조회 capability만 선택적으로 추가합니다.
+private struct FavoriteScheduleStubRepository: KBORepository, KBOFavoriteTeamScheduleDataSource {
+    let base: StubRepository
+    let fetchFavoriteTeamScheduleHandler: @Sendable (Date, Team.ID, Bool) async throws -> [GameDetail]
+
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
+    init(
+        base: StubRepository,
+        fetchFavoriteTeamSchedule: @escaping @Sendable (Date, Team.ID, Bool) async throws -> [GameDetail]
+    ) {
+        self.base = base
+        self.fetchFavoriteTeamScheduleHandler = fetchFavoriteTeamSchedule
+    }
+
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
+        try await base.fetchBootstrapData()
+    }
+
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchGames() async throws -> [GameDetail] {
+        try await base.fetchGames()
+    }
+
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchNotifications() async throws -> [NotificationItem] {
+        try await base.fetchNotifications()
+    }
+
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
+        try await base.fetchMonthlySchedule(for: month)
+    }
+
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchSchedule(for date: Date) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date)
+    }
+
+    // fetchSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchSchedule(for date: Date, bypassingCache: Bool) async throws -> [GameDetail] {
+        try await base.fetchSchedule(for: date, bypassingCache: bypassingCache)
+    }
+
+    // fetchStandings 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchStandings() async throws -> [TeamStandingsSnapshot] {
+        try await base.fetchStandings()
+    }
+
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    nonisolated func fetchFavoriteTeamSchedule(
+        date: Date,
+        favoriteTeamId: Team.ID,
+        bypassingCache: Bool
+    ) async throws -> [GameDetail] {
+        try await fetchFavoriteTeamScheduleHandler(date, favoriteTeamId, bypassingCache)
     }
 }
 

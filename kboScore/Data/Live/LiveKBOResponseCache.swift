@@ -147,20 +147,33 @@ actor RepositoryResponseCache {
 
         if let task = monthlyScheduleTasks[month] {
             let value = try await task.value
+            if value.isEmpty,
+               let entry = await cachedMonthlyScheduleEntry(for: month),
+               entry.value.isEmpty == false {
+                return (entry.value, entry.timestamp, true, true)
+            }
             let cachedAt = monthlyScheduleEntries[month]?.timestamp ?? .now
             return (value, cachedAt, false, false)
         }
 
+        let existingEntry = await cachedMonthlyScheduleEntry(for: month)
         let task = Task {
-            let value = try await fetch()
-            await self.storeMonthlySchedule(value, for: month, timestamp: .now)
-            return value
+            try await fetch()
         }
         monthlyScheduleTasks[month] = task
         defer { monthlyScheduleTasks[month] = nil }
 
         do {
             let value = try await task.value
+            if value.isEmpty,
+               let existingEntry,
+               existingEntry.value.isEmpty == false {
+#if DEBUG
+                print("[RepositoryCache] monthlySchedule emptyRefreshPreserved month=\(month.yearMonthText) existing=\(existingEntry.value.count)")
+#endif
+                return (existingEntry.value, existingEntry.timestamp, true, true)
+            }
+            await storeMonthlySchedule(value, for: month, timestamp: .now)
             return (value, monthlyScheduleEntries[month]?.timestamp ?? .now, false, false)
         } catch {
             if let entry = await cachedMonthlyScheduleEntry(for: month) {
@@ -177,20 +190,33 @@ actor RepositoryResponseCache {
     ) async throws -> (value: [GameDetail], cachedAt: Date, isCacheHit: Bool, isStale: Bool) {
         if let task = monthlyScheduleTasks[month] {
             let value = try await task.value
+            if value.isEmpty,
+               let entry = await cachedMonthlyScheduleEntry(for: month),
+               entry.value.isEmpty == false {
+                return (entry.value, entry.timestamp, true, true)
+            }
             let cachedAt = monthlyScheduleEntries[month]?.timestamp ?? .now
             return (value, cachedAt, false, false)
         }
 
+        let existingEntry = await cachedMonthlyScheduleEntry(for: month)
         let task = Task {
-            let value = try await fetch()
-            await self.storeMonthlySchedule(value, for: month, timestamp: .now)
-            return value
+            try await fetch()
         }
         monthlyScheduleTasks[month] = task
         defer { monthlyScheduleTasks[month] = nil }
 
         do {
             let value = try await task.value
+            if value.isEmpty,
+               let existingEntry,
+               existingEntry.value.isEmpty == false {
+#if DEBUG
+                print("[RepositoryCache] monthlySchedule emptyRefreshPreserved month=\(month.yearMonthText) existing=\(existingEntry.value.count)")
+#endif
+                return (existingEntry.value, existingEntry.timestamp, true, true)
+            }
+            await storeMonthlySchedule(value, for: month, timestamp: .now)
             return (value, .now, false, false)
         } catch {
             if let entry = await cachedMonthlyScheduleEntry(for: month) {
@@ -198,6 +224,20 @@ actor RepositoryResponseCache {
             }
             throw error
         }
+    }
+
+    func cachedMonthlyScheduleValue(
+        for month: KBOMonthScheduleKey
+    ) async -> (value: [GameDetail], cachedAt: Date, source: String)? {
+        if let entry = monthlyScheduleEntries[month] {
+            return (entry.value, entry.timestamp, "memory")
+        }
+
+        guard let entry = await diskCache.loadMonthlySchedule(for: month) else {
+            return nil
+        }
+        monthlyScheduleEntries[month] = entry
+        return (entry.value, entry.timestamp, "disk")
     }
 
     // upsertGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.

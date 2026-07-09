@@ -37,15 +37,42 @@ enum FavoriteTeamScheduleWidgetShared {
     private static let logger = Logger(subsystem: "com.chogm.kboScore", category: "FavoriteTeamScheduleWidgetShared")
 
     // saveState 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
-    static func saveState(favoriteTeamID: String?, snapshot: FavoriteTeamScheduleWidgetSnapshot?) {
-        if let existingStore = loadStore().store,
-           existingStore.favoriteTeamID == favoriteTeamID,
-           existingStore.snapshot == snapshot {
-            return
+    static func saveState(
+        favoriteTeamID: String?,
+        snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        sourceMonthlyCount: Int? = nil,
+        myTeamCount: Int? = nil,
+        source: String? = nil,
+        monthKey: String? = nil
+    ) {
+        let existingStore = loadStore().store
+        let resolvedSourceMonthlyCount = snapshot == nil
+            ? nil
+            : (sourceMonthlyCount ?? existingStore?.sourceMonthlyCount)
+        let resolvedMetadata = snapshot == nil
+            ? nil
+            : FavoriteTeamScheduleWidgetStoreMetadata(
+                monthKey: monthKey ?? existingStore?.metadata?.monthKey,
+                favoriteTeamID: favoriteTeamID ?? existingStore?.metadata?.favoriteTeamID,
+                sourceMonthlyCount: resolvedSourceMonthlyCount,
+                myTeamCount: myTeamCount ?? existingStore?.metadata?.myTeamCount,
+                source: source ?? existingStore?.metadata?.source,
+                createdAt: Date()
+            )
+        if let existingStore {
+            let metadataMatches = existingStore.metadata?.matches(resolvedMetadata) ?? (resolvedMetadata == nil)
+            if existingStore.favoriteTeamID == favoriteTeamID,
+               existingStore.snapshot == snapshot,
+               existingStore.sourceMonthlyCount == resolvedSourceMonthlyCount,
+               metadataMatches {
+                return
+            }
         }
         let store = Store(
             favoriteTeamID: favoriteTeamID,
             snapshot: snapshot,
+            sourceMonthlyCount: resolvedSourceMonthlyCount,
+            metadata: resolvedMetadata,
             updatedAt: Date()
         )
         persist(store)
@@ -70,6 +97,8 @@ enum FavoriteTeamScheduleWidgetShared {
         var store = loadStore().store ?? Store()
         guard store.snapshot != snapshot else { return }
         store.snapshot = snapshot
+        store.sourceMonthlyCount = nil
+        store.metadata = nil
         store.updatedAt = Date()
         persist(store)
     }
@@ -77,6 +106,14 @@ enum FavoriteTeamScheduleWidgetShared {
     // loadSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     static func loadSnapshot() -> FavoriteTeamScheduleWidgetSnapshot? {
         loadState().snapshot
+    }
+
+    static func loadSnapshotSourceMonthlyCount() -> Int? {
+        loadStore().store?.sourceMonthlyCount
+    }
+
+    static func loadSnapshotMetadata() -> FavoriteTeamScheduleWidgetStoreMetadata? {
+        loadStore().store?.metadata
     }
 
     // loadState 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -211,6 +248,8 @@ private extension FavoriteTeamScheduleWidgetShared {
     struct Store: Codable {
         var favoriteTeamID: String?
         var snapshot: FavoriteTeamScheduleWidgetSnapshot?
+        var sourceMonthlyCount: Int?
+        var metadata: FavoriteTeamScheduleWidgetStoreMetadata?
         var updatedAt: Date?
     }
 
@@ -218,6 +257,24 @@ private extension FavoriteTeamScheduleWidgetShared {
     struct StoreLoadResult {
         let store: Store?
         let issue: LoadIssue?
+    }
+}
+
+struct FavoriteTeamScheduleWidgetStoreMetadata: Codable, Hashable, Sendable {
+    let monthKey: String?
+    let favoriteTeamID: String?
+    let sourceMonthlyCount: Int?
+    let myTeamCount: Int?
+    let source: String?
+    let createdAt: Date
+
+    func matches(_ other: FavoriteTeamScheduleWidgetStoreMetadata?) -> Bool {
+        guard let other else { return false }
+        return monthKey == other.monthKey
+            && favoriteTeamID == other.favoriteTeamID
+            && sourceMonthlyCount == other.sourceMonthlyCount
+            && myTeamCount == other.myTeamCount
+            && source == other.source
     }
 }
 
