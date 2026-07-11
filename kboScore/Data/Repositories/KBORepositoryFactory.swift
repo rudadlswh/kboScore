@@ -1,20 +1,27 @@
 //
 //  KBORepositoryFactory.swift
 //  kboScore
+//  기능 설명: 환경 설정에 따라 로컬, 캐시, Supabase 저장소 조합을 생성합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
 
 import Foundation
 
+// AppRepositoryBundle 구조체는 AppRepositoryBundle 타입의 역할과 값을 정의합니다.
 struct AppRepositoryBundle {
     let repository: any KBORepository
     let runtimeState: RepositoryRuntimeState?
 }
 
+// AppRepositoryConfiguration 구조체는 AppRepositoryConfiguration 타입의 역할과 값을 정의합니다.
 struct AppRepositoryConfiguration: Sendable {
     let supabaseConfiguration: SupabaseConfiguration?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         backendBaseURL: URL? = nil,
         supabaseConfiguration: SupabaseConfiguration?
@@ -23,6 +30,7 @@ struct AppRepositoryConfiguration: Sendable {
         self.supabaseConfiguration = supabaseConfiguration
     }
 
+    // fromEnvironment 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func fromEnvironment(
         processInfo: ProcessInfo = .processInfo,
         bundle: Bundle = .main
@@ -33,11 +41,20 @@ struct AppRepositoryConfiguration: Sendable {
         let supabaseKeyEnvironmentValue = processInfo.environment["SUPABASE_PUBLISHABLE_KEY"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         let supabaseKeyInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabasePublishableKey") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchemaEnvironmentValue = processInfo.environment["SUPABASE_DB_SCHEMA"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchemaInfoDictionaryValue = (bundle.object(forInfoDictionaryKey: "SupabaseDBSchema") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let supabaseSchema = resolvedSupabaseSchema(
+            environmentValue: supabaseSchemaEnvironmentValue,
+            infoDictionaryValue: supabaseSchemaInfoDictionaryValue,
+            isDebugBuild: isDebugBuild
+        )
         let supabaseConfiguration = firstValidSupabaseConfiguration(
             candidates: [
                 (url: supabaseEnvironmentValue, publishableKey: supabaseKeyEnvironmentValue),
                 (url: supabaseInfoDictionaryValue, publishableKey: supabaseKeyInfoDictionaryValue)
-            ]
+            ],
+            schema: supabaseSchema
         )
 #if DEBUG
         print("[SupabaseConfig] environmentURLPresent=\(hasValue(supabaseEnvironmentValue))")
@@ -45,12 +62,15 @@ struct AppRepositoryConfiguration: Sendable {
         print("[SupabaseConfig] environmentKeyPresent=\(hasValue(supabaseKeyEnvironmentValue))")
         print("[SupabaseConfig] plistKeyPresent=\(hasValue(supabaseKeyInfoDictionaryValue))")
         print("[SupabaseConfig] finalRuntimeHost=\(debugHostValue(supabaseConfiguration))")
+        print("[SupabaseConfig] schema=\(supabaseSchema)")
+        logBackendSchemaMismatchWarning(supabaseSchema: supabaseSchema, processInfo: processInfo, bundle: bundle)
 #endif
         return AppRepositoryConfiguration(
             supabaseConfiguration: supabaseConfiguration
         )
     }
 
+    // backendURL 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func backendURL(from rawValue: String?) -> URL? {
         guard let rawValue,
               let url = URL(string: rawValue),
@@ -72,13 +92,16 @@ struct AppRepositoryConfiguration: Sendable {
         return url
     }
 
+    // firstValidSupabaseConfiguration 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func firstValidSupabaseConfiguration(
-        candidates: [(url: String?, publishableKey: String?)]
+        candidates: [(url: String?, publishableKey: String?)],
+        schema: String
     ) -> SupabaseConfiguration? {
         for candidate in candidates {
             if let configuration = supabaseConfiguration(
                 urlRawValue: candidate.url,
-                publishableKeyRawValue: candidate.publishableKey
+                publishableKeyRawValue: candidate.publishableKey,
+                schema: schema
             ) {
                 return configuration
             }
@@ -92,19 +115,53 @@ struct AppRepositoryConfiguration: Sendable {
     ]
 #endif
 
+    // supabaseConfiguration 메서드는 이 타입의 주요 동작을 수행합니다.
     private nonisolated static func supabaseConfiguration(
         urlRawValue: String?,
-        publishableKeyRawValue: String?
+        publishableKeyRawValue: String?,
+        schema: String
     ) -> SupabaseConfiguration? {
         guard let url = backendURL(from: urlRawValue),
               let publishableKey = publishableKeyRawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               publishableKey.isEmpty == false else {
             return nil
         }
-        return SupabaseConfiguration(url: url, publishableKey: publishableKey)
+        return SupabaseConfiguration(url: url, publishableKey: publishableKey, schema: schema)
+    }
+
+    // resolvedSupabaseSchema 메서드는 빌드 설정/환경에서 사용할 DB schema를 결정합니다.
+    nonisolated static func resolvedSupabaseSchema(
+        environmentValue: String?,
+        infoDictionaryValue: String?,
+        isDebugBuild: Bool
+    ) -> String {
+        let schema = [environmentValue, infoDictionaryValue]
+            .compactMap { value -> String? in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed?.isEmpty == false ? trimmed : nil
+            }
+            .first ?? SupabaseConfiguration.productionSchema
+
+        if isDebugBuild && schema == SupabaseConfiguration.productionSchema {
+            AppLog.warning(.supabase, "[SupabaseConfig] Debug build is using production schema.")
+        }
+        if !isDebugBuild && schema == SupabaseConfiguration.developmentSchema {
+            AppLog.error(.supabase, "[SupabaseConfig] Release build is configured with development schema.")
+            assertionFailure("Release build must not use \(SupabaseConfiguration.developmentSchema).")
+        }
+        return schema
+    }
+
+    private nonisolated static var isDebugBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 
 #if DEBUG
+    // hasValue 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private nonisolated static func hasValue(_ value: String?) -> Bool {
         guard let value else {
             return false
@@ -112,17 +169,42 @@ struct AppRepositoryConfiguration: Sendable {
         return value.isEmpty == false
     }
 
+    // debugHostValue 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private nonisolated static func debugHostValue(_ configuration: SupabaseConfiguration?) -> String {
         configuration?.url.host ?? "<none>"
+    }
+
+    nonisolated static func logBackendSchemaMismatchWarning(
+        supabaseSchema: String,
+        processInfo: ProcessInfo,
+        bundle: Bundle
+    ) {
+        let processValue = processInfo.environment["KBO_BACKEND_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let bundleValue = (bundle.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawBackendURL = [processValue, bundleValue]
+            .compactMap { value -> String? in
+                guard let value, value.isEmpty == false else { return nil }
+                return value
+            }
+            .first
+        let backendHost = rawBackendURL.flatMap { URL(string: $0)?.host } ?? "<none>"
+        let backendEnvironment = backendHost.contains("onrender.com") ? "production" :
+            (backendHost == "localhost" || backendHost == "127.0.0.1" ? "local" : "unknown")
+        print("[BackendConfig] backendEnvironment=\(backendEnvironment) backendHost=\(backendHost) supabaseSchema=\(supabaseSchema)")
+        if supabaseSchema == SupabaseConfiguration.developmentSchema,
+           backendEnvironment == "production" {
+            AppLog.warning(.supabase, "[BackendConfig] Debug Supabase schema is development but backend API is production.")
+            print("[BackendConfig] warning=schemaBackendMismatch supabaseSchema=\(supabaseSchema) backendEnvironment=\(backendEnvironment) backendHost=\(backendHost)")
+        }
     }
 #endif
 }
 
+// KBORepositoryFactory 열거형는 실행 환경에 맞는 구현체 생성을 담당합니다.
 enum KBORepositoryFactory {
-    static func makeAppRepository() -> any KBORepository {
-        makeAppRepositoryBundle().repository
-    }
-
+    // makeAppRepositoryBundle 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeAppRepositoryBundle(
         configuration: AppRepositoryConfiguration = .fromEnvironment()
     ) -> AppRepositoryBundle {
@@ -166,6 +248,7 @@ enum KBORepositoryFactory {
         )
     }
 
+    // makeSupabaseWrappedRepository 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private static func makeSupabaseWrappedRepository<Base: KBORepository>(
         baseRepository: Base,
         configuration: AppRepositoryConfiguration,
@@ -178,7 +261,12 @@ enum KBORepositoryFactory {
         #if canImport(Supabase)
         #if DEBUG
         print("[SupabaseConfig] supabase-swift linked=true")
-        print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>")")
+        print("[SupabaseKBO] enabled=true host=\(supabaseConfiguration.url.host ?? "<none>") schema=\(supabaseConfiguration.schema)")
+        AppRepositoryConfiguration.logBackendSchemaMismatchWarning(
+            supabaseSchema: supabaseConfiguration.schema,
+            processInfo: .processInfo,
+            bundle: .main
+        )
         #endif
         let repository = SupabaseBackedKBORepository(
             base: baseRepository,

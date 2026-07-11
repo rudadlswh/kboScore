@@ -1,12 +1,17 @@
 //
 //  GameRecordPositionFormatter.swift
 //  kboScore
+//  기능 설명: 선수 포지션과 기록 표기 문자열을 화면 표시용으로 정리합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 5/13/26.
 //
 
 import Foundation
 
+// GameRecordPositionFormatter 열거형는 도메인 값을 화면 표시용 문자열로 변환합니다.
 enum GameRecordPositionFormatter {
     private static let separator = "·"
     private static let separatorCharacter: Character = "·"
@@ -39,6 +44,7 @@ enum GameRecordPositionFormatter {
         }
     }
 
+    // display 메서드는 이 타입의 주요 동작을 수행합니다.
     static func display(_ rawPosition: String?) -> String {
         let raw = rawPosition?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard raw.isEmpty == false else { return "-" }
@@ -69,6 +75,7 @@ enum GameRecordPositionFormatter {
         return formatted.joined(separator: separator)
     }
 
+    // isRicher 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     static func isRicher(_ candidate: String, than current: String) -> Bool {
         let candidateDisplay = display(candidate)
         guard candidateDisplay != "-" else { return false }
@@ -81,6 +88,7 @@ enum GameRecordPositionFormatter {
         return componentCount(in: candidateDisplay) > componentCount(in: currentDisplay)
     }
 
+    // displayTokens 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func displayTokens(for component: String) -> [String] {
         if let mapped = positionMap[component] {
             return [mapped]
@@ -99,6 +107,7 @@ enum GameRecordPositionFormatter {
         return mapped
     }
 
+    // normalized 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private static func normalized(_ value: String) -> String {
         value
             .replacingOccurrences(of: " ", with: "")
@@ -109,11 +118,13 @@ enum GameRecordPositionFormatter {
             .replacingOccurrences(of: "ㅡ", with: "-")
     }
 
+    // componentCount 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func componentCount(in display: String) -> Int {
         display.split(separator: separatorCharacter).count
     }
 
     #if DEBUG
+    // resetDebugLogCacheForTesting 메서드는 저장된 상태나 캐시 값을 정리합니다.
     static func resetDebugLogCacheForTesting() {
         debugLogLock.withLock {
             debugLoggedPositionKeys.removeAll()
@@ -126,6 +137,7 @@ enum GameRecordPositionFormatter {
         }
     }
 
+    // logPositionChangeIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     static func logPositionChangeIfNeeded(
         sideLabel: String,
         playerName: String,
@@ -147,6 +159,7 @@ enum GameRecordPositionFormatter {
 }
 
 extension GameCenterReview {
+    // enrichingBatterPositions 메서드는 이 타입의 주요 동작을 수행합니다.
     func enrichingBatterPositions(from source: GameCenterReview?) -> GameCenterReview {
         guard let source else { return self }
         return GameCenterReview(
@@ -159,6 +172,7 @@ extension GameCenterReview {
         )
     }
 
+    // enrichingBatterPositions 메서드는 이 타입의 주요 동작을 수행합니다.
     func enrichingBatterPositions(from sourceSections: [GameCenterBattingSection]?) -> GameCenterReview {
         guard let sourceSections, sourceSections.count >= 2 else { return self }
         return GameCenterReview(
@@ -173,6 +187,7 @@ extension GameCenterReview {
 }
 
 extension GameCenterBattingSection {
+    // enrichingPositions 메서드는 이 타입의 주요 동작을 수행합니다.
     func enrichingPositions(from source: GameCenterBattingSection?, sideLabel: String) -> GameCenterBattingSection {
         guard let source else { return self }
 
@@ -181,9 +196,23 @@ extension GameCenterBattingSection {
                 let positions = Set(matches.map(\.position).filter { GameRecordPositionFormatter.display($0) != "-" })
                 return positions.count == 1 ? positions.first : nil
             }
+        let orderedSourceLines = source.lines.compactMap { line -> (order: String, position: String)? in
+            guard let order = line.battingOrderNumber else { return nil }
+            return (order, line.position)
+        }
+        let sourcePositionsByOrder = Dictionary(grouping: orderedSourceLines, by: \.order)
+            .compactMapValues { matches -> String? in
+                let positions = Set(matches.map(\.position).filter { GameRecordPositionFormatter.display($0) != "-" })
+                return positions.count == 1 ? positions.first : nil
+            }
 
         let enrichedLines = lines.map { line -> GameCenterBattingLine in
-            let candidate = sourcePositions[line.name.normalizedPositionLookupName]
+            let nameCandidate = sourcePositions[line.name.normalizedPositionLookupName]
+            let orderCandidate = line.battingOrderNumber.flatMap { sourcePositionsByOrder[$0] }
+            let adjacentOrderCandidate = line.battingOrderNumber == nil
+                ? inferredAdjacentOrderPosition(for: line, in: lines, sourcePositionsByOrder: sourcePositionsByOrder)
+                : nil
+            let candidate = nameCandidate ?? orderCandidate ?? adjacentOrderCandidate
             let position = candidate.flatMap {
                 GameRecordPositionFormatter.isRicher($0, than: line.position) ? $0 : nil
             } ?? line.position
@@ -203,9 +232,44 @@ extension GameCenterBattingSection {
 
         return GameCenterBattingSection(lines: enrichedLines, totals: totals)
     }
+
+    // inferredAdjacentOrderPosition 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func inferredAdjacentOrderPosition(
+        for line: GameCenterBattingLine,
+        in lines: [GameCenterBattingLine],
+        sourcePositionsByOrder: [String: String]
+    ) -> String? {
+        guard let index = lines.firstIndex(where: { $0.id == line.id }) else {
+            return nil
+        }
+
+        if index > lines.startIndex {
+            for previousIndex in stride(from: lines.index(before: index), through: lines.startIndex, by: -1) {
+                if let order = lines[previousIndex].battingOrderNumber,
+                   let position = sourcePositionsByOrder[order],
+                   GameRecordPositionFormatter.display(position) != "-" {
+                    return position
+                }
+            }
+        }
+
+        let nextIndex = lines.index(after: index)
+        if nextIndex < lines.endIndex {
+            for followingIndex in nextIndex..<lines.endIndex {
+                if let order = lines[followingIndex].battingOrderNumber,
+                   let position = sourcePositionsByOrder[order],
+                   GameRecordPositionFormatter.display(position) != "-" {
+                    return position
+                }
+            }
+        }
+
+        return nil
+    }
 }
 
 private extension GameCenterBattingLine {
+    // replacingPosition 메서드는 이 타입의 주요 동작을 수행합니다.
     func replacingPosition(_ position: String) -> GameCenterBattingLine {
         GameCenterBattingLine(
             battingOrder: battingOrder,
@@ -219,6 +283,8 @@ private extension GameCenterBattingLine {
             walks: walks,
             strikeouts: strikeouts,
             stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
             average: average,
             plateAppearanceHomeRuns: plateAppearanceHomeRuns,
             plateAppearanceWalks: plateAppearanceWalks,

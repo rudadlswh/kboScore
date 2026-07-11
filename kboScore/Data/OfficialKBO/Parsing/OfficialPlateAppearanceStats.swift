@@ -1,23 +1,30 @@
 //
 //  OfficialPlateAppearanceStats.swift
 //  kboScore
+//  기능 설명: 타석 결과 문자열에서 타수, 안타, 타점 등 세부 기록을 계산합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
 
 import Foundation
 
+// PlateAppearanceDerivedStats 구조체는 PlateAppearanceDerivedStats 타입의 역할과 값을 정의합니다.
 struct PlateAppearanceDerivedStats: Sendable, Equatable {
     let homeRuns: Int
     let walks: Int
     let strikeouts: Int
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(homeRuns: Int = 0, walks: Int = 0, strikeouts: Int = 0) {
         self.homeRuns = homeRuns
         self.walks = walks
         self.strikeouts = strikeouts
     }
 
+    // adding 메서드는 이 타입의 주요 동작을 수행합니다.
     func adding(resultText: String) -> PlateAppearanceDerivedStats {
         resultText.plateAppearanceResultTokens.reduce(self) { stats, result in
             PlateAppearanceDerivedStats(
@@ -28,6 +35,7 @@ struct PlateAppearanceDerivedStats: Sendable, Equatable {
         }
     }
 
+    // + 메서드는 이 타입의 주요 동작을 수행합니다.
     static func + (lhs: PlateAppearanceDerivedStats, rhs: PlateAppearanceDerivedStats) -> PlateAppearanceDerivedStats {
         PlateAppearanceDerivedStats(
             homeRuns: lhs.homeRuns + rhs.homeRuns,
@@ -38,6 +46,7 @@ struct PlateAppearanceDerivedStats: Sendable, Equatable {
 }
 
 extension OfficialKBOGameCenterClient {
+    // plateAppearanceDerivedStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func plateAppearanceDerivedStats(
         table: OfficialGridTable?,
         row: OfficialGridRow?
@@ -52,6 +61,7 @@ extension OfficialKBOGameCenterClient {
         }
     }
 
+    // plateAppearanceTotals 메서드는 이 타입의 주요 동작을 수행합니다.
     func plateAppearanceTotals(table: OfficialGridTable?) -> PlateAppearanceDerivedStats? {
         guard table?.battingTableInterpretation == .plateAppearanceResults,
               let rows = table?.rows,
@@ -77,6 +87,7 @@ private extension String {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self

@@ -1,6 +1,10 @@
 //
 //  AppModel.swift
 //  kboScore
+//  기능 설명: 앱 전역 상태, 데이터 새로고침, 알림, 위젯, 라이브 액티비티 동기화를 관리합니다.
+//  여러 화면과 시스템 기능이 같은 경기 데이터를 보도록 앱 전역 상태와 부수 효과를 한곳에서 조정합니다.
+//  비동기 새로고침, 캐시, 알림, 위젯 갱신이 동시에 발생할 수 있어 중복 실행과 오래된 응답을 방어합니다.
+//  TODO : 상태 전이를 더 작은 도메인 서비스로 나누고 관찰 가능한 부수 효과를 테스트로 고정합니다.
 //
 //  Created by Codex on 3/25/26.
 //
@@ -9,6 +13,9 @@ import Foundation
 import Observation
 import UIKit
 import UserNotifications
+#if canImport(ActivityKit)
+import ActivityKit
+#endif
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
@@ -16,17 +23,63 @@ import WidgetKit
 typealias GameCancellationNotificationScheduler = (UNNotificationRequest) async throws -> Void
 typealias CurrentDateProvider = () -> Date
 
+// RefreshScope 열거형는 RefreshScope 타입의 역할과 값을 정의합니다.
 enum RefreshScope: Hashable, Sendable {
     case home
     case myTeam
     case notifications
 }
 
+// RefreshDataSet 열거형는 RefreshDataSet 타입의 역할과 값을 정의합니다.
 private enum RefreshDataSet: Hashable {
     case games
     case notifications
 }
 
+// ScheduleGameMergeSource 열거형는 ScheduleGameMergeSource 타입의 역할과 값을 정의합니다.
+private enum ScheduleGameMergeSource: String {
+    case unspecified
+    case scheduleMonthLoad
+    case todayLiveRefresh
+    case gameDetailRefresh
+    case standingsRefresh
+    case staleReconciliation
+    case homeFavoriteRefresh
+    case startupSync
+}
+
+private enum FavoriteTeamScheduleWidgetSnapshotSource: Int {
+    case unspecified = 0
+    case homeFavoriteRefresh = 100
+    case todayLiveRefresh = 150
+    case appModelMonthly = 300
+    case scheduleTabCurrentMonth = 400
+
+    var logName: String {
+        switch self {
+        case .unspecified:
+            "unspecified"
+        case .homeFavoriteRefresh:
+            "homeFavoriteRefresh"
+        case .todayLiveRefresh:
+            "todayLiveRefresh"
+        case .appModelMonthly:
+            "appModelMonthly"
+        case .scheduleTabCurrentMonth:
+            "scheduleTabCurrentMonth"
+        }
+    }
+}
+
+private struct FavoriteTeamScheduleWidgetMonthSource {
+    let monthKey: KBOMonthScheduleKey
+    let favoriteTeamID: String
+    let games: [GameDetail]
+    let source: FavoriteTeamScheduleWidgetSnapshotSource
+    let updatedAt: Date
+}
+
+// HomeGameFilter 열거형는 HomeGameFilter 타입의 역할과 값을 정의합니다.
 enum HomeGameFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case live = "라이브"
@@ -37,6 +90,7 @@ enum HomeGameFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// NotificationListFilter 열거형는 NotificationListFilter 타입의 역할과 값을 정의합니다.
 enum NotificationListFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case myTeam = "마이팀"
@@ -47,6 +101,7 @@ enum NotificationListFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// ScheduleFilter 열거형는 ScheduleFilter 타입의 역할과 값을 정의합니다.
 enum ScheduleFilter: String, CaseIterable, Identifiable {
     case all = "전체"
     case myTeam = "마이팀"
@@ -54,6 +109,7 @@ enum ScheduleFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// AppTab 열거형는 AppTab 타입의 역할과 값을 정의합니다.
 enum AppTab: Hashable, Sendable {
     case home
     case standings
@@ -62,9 +118,36 @@ enum AppTab: Hashable, Sendable {
     case settings
 }
 
+// HomeFavoriteGameRefreshKey 구조체는 HomeFavoriteGameRefreshKey 타입의 역할과 값을 정의합니다.
 private struct HomeFavoriteGameRefreshKey: Hashable {
     let dayKey: String
     let favoriteTeamID: String
+}
+
+// RawSupabaseGameDetailIdentity 구조체는 RawSupabaseGameDetailIdentity 타입의 역할과 값을 정의합니다.
+private struct RawSupabaseGameDetailIdentity: Sendable {
+    let supabaseGameID: UUID
+    let providerGameID: String?
+    let publicGameID: String?
+}
+
+// GameDetailRefreshResult 구조체는 GameDetailRefreshResult 타입의 역할과 값을 정의합니다.
+struct GameDetailRefreshResult: Sendable {
+    let game: GameDetail
+    let rawSupabaseGameID: UUID?
+    let providerGameID: String?
+    let publicGameID: String?
+}
+
+private enum GameDetailLiveStateRefresh: Sendable {
+    case updated(GameDetailRefreshResult)
+    case unchanged
+    case unavailable
+}
+
+private enum GameDetailLiveTransport {
+    case streaming
+    case polling
 }
 
 @MainActor
@@ -88,10 +171,15 @@ final class AppModel {
     private let repository: any KBORepository
     private let repositoryRuntimeState: RepositoryRuntimeState?
     private let notificationRegistrationClient: any NotificationRegistrationClient
+    private let liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient
     private let scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient
+    private let attendanceClient: any AttendanceClient
+    private let gameLiveStateClient: any GameLiveStateFetching
+    private let gameLiveStreamClient: any GameLiveStreaming
     private let liveActivityController: any FavoriteTeamLiveActivityControlling
     private let cancellationNotificationScheduler: GameCancellationNotificationScheduler
     private let currentDateProvider: CurrentDateProvider
+    private let gameDetailPollingIntervalNanoseconds: UInt64
     private let cancellationNotificationCoordinator = GameCancellationNotificationCoordinator()
     private let officialGameCenterClient = OfficialKBOGameCenterClient()
     private let localPostseasonQualificationCalculator = LocalPostseasonQualificationCalculator()
@@ -106,9 +194,21 @@ final class AppModel {
     private var notificationRegistrationSyncTask: Task<Void, Never>?
     private var notificationRegistrationSyncTaskKey: NotificationRegistrationKey?
     private var notificationRegistrationSyncGeneration = 0
+    private var liveActivityPushToStartTokenObservationTask: Task<Void, Never>?
+    private var registeredPushToStartTokenKeys: Set<LiveActivityPushToStartTokenRegistrationKey> = []
+    private var lastLiveActivityPushToStartToken: String?
     private var lastNotifiedGameStates: [String: GameContentNotificationState] = [:]
-    private var notifiedGameContentKeys: Set<String> = []
     private var lastFavoriteTeamWidgetSemanticKey: String?
+    private var lastFavoriteTeamWidgetSnapshot: FavoriteTeamScheduleWidgetSnapshot?
+    private var favoriteTeamWidgetMonthSources: [KBOMonthScheduleKey: FavoriteTeamScheduleWidgetMonthSource] = [:]
+    private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
+    private var lastGameDetailLiveStateRawHashByIdentity: [String: String] = [:]
+    private var inFlightAttendanceTasks: [UUID: Task<Void, Never>] = [:]
+    private var attendanceListSyncInFlight = false
+    private var attendanceListSyncSuppressed = false
+    private var attendanceSyncDisabled = false
+    private var lastAttendanceListFailureSignature: String?
+    private var failedAttendanceActionKeys: Set<String> = []
 
     var isLoading = false
     var loadErrorMessage: String?
@@ -141,6 +241,8 @@ final class AppModel {
     var notificationRegistrationSyncStatus: NotificationRegistrationSyncStatus = .waitingForToken
     var notificationRegistrationLastAttemptAt: Date?
     var notificationRegistrationEndpointDescription: String?
+    private(set) var attendanceSyncFailureMessage: String?
+    private(set) var attendedGameIDs: Set<UUID> = []
     private(set) var attendedGameKeys: Set<String> = []
     private var notifiedCancellationKeys: Set<String> = []
     var settings: AppSettings {
@@ -148,15 +250,20 @@ final class AppModel {
             let favoriteTeamChanged = oldValue.favoriteTeamID != settings.favoriteTeamID
             persistSettings()
             scheduleNotificationRegistrationSyncIfNeeded(oldSettings: oldValue)
-            if oldValue.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
-                oldValue.favoriteTeamID != settings.favoriteTeamID {
-                Task { [weak self] in
-                    await self?.syncFavoriteTeamLiveActivity()
-                    await self?.syncFavoriteTeamWidgetSnapshot(includePrefetch: true)
-                }
-            }
             if favoriteTeamChanged {
                 invalidateScheduleDerivedCaches()
+            }
+            if oldValue.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
+                oldValue.liveActivityAutoStartEnabled != settings.liveActivityAutoStartEnabled ||
+                oldValue.favoriteTeamID != settings.favoriteTeamID {
+                Task { [weak self] in
+                    await self?.registerLastKnownPushToStartTokenIfNeeded(reason: "settingsChanged")
+                    await self?.syncFavoriteTeamLiveActivity()
+                    await self?.syncFavoriteTeamWidgetSnapshot(
+                        includePrefetch: true,
+                        reason: favoriteTeamChanged ? "favoriteTeamChanged" : "settingsChanged"
+                    )
+                }
             }
         }
     }
@@ -174,12 +281,20 @@ final class AppModel {
     private(set) var failedScheduleMonths: Set<KBOMonthScheduleKey> = []
     private var monthlyScheduleRefreshDayKeys: [KBOMonthScheduleKey: String] = [:]
     private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
-    private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
-    private var inFlightGameDetailRefreshTasks: [String: Task<GameDetail?, Never>] = [:]
+    private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Bool, Never>] = [:]
+    private var inFlightGameDetailRefreshTasks: [String: Task<GameDetailRefreshResult?, Never>] = [:]
+    private var activeGameDetailLivePollingIdentity: String?
+    private var gameDetailLivePollingTask: Task<Void, Never>?
+    private var gameDetailLivePollingGeneration = 0
+    private var gameDetailLiveTransport: GameDetailLiveTransport?
+    private var lastGameDetailPollingSkipSignature: String?
+    private var inFlightGameDetailDatabaseReviewTasks: [String: Task<GameDetailDatabaseReviewFetchResult?, Never>] = [:]
+    private var cachedGameDetailDatabaseReviewsByRequestKey: [String: GameDetailDatabaseReviewFetchResult] = [:]
+    private var cachedGameDetailDatabaseReviewsByRawSupabaseID: [UUID: GameDetailDatabaseReviewFetchResult] = [:]
     private var lastGameDetailRefreshAt: [String: Date] = [:]
     private var inFlightHomeFavoriteGameTasks: [HomeFavoriteGameRefreshKey: Task<Void, Never>] = [:]
     private var lastHomeFavoriteGameRefreshAt: [HomeFavoriteGameRefreshKey: Date] = [:]
-    private var inFlightTodayLiveRefreshTasks: [String: Task<Void, Never>] = [:]
+    private var inFlightTodayLiveRefreshTasks: [String: Task<[GameDetail], Never>] = [:]
     private var lastTodayLiveRefreshAt: [String: Date] = [:]
     private var inFlightScheduleStaleReconciliationTask: Task<Void, Error>?
     private var inFlightSchedulePostReconciliationRefreshDates: Set<String> = []
@@ -195,19 +310,23 @@ final class AppModel {
     private var standingsSnapshotCacheBySeason: [Int: [TeamStandingsSnapshot]] = [:]
     private var standingsSourceGamesBySeason: [Int: [GameDetail]] = [:]
     private var inFlightStandingsTasks: [Int: Task<Void, Never>] = [:]
-    private var inFlightStandingsSourceTasks: [Int: Task<Bool, Never>] = [:]
-    private var standingsSourcePrefetchTasks: [Int: Task<Void, Never>] = [:]
     private let isRunningTests: Bool
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         repository: any KBORepository = MockKBORepository(),
         repositoryRuntimeState: RepositoryRuntimeState? = nil,
         notificationRegistrationClient: any NotificationRegistrationClient = NoOpNotificationRegistrationClient(),
+        liveActivityPushToStartTokenRegistrationClient: any LiveActivityPushToStartTokenRegistrationClient = NoOpLiveActivityPushToStartTokenRegistrationClient(),
         scheduleStaleGameReconciliationClient: any ScheduleStaleGameReconciliationClient = NoOpScheduleStaleGameReconciliationClient(),
+        attendanceClient: any AttendanceClient = NoOpAttendanceClient(),
+        gameLiveStateClient: any GameLiveStateFetching = GameLiveStateClientFactory.makeAppClient(),
+        gameLiveStreamClient: any GameLiveStreaming = GameLiveStreamClientFactory.makeAppClient(),
         liveActivityController: (any FavoriteTeamLiveActivityControlling)? = nil,
         bootstrap: KBOBootstrapData? = nil,
         usePersistedSettings: Bool = true,
         currentDateProvider: @escaping CurrentDateProvider = Date.init,
+        gameDetailPollingIntervalNanoseconds: UInt64 = 2_000_000_000,
         cancellationNotificationScheduler: @escaping GameCancellationNotificationScheduler = { request in
             try await UNUserNotificationCenter.current().add(request)
         }
@@ -215,9 +334,14 @@ final class AppModel {
         self.repository = repository
         self.repositoryRuntimeState = repositoryRuntimeState
         self.notificationRegistrationClient = notificationRegistrationClient
+        self.liveActivityPushToStartTokenRegistrationClient = liveActivityPushToStartTokenRegistrationClient
         self.scheduleStaleGameReconciliationClient = scheduleStaleGameReconciliationClient
+        self.attendanceClient = attendanceClient
+        self.gameLiveStateClient = gameLiveStateClient
+        self.gameLiveStreamClient = gameLiveStreamClient
         self.cancellationNotificationScheduler = cancellationNotificationScheduler
         self.currentDateProvider = currentDateProvider
+        self.gameDetailPollingIntervalNanoseconds = gameDetailPollingIntervalNanoseconds
         #if canImport(ActivityKit)
         self.liveActivityController = liveActivityController ?? FavoriteTeamLiveActivityManager()
         #else
@@ -228,7 +352,6 @@ final class AppModel {
         let persistedOnboardingCompletion = usePersistedSettings ? AppModelPersistenceStore.loadOnboardingCompletion() : nil
         let persistedDeviceToken = usePersistedSettings ? AppModelPersistenceStore.loadDeviceToken() : nil
         let persistedNotificationHistory = usePersistedSettings ? AppModelPersistenceStore.loadNotificationHistory() : []
-        let persistedAttendedGameKeys = usePersistedSettings ? AppModelPersistenceStore.loadAttendedGameKeys() : []
         let persistedCancellationNotificationKeys = usePersistedSettings ? AppModelPersistenceStore.loadCancellationNotificationKeys() : []
         let hasPersistedFavoriteTeam = Self.canonicalTeamIdentifier(persistedSettings?.favoriteTeamID) != nil
         let initialHasCompletedOnboarding: Bool
@@ -263,16 +386,19 @@ final class AppModel {
         self.debugLocalBootstrapResolvedPath = nil
         self.debugLocalBootstrapLoadedAt = nil
         self.apnsDeviceToken = persistedDeviceToken
-        self.attendedGameKeys = persistedAttendedGameKeys
+        self.attendedGameIDs = []
+        self.attendedGameKeys = []
         self.notifiedCancellationKeys = persistedCancellationNotificationKeys
         self.notificationRegistrationEndpointDescription = notificationRegistrationClient.debugEndpointDescription
+        self.attendanceSyncFailureMessage = nil
         self.liveActivitySupported = self.liveActivityController.isSupported
         self.notificationRegistrationSyncStatus = persistedDeviceToken == nil ? .waitingForToken : .idle
         self.isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         self.notifications = persistedNotificationHistory
         FavoriteTeamScheduleWidgetShared.saveFavoriteTeamID(initialSettings.favoriteTeamID)
         if let bootstrap {
-            apply(bootstrap, refreshProbabilitySignalsSynchronously: isRunningTests)
+            apply(bootstrap)
+            publishBootstrapStandings()
             hasLoaded = true
             let now = Date()
             lastSuccessfulRefresh[.games] = now
@@ -281,9 +407,10 @@ final class AppModel {
         }
     }
 
+    // loadIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadIfNeeded() async {
         guard !hasLoaded, !isLoading else {
-            scheduleStandingsSourcePrefetchIfNeeded(reason: "loadIfNeededAlreadyLoaded")
+            logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "loadIfNeededAlreadyLoaded")
             return
         }
 
@@ -294,7 +421,7 @@ final class AppModel {
             teams = Self.catalogTeams()
         }
         hasLoaded = true
-        scheduleStandingsSourcePrefetchIfNeeded(reason: "launch")
+        logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "launch")
 
         guard settings.favoriteTeamID != nil else {
             #if DEBUG
@@ -307,33 +434,33 @@ final class AppModel {
         await refreshFavoriteTeamGameForHome(reason: "launch", bypassingCache: true)
         await loadHomeFallbackStandingsSourceIfNeeded(reason: "launch")
         await syncFavoriteTeamLiveActivity()
-        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        await syncFavoriteTeamWidgetSnapshot(includePrefetch: true, reason: "launch")
         isLoading = false
     }
 
-    private func apply(
-        _ bootstrap: KBOBootstrapData,
-        refreshProbabilitySignalsSynchronously: Bool = false
-    ) {
+    // apply 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
+    private func apply(_ bootstrap: KBOBootstrapData) {
         teams = bootstrap.teams
         games = bootstrap.games.sorted { $0.scheduledStart > $1.scheduledStart }
         notifications = mergedNotifications(with: bootstrap.notifications)
         invalidateScheduleDerivedCaches()
-        if refreshProbabilitySignalsSynchronously {
-            refreshLocalStandingsProbabilitySignalsSynchronously()
-        } else {
-            scheduleLocalStandingsProbabilityRefresh()
-        }
         if !hasPersistedSettingsAtLaunch {
             settings = bootstrap.settings
         }
         normalizeFavoriteTeamSelectionIfNeeded()
+        logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "bootstrap")
+    }
+
+    // publishBootstrapStandings 메서드는 bootstrap으로 초기화된 화면 상태의 순위 행을 즉시 계산합니다.
+    private func publishBootstrapStandings() {
+        refreshLocalStandingsProbabilitySignalsSynchronously()
         refreshPublishedStandingsRowsWithCurrentSource(
             season: currentStandingsSeason(),
             reason: "bootstrap"
         )
     }
 
+    // normalizeFavoriteTeamSelectionIfNeeded 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizeFavoriteTeamSelectionIfNeeded() {
         guard let favoriteTeamID = Self.canonicalTeamIdentifier(settings.favoriteTeamID) else {
             if settings.favoriteTeamID != nil {
@@ -356,6 +483,7 @@ final class AppModel {
         settings.favoriteTeamID = nil
     }
 
+    // catalogTeams 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func catalogTeams() -> [Team] {
         TeamIdentity.catalog.values
             .map { identity in
@@ -370,12 +498,14 @@ final class AppModel {
             .sorted { $0.displayName < $1.displayName }
     }
 
+    // ensureCatalogTeamsLoadedIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func ensureCatalogTeamsLoadedIfNeeded() {
         guard teams.isEmpty else { return }
         teams = Self.catalogTeams()
         normalizeFavoriteTeamSelectionIfNeeded()
     }
 
+    // refreshFavoriteTeamGameForHome 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshFavoriteTeamGameForHome(
         reason: String,
         bypassingCache: Bool
@@ -402,10 +532,11 @@ final class AppModel {
             await existingTask.value
             return
         }
-        let shouldThrottleRecentRefresh = reason != "homeRefresh" && reason != "favoriteTeamSelected"
-        if shouldThrottleRecentRefresh,
-           let refreshedAt = lastHomeFavoriteGameRefreshAt[refreshKey],
-           Date().timeIntervalSince(refreshedAt) < 15 {
+        if HomeFavoriteGameRefreshPolicy.shouldSkipRecentRefresh(
+            reason: reason,
+            lastRefreshedAt: lastHomeFavoriteGameRefreshAt[refreshKey],
+            now: Date()
+        ) {
             #if DEBUG
             print("HomeFavoriteGameRefresh skipped reason=recent date=\(dayKey) favoriteTeamId=\(favoriteTeamID)")
             #endif
@@ -427,6 +558,7 @@ final class AppModel {
         inFlightHomeFavoriteGameTasks[refreshKey] = nil
     }
 
+    // performFavoriteTeamGameRefreshForHome 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performFavoriteTeamGameRefreshForHome(
         reason: String,
         favoriteTeamID: Team.ID,
@@ -442,7 +574,7 @@ final class AppModel {
                 bypassingCache: bypassingCache
             )
             homeFavoriteTeamGames = fetched
-            let upsertResult = upsertScheduleGamesIntoLocalStore(fetched)
+            let upsertResult = upsertScheduleGamesIntoLocalStore(fetched, source: .homeFavoriteRefresh)
             let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache(fetched)
             let didChange = upsertResult.inserted > 0 ||
                 upsertResult.updated > 0 ||
@@ -454,7 +586,11 @@ final class AppModel {
             }
             await syncFavoriteTeamLiveActivity()
             if didChange {
-                await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+                await syncFavoriteTeamWidgetSnapshot(
+                    includePrefetch: false,
+                    reason: "homeFavoriteRefresh",
+                    monthKey: scheduleMonthKey(for: currentDateProvider())
+                )
             }
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
             lastHomeFavoriteGameRefreshAt[refreshKey] = Date()
@@ -471,34 +607,94 @@ final class AppModel {
         }
     }
 
+    // refreshHome 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshHome() async {
         await refreshFavoriteTeamGameForHome(reason: "homeRefresh", bypassingCache: true)
         await loadHomeFallbackStandingsSourceIfNeeded(reason: "homeRefresh")
     }
 
+    // refreshTodayOnForeground 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshTodayOnForeground() async {
-        guard hasLoaded else { return }
-        await refreshFavoriteTeamGameForHome(reason: "foreground", bypassingCache: true)
-        await loadHomeFallbackStandingsSourceIfNeeded(reason: "foreground")
-        await syncFavoriteTeamLiveActivity()
-        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        await refreshTodayForLiveActivity(reason: "foreground", includeHomeFallback: true)
     }
 
+    // refreshTodayForBackgroundLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    @discardableResult
+    func refreshTodayForBackgroundLiveActivity(reason: String) async -> Bool {
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] start reason=\(reason) localUpdateOnly=true limitation=iOSMaySuspendBeforeLocalUpdateCompletes")
+        #endif
+        let backgroundTaskID = UIApplication.shared.beginBackgroundTask(
+            withName: "LiveActivityBackgroundRefresh"
+        ) {
+            #if DEBUG
+            print("[LiveActivityBackgroundRefresh] expiration reason=\(reason) limitation=iOSRequestedSuspend")
+            #endif
+        }
+        defer {
+            if backgroundTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            }
+        }
+
+        let didAttemptRefresh = await refreshTodayForLiveActivity(
+            reason: reason,
+            includeHomeFallback: false
+        )
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] completed reason=\(reason) attempted=\(didAttemptRefresh) limitation=localUpdatesNotGuaranteedAfterSuspend")
+        #endif
+        return didAttemptRefresh
+    }
+
+    // refreshTodayForLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    @discardableResult
+    private func refreshTodayForLiveActivity(reason: String, includeHomeFallback: Bool) async -> Bool {
+        guard hasLoaded else {
+            #if DEBUG
+            print("[LiveActivityBackgroundRefresh] skipped reason=\(reason) appLoaded=false")
+            #endif
+            return false
+        }
+        await refreshFavoriteTeamGameForHome(reason: reason, bypassingCache: true)
+        _ = await refreshTodayGamesFromSupabase(
+            for: currentDateProvider(),
+            monthKey: scheduleMonthKey(for: currentDateProvider()),
+            reason: "liveActivity"
+        )
+        await refreshActiveLiveActivityGameDetailIfNeeded(reason: reason)
+        if includeHomeFallback {
+            await loadHomeFallbackStandingsSourceIfNeeded(reason: reason)
+        }
+        await syncFavoriteTeamLiveActivity()
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: reason == "foreground",
+            reason: "liveActivity",
+            monthKey: scheduleMonthKey(for: currentDateProvider())
+        )
+        return true
+    }
+
+    // refreshMyTeam 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshMyTeam() async {
         await refreshGames(for: [.myTeam, .home])
     }
 
+    // loadStandingsIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadStandingsIfNeeded() async {
         let season = currentStandingsSeason()
-        if standingsSourceGamesBySeason[season] != nil {
+        if standingsSnapshots.isEmpty == false {
             #if DEBUG
-            let sourceCount = standingsSourceGamesBySeason[season]?.count ?? 0
-            print("[StandingsRankMovement] source used from memory season=\(season) count=\(sourceCount)")
+            print("[StandingsRank] load skipped reason=visibleRows season=\(season) rows=\(standingsSnapshots.count)")
             #endif
             return
         }
         if standingsSnapshotCacheBySeason[season]?.isEmpty == false {
-            _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "cachedRankRows")
+            refreshPublishedStandingsRowsWithCurrentSource(
+                season: season,
+                reason: "cachedRankRows"
+            )
+            logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "cachedRankRows")
             return
         }
         let localRankCount = await loadLocalTeamRanks(season: season)
@@ -506,53 +702,19 @@ final class AppModel {
         await bootstrapStandingsRankIfNeeded(season: season)
     }
 
+    // refreshStandings 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshStandings() async {
         let season = currentStandingsSeason()
         await refreshStandings(season: season, logsBootstrapJoin: false)
     }
 
+    // prefetchStandingsSourceIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func prefetchStandingsSourceIfNeeded(season requestedSeason: Int? = nil) async {
         let season = requestedSeason ?? currentStandingsSeason()
-        _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "prefetch")
+        logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "prefetch:\(season)")
     }
 
-    private func scheduleStandingsSourcePrefetchIfNeeded(reason: String) {
-        let season = currentStandingsSeason()
-        if let cachedGames = standingsSourceGamesBySeason[season], cachedGames.isEmpty == false {
-            #if DEBUG
-            print("[StandingsRankMovement] prefetch skip reason=memory season=\(season) count=\(cachedGames.count)")
-            #endif
-            return
-        }
-        if standingsSourcePrefetchTasks[season] != nil || inFlightStandingsSourceTasks[season] != nil {
-            #if DEBUG
-            print("[StandingsRankMovement] prefetch skip reason=inFlight season=\(season)")
-            #endif
-            return
-        }
-
-        #if DEBUG
-        print("[StandingsRankMovement] prefetch start season=\(season) reason=\(reason)")
-        #endif
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let startedAt = Date()
-            let loaded = await self.loadStandingsSourceGamesIfAvailable(
-                season: season,
-                reason: "prefetch:\(reason)"
-            )
-            let duration = Date().timeIntervalSince(startedAt)
-            let sourceCount = self.standingsSourceGamesBySeason[season]?.count ?? 0
-            #if DEBUG
-            print(
-                "[StandingsRankMovement] prefetch success=\(loaded) season=\(season) count=\(sourceCount) duration=\(String(format: "%.3f", duration))s officialRequestsAvoided=true"
-            )
-            #endif
-            self.standingsSourcePrefetchTasks[season] = nil
-        }
-        standingsSourcePrefetchTasks[season] = task
-    }
-
+    // bootstrapStandingsRankIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func bootstrapStandingsRankIfNeeded(season: Int) async {
         if let task = inFlightStandingsTasks[season] {
             #if DEBUG
@@ -568,6 +730,7 @@ final class AppModel {
         await refreshStandings(season: season, logsBootstrapJoin: true)
     }
 
+    // refreshStandings 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshStandings(season: Int, logsBootstrapJoin: Bool) async {
         if let task = inFlightStandingsTasks[season] {
             #if DEBUG
@@ -589,6 +752,7 @@ final class AppModel {
         inFlightStandingsTasks[season] = nil
     }
 
+    // performRefreshStandings 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshStandings(season: Int) async {
         ensureCatalogTeamsLoadedIfNeeded()
         if await refreshTeamRanksFromRemote(season: season) {
@@ -598,6 +762,7 @@ final class AppModel {
         await refreshStandingsFromGamesFallback(season: season, reason: "rankFetchUnavailable")
     }
 
+    // loadLocalTeamRanks 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadLocalTeamRanks(season: Int) async -> Int {
         guard let localRankCache = repository as? any KBOLocalTeamRankCacheDataSource else {
             #if DEBUG
@@ -619,10 +784,11 @@ final class AppModel {
             season: season,
             reason: "localRankRowsInitial"
         )
-        _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "localRankRows")
+        logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "localRankRows")
         return rows.count
     }
 
+    // refreshTeamRanksFromRemote 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshTeamRanksFromRemote(season: Int) async -> Bool {
         guard let teamRankSource = repository as? any KBOTeamRankDataSource else {
             #if DEBUG
@@ -634,6 +800,7 @@ final class AppModel {
         do {
             #if DEBUG
             print("[StandingsRank] remote fetch start view=team_rank_2026 season=\(season)")
+            print("[StandingsRank] standings source=team_rank_2026 season=\(season)")
             #endif
             let rows = try await teamRankSource.fetchTeamRanks(season: season)
                 .sorted { $0.rank < $1.rank }
@@ -664,7 +831,7 @@ final class AppModel {
                     season: season,
                     reason: "remoteRankRowsInitial"
                 )
-                _ = await loadStandingsSourceGamesIfAvailable(season: season, reason: "remoteRankRows")
+                logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "remoteRankRows")
             }
 
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
@@ -685,6 +852,7 @@ final class AppModel {
         }
     }
 
+    // refreshStandingsFromGamesFallback 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshStandingsFromGamesFallback(season: Int, reason: String) async {
         do {
             #if DEBUG
@@ -711,62 +879,40 @@ final class AppModel {
         }
     }
 
+    // loadHomeFallbackStandingsSourceIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadHomeFallbackStandingsSourceIfNeeded(reason: String) async {
-        guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
-
         let season = currentStandingsSeason()
-        if let task = inFlightStandingsTasks[season] {
-            await task.value
-            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
+        if standingsSourceGamesBySeason[season]?.isEmpty == false ||
+            homeFallbackReferenceWeekCompletedGames.isEmpty == false {
+            logStandingsLocalCalculationSkipped(reason: "homeFallbackSourceAvailable", source: "homeFallback:\(reason)")
+            return
         }
-        if let sourceTask = inFlightStandingsSourceTasks[season] {
-            #if DEBUG
-            print("[HomeFallback] standings source joined rankMovementLoad reason=\(reason) season=\(season)")
-            #endif
-            let loaded = await sourceTask.value
-            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
-            if loaded {
-                return
-            }
-        } else if let prefetchTask = standingsSourcePrefetchTasks[season] {
-            #if DEBUG
-            print("[HomeFallback] standings source joined prefetch reason=\(reason) season=\(season)")
-            #endif
-            await prefetchTask.value
-            guard todayGames.isEmpty, homeFallbackStandingsSnapshots.isEmpty else { return }
-            if standingsSourceGamesBySeason[season]?.isEmpty == false {
-                return
-            }
-        }
-        guard standingsSourceGamesBySeason[season] == nil else { return }
 
         do {
-            ensureCatalogTeamsLoadedIfNeeded()
-            let sourceGames = try await fetchStandingsSourceGames(season: season)
-            let snapshot = await repositoryRuntimeState?.snapshot()
-            let normalizedGames = await reconcileOfficialScheduleStartTimesIfNeeded(
-                in: sourceGames,
-                snapshot: snapshot
-            )
+            #if DEBUG
+            print("[HomeFallback] standings source fetch start season=\(season) reason=\(reason)")
+            #endif
+            let normalizedGames = try await fetchNormalizedStandingsSourceGames(season: season)
             storeStandingsSourceGames(normalizedGames, season: season)
             refreshLocalStandingsProbabilitySignals(for: normalizedGames)
-            refreshPublishedStandingsRowsWithCurrentSource(
-                season: season,
-                reason: reason
-            )
             markRefreshSuccess(for: .games, at: Date(), isStale: false)
             await refreshRepositoryDebugInfo(dataSets: [])
             #if DEBUG
-            print("[HomeFallback] standings source loaded reason=\(reason) season=\(season) count=\(normalizedGames.count)")
+            print("[HomeFallback] standings source fetch success season=\(season) count=\(normalizedGames.count) reason=\(reason)")
+            #endif
+        } catch is CancellationError {
+            #if DEBUG
+            print("[HomeFallback] standings source fetch cancelled season=\(season) reason=\(reason)")
             #endif
         } catch {
             #if DEBUG
-            print("[HomeFallback] standings source load failed reason=\(reason) error=\(error)")
+            print("[HomeFallback] standings source fetch failed season=\(season) reason=\(reason) error=\(error)")
             #endif
             markRefreshFailure(for: .games, hasUsableData: !games.isEmpty)
         }
     }
 
+    // fetchStandingsSourceGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchStandingsSourceGames(season: Int) async throws -> [GameDetail] {
         if let standingsGameSource = repository as? any KBOStandingsGameDataSource {
             return try await standingsGameSource.fetchStandingsSource(season: season)
@@ -776,6 +922,7 @@ final class AppModel {
             .filter { $0.isRegularSeason && $0.hasCompleteFinalScore }
     }
 
+    // fetchNormalizedStandingsSourceGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchNormalizedStandingsSourceGames(season: Int) async throws -> [GameDetail] {
         let sourceGames = try await fetchStandingsSourceGames(season: season)
         let snapshot = await repositoryRuntimeState?.snapshot()
@@ -785,67 +932,7 @@ final class AppModel {
         )
     }
 
-    private func loadStandingsSourceGamesIfAvailable(season: Int, reason: String) async -> Bool {
-        if standingsSourceGamesBySeason[season]?.isEmpty == false {
-            return true
-        }
-
-        if let task = inFlightStandingsSourceTasks[season] {
-            #if DEBUG
-            print("[StandingsRankMovement] source=games reason=\(reason) standingsSourceLoadJoined=true")
-            #endif
-            let result = await task.value
-            if result {
-                refreshPublishedStandingsRowsWithCurrentSource(
-                    season: season,
-                    reason: "\(reason)Joined"
-                )
-            }
-            return result
-        }
-
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return false }
-            return await self.performLoadStandingsSourceGamesIfAvailable(season: season, reason: reason)
-        }
-        inFlightStandingsSourceTasks[season] = task
-        let result = await task.value
-        inFlightStandingsSourceTasks[season] = nil
-        return result
-    }
-
-    private func performLoadStandingsSourceGamesIfAvailable(season: Int, reason: String) async -> Bool {
-        do {
-            let startedAt = Date()
-            let sourceGames = try await fetchStandingsSourceGames(season: season)
-            guard sourceGames.isEmpty == false else {
-                #if DEBUG
-                print("[StandingsRankMovement] source=rankRows reason=\(reason) standingsSourceGames=0")
-                #endif
-                return false
-            }
-
-            storeStandingsSourceGames(sourceGames, season: season)
-            refreshLocalStandingsProbabilitySignals(for: sourceGames)
-            refreshPublishedStandingsRowsWithCurrentSource(
-                season: season,
-                reason: reason
-            )
-            #if DEBUG
-            let duration = Date().timeIntervalSince(startedAt)
-            print(
-                "[StandingsRankMovement] source=games reason=\(reason) standingsSourceGames=\(sourceGames.count) duration=\(String(format: "%.3f", duration))s officialRequestsAvoided=true"
-            )
-            #endif
-            return true
-        } catch {
-            #if DEBUG
-            print("[StandingsRankMovement] source=rankRows reason=\(reason) standingsSourceLoadFailed error=\(error)")
-            #endif
-            return false
-        }
-    }
-
+    // storeStandingsSourceGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func storeStandingsSourceGames(_ games: [GameDetail], season: Int) {
         standingsSourceGamesBySeason[season] = games
         #if DEBUG
@@ -853,20 +940,24 @@ final class AppModel {
         #endif
     }
 
+    // currentStandingsSeason 메서드는 이 타입의 주요 동작을 수행합니다.
     private func currentStandingsSeason() -> Int {
         var calendar = calendar
         calendar.timeZone = scheduleTimeZone
         return calendar.component(.year, from: currentDateProvider())
     }
 
+    // refreshNotifications 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshNotifications() async {
         await refreshNotifications(for: [.notifications])
     }
 
+    // isRefreshing 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isRefreshing(_ scope: RefreshScope) -> Bool {
         activeRefreshScopes.contains(scope)
     }
 
+    // statusMessage 메서드는 이 타입의 주요 동작을 수행합니다.
     func statusMessage(for scope: RefreshScope) -> String? {
         switch scope {
         case .home, .myTeam:
@@ -918,10 +1009,6 @@ final class AppModel {
         }
     }
 
-    var isDoosanFavoriteSelected: Bool {
-        Self.canonicalTeamIdentifier(settings.favoriteTeamID) == "doosan"
-    }
-
     var favoriteTeam: Team? {
         teams.first { $0.id == settings.favoriteTeamID }
     }
@@ -930,6 +1017,7 @@ final class AppModel {
         hasCompletedOnboarding == false
     }
 
+    // completeFavoriteTeamOnboarding 메서드는 이 타입의 주요 동작을 수행합니다.
     func completeFavoriteTeamOnboarding(with teamID: String) {
         #if DEBUG
         print("[FavoriteTeamOnboarding] selected favoriteTeamID=\(teamID)")
@@ -1002,18 +1090,6 @@ final class AppModel {
         return "오늘 경기가 없어 직전주차 기준 순위를 표시합니다."
     }
 
-    var todayGamesCount: Int {
-        homeTodayGames.count
-    }
-
-    var liveGamesCount: Int {
-        homeTodayGames.filter { $0.status.isLiveLike }.count
-    }
-
-    var myGamesCount: Int {
-        homeTodayGames.filter { $0.involves(teamID: settings.favoriteTeamID) }.count
-    }
-
     var myTeamTodayGame: GameDetail? {
         homeTodayGames.first { $0.involves(teamID: settings.favoriteTeamID) }
     }
@@ -1047,6 +1123,7 @@ final class AppModel {
             .first { $0.status.isLiveLike && $0.involves(teamID: settings.favoriteTeamID) }
     }
 
+    // makeHomeSummary 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeHomeSummary(from game: GameDetail) -> GameSummary {
         HomeGameSummaryBuilder.makeSummary(
             game: game,
@@ -1139,16 +1216,40 @@ final class AppModel {
     }
 
     var attendanceDashboard: AttendanceDashboard {
-        AttendanceDashboardBuilder.build(
-            attendedGames: knownScheduleGames(filter: .all).filter { isGameAttended($0) },
+        let knownGames = knownScheduleGames(filter: .all)
+        #if DEBUG
+        let loadedMonthGames = monthlyScheduleGames.values.reduce(0) { $0 + $1.count }
+        print("[AttendanceTab] resolve start confirmedCount=\(attendedGameKeys.count) loadedMonthGames=\(loadedMonthGames)")
+        #endif
+        let attendedGames = knownGames.filter { isGameAttended($0) }
+        let dashboard = AttendanceDashboardBuilder.build(
+            attendedGames: attendedGames,
             favoriteTeamID: settings.favoriteTeamID
         )
+        #if DEBUG
+        let knownKeys = Set(knownGames.map(\.attendanceCanonicalKey))
+        let unmatchedKeys = attendedGameKeys.subtracting(knownKeys)
+        for game in attendedGames.sorted(by: { $0.scheduledStart < $1.scheduledStart }) {
+            let uuidText = GameIdentifier.attendanceUUID(fromCanonicalKey: game.attendanceCanonicalKey)?
+                .uuidString.lowercased() ?? game.attendanceCanonicalKey
+            print("[AttendanceTab] matched gameID=\(uuidText) publicGameID=\(game.publicGameID ?? "none") status=\(game.status.rawValue)")
+        }
+        for key in unmatchedKeys.sorted().prefix(8) {
+            let normalized = GameIdentifier.attendanceCanonicalKey(from: key) ?? key
+            print("[AttendanceTab] unresolved gameID=\(normalized) fallback=notFoundInLoadedGames")
+        }
+        let finalCount = attendedGames.filter { $0.status == .final }.count
+        print("[AttendanceTab] summary totalConfirmed=\(attendedGameKeys.count) displayedCount=\(dashboard.games.count) upcomingCount=\(dashboard.upcomingGames.count) finalCount=\(finalCount) unmatchedCount=\(unmatchedKeys.count)")
+        print("[AttendanceStats] totalConfirmed=\(attendedGameKeys.count) finalCount=\(finalCount) calculatedCount=\(dashboard.overall.games) upcomingExcluded=\(dashboard.upcomingGames.count) win=\(dashboard.overall.wins) loss=\(dashboard.overall.losses) draw=\(dashboard.overall.draws)")
+        #endif
+        return dashboard
     }
 
     var regularSeasonGames: [GameDetail] {
         standingsCalculationGames.filter(\.isRegularSeason)
     }
 
+    // refreshPublishedStandingsRowsWithCurrentSource 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshPublishedStandingsRowsWithCurrentSource(season: Int, reason: String) {
         let snapshots = makeStandingsSnapshotsForCurrentState(season: season)
         standingsSnapshots = snapshots
@@ -1162,30 +1263,41 @@ final class AppModel {
 #endif
     }
 
+    // logStandingsLocalCalculationSkipped 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func logStandingsLocalCalculationSkipped(reason: String, source: String) {
+#if DEBUG
+        print("[StandingsRank] standings local calculation skipped reason=\(reason) source=\(source)")
+#endif
+    }
+
+    // durationMilliseconds 메서드는 이 타입의 주요 동작을 수행합니다.
+    private static func durationMilliseconds(since start: Date) -> Int {
+        Int(Date().timeIntervalSince(start) * 1_000)
+    }
+
+    // makeStandingsSnapshotsForCurrentState 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshotsForCurrentState(season: Int) -> [TeamStandingsSnapshot] {
-        let preGameRanks = preGameRankByTeamID(for: season)
         if standingsSourceGamesBySeason[season]?.isEmpty == false {
+            let preGameRanks = preGameRankByTeamID(for: season)
             return gameCalculatedStandingsSnapshots(season: season, preGameRanks: preGameRanks)
         }
         if let cached = standingsSnapshotCacheBySeason[season], cached.isEmpty == false {
             let snapshots = cached
-                .map { $0.withPreGameRank(preGameRanks[$0.team.id]) }
                 .sorted { left, right in
                     if left.rank != right.rank {
                         return left.rank < right.rank
                     }
                     return left.team.name.localizedStandardCompare(right.team.name) == .orderedAscending
                 }
-            return logStandingsRankMovementDiagnostics(
-                snapshots,
-                season: season,
-                preGameRanks: preGameRanks
-            )
+            logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "team_rank_2026")
+            return snapshots
         }
 
+        let preGameRanks = preGameRankByTeamID(for: season)
         return gameCalculatedStandingsSnapshots(season: season, preGameRanks: preGameRanks)
     }
 
+    // gameCalculatedStandingsSnapshots 메서드는 이 타입의 주요 동작을 수행합니다.
     private func gameCalculatedStandingsSnapshots(
         season: Int,
         preGameRanks: [String: Int]
@@ -1228,6 +1340,7 @@ final class AppModel {
         return standingsSourceGamesBySeason[season] ?? games
     }
 
+    // preGameRankByTeamID 메서드는 이 타입의 주요 동작을 수행합니다.
     private func preGameRankByTeamID(for season: Int) -> [String: Int] {
         StandingsRankMovementResolver.preGameRanks(
             teams: teams,
@@ -1236,6 +1349,7 @@ final class AppModel {
         )
     }
 
+    // logStandingsRankMovementDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logStandingsRankMovementDiagnostics(
         _ snapshots: [TeamStandingsSnapshot],
         season: Int,
@@ -1314,6 +1428,7 @@ final class AppModel {
     }
 #endif
 
+    // scheduleGames 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleGames(on date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let selectedDayKey = scheduleDayKey(for: date)
         let dayGames = groupedScheduleGamesByDay(for: date, filter: filter)[selectedDayKey] ?? []
@@ -1321,19 +1436,12 @@ final class AppModel {
         return ScheduleGameSelector.sortSelectedGames(dayGames, favoriteTeamID: settings.favoriteTeamID)
     }
 
+    // myTeamGames 메서드는 이 타입의 주요 동작을 수행합니다.
     func myTeamGames(on date: Date) -> [GameDetail] {
         scheduleGames(on: date, filter: .myTeam)
     }
 
-    func scheduleHasAvailableMonths(filter: ScheduleFilter) -> Bool {
-        availableScheduleMonths(filter: filter).isEmpty == false
-    }
-
-    func isScheduleMonthAvailable(_ date: Date, filter: ScheduleFilter) -> Bool {
-        let monthStart = startOfMonth(for: date)
-        return availableScheduleMonths(filter: filter).contains(monthStart)
-    }
-
+    // nearestScheduleMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func nearestScheduleMonth(to date: Date, filter: ScheduleFilter) -> Date? {
         let months = availableScheduleMonths(filter: filter)
         guard months.isEmpty == false else { return nil }
@@ -1345,6 +1453,7 @@ final class AppModel {
         return months.last
     }
 
+    // shiftedScheduleMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func shiftedScheduleMonth(from date: Date, by offset: Int, filter: ScheduleFilter) -> Date? {
         let months = availableScheduleMonths(filter: filter)
         guard months.isEmpty == false else { return nil }
@@ -1359,6 +1468,7 @@ final class AppModel {
         return months[targetIndex]
     }
 
+    // scheduleCalendarDays 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleCalendarDays(for month: Date, filter: ScheduleFilter) -> [MyTeamCalendarDay] {
         let cacheKey = makeScheduleCalendarCacheKey(for: month, filter: filter)
         if let cached = scheduleCalendarDaysCache[cacheKey] {
@@ -1366,53 +1476,49 @@ final class AppModel {
         }
 
         let gamesByDayKey = groupedScheduleGamesByDay(for: month, filter: filter)
-        let monthStart = startOfMonth(for: month)
-        guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
-              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
-              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: monthRange.start),
-              let lastWeek = calendar.dateInterval(of: .weekOfMonth, for: monthEnd) else {
-            return []
-        }
-
-        var days: [MyTeamCalendarDay] = []
-        var cursor = firstWeek.start
-        while cursor < lastWeek.end {
-            let cursorKey = scheduleDayKey(for: cursor)
-            let dayGames = gamesByDayKey[cursorKey] ?? []
-            let myTeamDayGames = calendarMyTeamGames(for: dayGames)
-            days.append(
-                MyTeamCalendarDay(
-                    date: cursor,
-                    isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
-                    isToday: calendar.isDateInToday(cursor),
-                    gameCount: dayGames.count,
-                    hasAttendedGame: dayGames.contains(where: isGameAttended),
-                    dominantStatus: dominantStatus(for: myTeamDayGames),
-                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter),
-                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter),
-                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames)
-                )
-            )
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = nextDay
-        }
+        let days = ScheduleCalendarDayBuilder.makeDays(
+            monthStart: startOfMonth(for: month),
+            gamesByDate: gamesByDayKey,
+            filter: filter,
+            favoriteTeamID: settings.favoriteTeamID,
+            calendar: calendar,
+            dayKey: { [self] date in scheduleDayKey(for: date) },
+            isToday: { [self] date, _ in calendar.isDateInToday(date) },
+            hasAttendedGame: { [self] games in games.contains(where: isGameAttended) },
+            favoriteTeamResult: { [self] games, _ in calendarFavoriteTeamResult(for: games) }
+        )
         scheduleCalendarDaysCache[cacheKey] = days
         return days
     }
 
+    // myTeamCalendarDays 메서드는 이 타입의 주요 동작을 수행합니다.
     func myTeamCalendarDays(for month: Date) -> [MyTeamCalendarDay] {
         scheduleCalendarDays(for: month, filter: .myTeam)
     }
 
+    // startOfMonth 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOfMonth(for date: Date) -> Date {
         let components = calendar.dateComponents([.year, .month], from: date)
         return calendar.date(from: components) ?? date
     }
 
+    // startOfMonth 메서드는 지정된 캘린더 기준 월 시작일을 반환합니다.
+    private func startOfMonth(for date: Date, calendar sourceCalendar: Calendar) -> Date {
+        let components = sourceCalendar.dateComponents([.year, .month], from: date)
+        return sourceCalendar.date(from: components) ?? date
+    }
+
+    // monthStart 메서드는 월 키를 KST 캘린더의 월 시작일로 변환합니다.
+    private func monthStart(for key: KBOMonthScheduleKey, calendar sourceCalendar: Calendar) -> Date {
+        sourceCalendar.date(from: DateComponents(year: key.year, month: key.month, day: 1)) ?? currentDateProvider()
+    }
+
+    // shiftedMonth 메서드는 이 타입의 주요 동작을 수행합니다.
     func shiftedMonth(from date: Date, by offset: Int) -> Date {
         calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
     }
 
+    // calendarMonthTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func calendarMonthTitle(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
@@ -1421,16 +1527,19 @@ final class AppModel {
         return formatter.string(from: startOfMonth(for: date))
     }
 
+    // loadScheduleIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadScheduleIfNeeded(for month: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadMyTeamSchedule(for: month, forceRefresh: false)
     }
 
+    // refreshSchedule 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshSchedule(for month: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadMyTeamSchedule(for: month, forceRefresh: true)
     }
 
+    // fetchIsolatedScheduleMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchIsolatedScheduleMonth(
         for key: KBOMonthScheduleKey,
         bypassingCache: Bool
@@ -1445,29 +1554,149 @@ final class AppModel {
         return normalized.sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // fetchScheduleTabMonth 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetchScheduleTabMonth(
+        for key: KBOMonthScheduleKey,
+        bypassingCache: Bool,
+        callSite: String,
+        reason: String
+    ) async throws -> [GameDetail] {
+        ensureCatalogTeamsLoadedIfNeeded()
+        let startedAt = Date()
+        #if DEBUG
+        print("[ScheduleRefresh] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) source=scheduleTabMonth officialStartTimeReconciliation=false skippedGlobalMerge=true")
+        #endif
+        let fetched: [GameDetail]
+        if let scheduleTabMonthSource = repository as? any KBOScheduleTabMonthDataSource {
+            fetched = try await scheduleTabMonthSource.fetchScheduleTabMonth(
+                for: key,
+                bypassingCache: bypassingCache
+            )
+        } else {
+            fetched = try await repository.fetchMonthlySchedule(
+                for: key,
+                bypassingCache: bypassingCache
+            )
+        }
+        let sorted = fetched.sorted { $0.scheduledStart < $1.scheduledStart }
+        #if DEBUG
+        print("[ScheduleRefresh] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) scheduleMonthLoad skippedGlobalMerge=true fetched=\(sorted.count) durationMs=\(Self.durationMilliseconds(since: startedAt))")
+        #endif
+        return sorted
+    }
+
+    func fetchCachedScheduleTabMonth(
+        for key: KBOMonthScheduleKey,
+        callSite: String,
+        reason: String
+    ) async -> [GameDetail]? {
+        ensureCatalogTeamsLoadedIfNeeded()
+        guard let cacheSource = repository as? any KBOLocalMonthlyScheduleCacheDataSource,
+              let cached = await cacheSource.fetchCachedMonthlySchedule(for: key),
+              cached.isEmpty == false else {
+            #if DEBUG
+            print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) repositoryHit=false diskHit=false displayCacheUsed=false")
+            #endif
+            return nil
+        }
+        let sorted = cached.sorted { $0.scheduledStart < $1.scheduledStart }
+        #if DEBUG
+        print("[ScheduleMonthCache] callSite=\(callSite) reason=\(reason) month=\(key.yearMonthText) repositoryHit=true displayCacheUsed=true count=\(sorted.count)")
+        #endif
+        return sorted
+    }
+
+    // refreshTodayScheduleGamesForScheduleCache 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    func refreshTodayScheduleGamesForScheduleCache(
+        selectedDate: Date,
+        reason: String
+    ) async -> [GameDetail] {
+        await refreshTodayGamesFromSupabase(
+            for: selectedDate,
+            monthKey: scheduleMonthKey(for: selectedDate),
+            reason: reason
+        )
+    }
+
+    // currentScheduleMonthSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     func currentScheduleMonthSnapshot(for key: KBOMonthScheduleKey) -> [GameDetail] {
         mergeMonthlyScheduleGames(fallbackMonthSchedule(for: key), for: key)
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    func updateFavoriteTeamScheduleWidgetSnapshot(
+        fromScheduleTabMonthGames games: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        reason: String
+    ) async {
+        let currentMonthKey = currentWidgetMonthKey()
+        guard monthKey == currentMonthKey else {
+            #if DEBUG
+            print("[WidgetScheduleBridge] skipped reason=nonCurrentMonth displayedMonth=\(monthKey.yearMonthText) currentMonth=\(currentMonthKey.yearMonthText) source=scheduleTabMonth")
+            #endif
+            return
+        }
+
+        let sortedGames = mergeEquivalentGames(games)
+            .filter { scheduleMonthKey(for: $0.scheduledStart) == monthKey }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        if sortedGames.isEmpty,
+           let existingSource = favoriteTeamWidgetMonthSources[monthKey],
+           existingSource.games.isEmpty == false {
+            #if DEBUG
+            print("[WidgetSnapshot] skipped reason=emptySchedulePreserved source=scheduleTabMonth month=\(monthKey.yearMonthText) existing=\(existingSource.games.count)")
+            #endif
+            return
+        }
+        storeFavoriteTeamWidgetMonthSource(
+            sortedGames,
+            monthKey: monthKey,
+            favoriteTeamID: settings.favoriteTeamID,
+            source: .scheduleTabCurrentMonth
+        )
+        #if DEBUG
+        print("[WidgetScheduleBridge] month=\(monthKey.yearMonthText) source=scheduleTabMonth count=\(sortedGames.count) favoriteTeam=\(settings.favoriteTeamID ?? "nil")")
+        #endif
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: "scheduleTabCurrentMonth",
+            monthKey: monthKey,
+            preferredMonthGames: sortedGames,
+            incomingSource: .scheduleTabCurrentMonth
+        )
+    }
+
+    func favoriteTeamScheduleWidgetSnapshotForTesting() -> FavoriteTeamScheduleWidgetSnapshot? {
+        lastFavoriteTeamWidgetSnapshot
+    }
+
+    func favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: KBOMonthScheduleKey) -> Int? {
+        favoriteTeamWidgetMonthSources[monthKey]?.games.count
+    }
+
+    // loadScheduleDayIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadScheduleDayIfNeeded(for date: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadScheduleDay(for: date, forceRefresh: false)
     }
 
+    // refreshScheduleDay 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshScheduleDay(for date: Date) async {
         ensureCatalogTeamsLoadedIfNeeded()
         await loadScheduleDay(for: date, forceRefresh: true)
     }
 
+    // currentScheduleRefreshDate 메서드는 이 타입의 주요 동작을 수행합니다.
     func currentScheduleRefreshDate() -> Date {
         currentDateProvider()
     }
 
+    // isScheduleStaleReconciliationInFlight 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isScheduleStaleReconciliationInFlight() -> Bool {
         inFlightScheduleStaleReconciliationTask != nil
     }
 
+    // preflightRefreshStaleScheduleDates 메서드는 이 타입의 주요 동작을 수행합니다.
     func preflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         let task = Task { @MainActor in
@@ -1476,6 +1705,7 @@ final class AppModel {
         return await task.value
     }
 
+    // reconcileStaleScheduleGameDates 메서드는 이 타입의 주요 동작을 수행합니다.
     func reconcileStaleScheduleGameDates(_ dates: [String]) async throws -> [String] {
         pruneExpiredRecentlyReconciledScheduleDates()
         let uniqueDates = Array(Set(dates)).sorted(by: >)
@@ -1508,6 +1738,7 @@ final class AppModel {
         return reconciliableDates
     }
 
+    // startPostReconciliationForceRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startPostReconciliationForceRefresh(_ dateKeys: [String]) {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         let refreshDateKeys = uniqueDateKeys.filter { inFlightSchedulePostReconciliationRefreshDates.contains($0) == false }
@@ -1524,12 +1755,28 @@ final class AppModel {
         }
     }
 
+    func mergeScheduleTabMonthGamesForAttendance(
+        _ monthGames: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        reason: String
+    ) {
+        let mergedGames = mergeMonthlyScheduleGames(monthGames, for: monthKey)
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        monthlyScheduleGames[monthKey] = mergedGames
+        invalidateScheduleDerivedCaches(for: monthKey)
+        #if DEBUG
+        print("[AttendanceTab] month cache updated month=\(monthKey.yearMonthText) loadedMonthGames=\(mergedGames.count) reason=\(reason)")
+        #endif
+    }
+
+    // waitForSchedulePostReconciliationRefreshIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForSchedulePostReconciliationRefreshIfNeeded() async {
         while inFlightSchedulePostReconciliationRefreshDates.isEmpty == false {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
+    // performPostReconciliationForceRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performPostReconciliationForceRefresh(_ dateKeys: [String]) async {
         do {
             _ = try await forceRefreshScheduleDatesAfterReconciliation(dateKeys)
@@ -1545,6 +1792,7 @@ final class AppModel {
         inFlightSchedulePostReconciliationRefreshDates.subtract(dateKeys)
     }
 
+    // performPreflightRefreshStaleScheduleDates 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performPreflightRefreshStaleScheduleDates(_ dateKeys: [String]) async -> ScheduleStalePreflightRefreshResult {
         guard dateKeys.isEmpty == false else {
             return ScheduleStalePreflightRefreshResult(
@@ -1574,8 +1822,12 @@ final class AppModel {
                 #endif
 
                 let monthKey = scheduleMonthKey(for: date)
-                let overlayResult = overlayScheduleGames(fetched, intoMonth: monthKey)
-                let upsertResult = upsertScheduleGamesIntoLocalStore(fetched)
+                let overlayResult = await overlayScheduleGames(
+                    fetched,
+                    intoMonth: monthKey,
+                    reason: "stalePreflightOverlay"
+                )
+                let upsertResult = upsertScheduleGamesIntoLocalStore(fetched, source: .staleReconciliation)
                 _ = await upsertScheduleGamesIntoRepositoryCache(fetched)
                 refreshedMonthKeys.insert(monthKey)
                 didMergeFreshGames = true
@@ -1608,7 +1860,10 @@ final class AppModel {
         }
 
         for monthKey in refreshedMonthKeys {
-            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: monthKey,
+                reason: "stalePreflightLocalStoreRefresh"
+            )
         }
         if didMergeFreshGames {
             schedulePostReconciliationRefreshGeneration += 1
@@ -1629,6 +1884,7 @@ final class AppModel {
         )
     }
 
+    // forceRefreshScheduleDatesAfterReconciliation 메서드는 이 타입의 주요 동작을 수행합니다.
     private func forceRefreshScheduleDatesAfterReconciliation(_ dateKeys: [String]) async throws -> SchedulePostReconciliationRefreshResult {
         let uniqueDateKeys = Array(Set(dateKeys)).sorted(by: >)
         guard uniqueDateKeys.isEmpty == false else {
@@ -1653,8 +1909,12 @@ final class AppModel {
         var refreshedMonthKeys = Set<KBOMonthScheduleKey>()
         for fetch in fetches {
             let monthKey = scheduleMonthKey(for: fetch.date)
-            let overlayResult = overlayScheduleGames(fetch.games, intoMonth: monthKey)
-            let upsertResult = upsertScheduleGamesIntoLocalStore(fetch.games)
+            let overlayResult = await overlayScheduleGames(
+                fetch.games,
+                intoMonth: monthKey,
+                reason: "postReconciliationOverlay"
+            )
+            let upsertResult = upsertScheduleGamesIntoLocalStore(fetch.games, source: .staleReconciliation)
             _ = await upsertScheduleGamesIntoRepositoryCache(fetch.games)
             refreshedMonthKeys.insert(monthKey)
             dateResults.append(
@@ -1673,7 +1933,10 @@ final class AppModel {
         }
 
         for monthKey in refreshedMonthKeys {
-            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: monthKey,
+                reason: "postReconciliationLocalStoreRefresh"
+            )
         }
 
         #if DEBUG
@@ -1685,6 +1948,7 @@ final class AppModel {
         return SchedulePostReconciliationRefreshResult(dateResults: dateResults)
     }
 
+    // loadScheduleDay 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadScheduleDay(for date: Date, forceRefresh: Bool) async {
         let dayKey = scheduleDayKey(for: date)
         let todayKey = scheduleDayKey(for: currentDateProvider())
@@ -1739,25 +2003,20 @@ final class AppModel {
             return
         }
 
-        await refreshTodayGamesFromSupabase(for: date, monthKey: monthKey, reason: reason)
+        _ = await refreshTodayGamesFromSupabase(for: date, monthKey: monthKey, reason: reason)
     }
 
+    // loadMyTeamScheduleIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func loadMyTeamScheduleIfNeeded(for month: Date) async {
         await loadScheduleIfNeeded(for: month)
     }
 
-    func refreshMyTeamSchedule(for month: Date) async {
-        await refreshSchedule(for: month)
-    }
-
+    // isLoadingSchedule 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLoadingSchedule(for month: Date) -> Bool {
         loadingScheduleMonths.contains(KBOMonthScheduleKey(date: month, calendar: calendar))
     }
 
-    func isLoadingMyTeamSchedule(for month: Date) -> Bool {
-        isLoadingSchedule(for: month)
-    }
-
+    // scheduleStatusMessage 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleStatusMessage(for month: Date) -> String? {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         if let snapshot = monthlyScheduleDebugSnapshots[key] {
@@ -1781,10 +2040,7 @@ final class AppModel {
         return "월간 일정을 불러오지 못했습니다."
     }
 
-    func myTeamScheduleStatusMessage(for month: Date) -> String? {
-        scheduleStatusMessage(for: month)
-    }
-
+    // scheduleDebugSummary 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleDebugSummary(for month: Date) -> String? {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         guard let snapshot = monthlyScheduleDebugSnapshots[key] else { return nil }
@@ -1825,28 +2081,44 @@ final class AppModel {
         }
     }
 
+    // game 메서드는 이 타입의 주요 동작을 수행합니다.
     func game(withID gameID: UUID) -> GameDetail? {
         game(withIdentity: gameID.uuidString)
     }
 
+    // initialGameSnapshot 메서드는 이 타입의 주요 동작을 수행합니다.
     func initialGameSnapshot(for gameIdentity: String) -> GameDetail? {
         game(withIdentity: gameIdentity)
     }
 
+    // game 메서드는 이 타입의 주요 동작을 수행합니다.
     func game(withIdentity gameIdentity: String) -> GameDetail? {
         selectedGameMatch(for: gameIdentity)?.game
     }
 
-    func resolveGameDetailSelection(for gameIdentity: String) async -> GameDetail? {
+    // resolveGameDetailSelection 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
+    func resolveGameDetailSelection(
+        for gameIdentity: String,
+        initialGame: GameDetail? = nil
+    ) async -> GameDetail? {
         if let match = selectedGameMatch(for: gameIdentity) {
             #if DEBUG
             print("[GameDetailFetch] selectedGame resolved selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
             #endif
             return match.game
         }
+        if let initialGame,
+           let match = SelectedGameResolver.match(for: gameIdentity, in: allKnownGames() + [initialGame]) {
+            #if DEBUG
+            print("[GameDetailFetch] selectedGame resolved source=routeInitialSnapshot selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
+            print("[GameDetailFetch] selectedGame localMiss avoided reason=routeInitialSnapshot selectedIdentity=\(gameIdentity)")
+            #endif
+            return match.game
+        }
         return await fetchSelectedGameFromRepository(for: gameIdentity)
     }
 
+    // fetchIsolatedGameDetailSnapshot 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchIsolatedGameDetailSnapshot(
         for game: GameDetail,
         identity: String
@@ -1870,14 +2142,766 @@ final class AppModel {
         }
     }
 
+    // fetchGameDetailDatabaseReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetchGameDetailDatabaseReview(for game: GameDetail) async -> GameCenterReview? {
+        guard game.status == .final || game.status.isLiveLike else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=nonRecordStatus status=\(game.status.rawValue) gameID=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
+        guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDataSource else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedRepository gameID=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
+        do {
+            return try await recordSource.fetchGameDetailDatabaseReview(for: game)
+        } catch is CancellationError {
+            return nil
+        } catch {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=fetchFailed gameID=\(game.id.uuidString) error=\(error)")
+            #endif
+            return nil
+        }
+    }
+
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async -> GameDetailDatabaseReviewFetchResult? {
+        guard game.status == .final || game.status.isLiveLike else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=nonRecordStatus status=\(game.status.rawValue) gameID=\(game.id.uuidString)")
+            #endif
+            return nil
+        }
+        let forceRefresh = game.status.isLiveLike
+        if let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
+            let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
+            let providerGameID = game.providerGameID ?? rawIdentity?.providerGameID
+            let publicGameID = game.publicGameID ?? rawIdentity?.publicGameID
+            if let rawSupabaseGameID = rawIdentity?.supabaseGameID {
+                return await fetchGameDetailDatabaseReviewResult(
+                    rawSupabaseGameID: rawSupabaseGameID,
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID
+                )
+            }
+            if providerGameID?.nilIfBlank != nil || publicGameID?.nilIfBlank != nil {
+                #if DEBUG
+                print("[GameDetailDBRecords] providerResolvedRequest invokedFrom=afterFetchGameSingleProviderResolved localGameId=\(game.id.uuidString) providerGameID=\(providerGameID ?? "<nil>") publicGameID=\(publicGameID ?? "<nil>")")
+                #endif
+                return await fetchGameDetailDatabaseReviewResultDeduped(
+                    rawSupabaseGameID: nil,
+                    providerGameID: providerGameID,
+                    publicGameID: publicGameID,
+                    recordType: "providerResolvedDbRecords",
+                    forceRefresh: forceRefresh
+                ) {
+                    try await recordSource.fetchGameDetailDatabaseReview(
+                        providerGameID: providerGameID,
+                        publicGameID: publicGameID,
+                        invokedFrom: "afterFetchGameSingleProviderResolved"
+                    )
+                }
+            }
+            #if DEBUG
+            print("[GameDetailDBRecords] providerResolvedRequest skipped reason=missingProviderAndPublicID localGameId=\(game.id.uuidString)")
+            #endif
+            return await fetchGameDetailDatabaseReviewResultDeduped(
+                rawSupabaseGameID: nil,
+                providerGameID: game.providerGameID,
+                publicGameID: game.publicGameID,
+                recordType: "localDbRecords",
+                forceRefresh: forceRefresh
+            ) {
+                try await recordSource.fetchGameDetailDatabaseReviewResult(for: game)
+            }
+        }
+
+        return await fetchGameDetailDatabaseReviewResultDeduped(
+            rawSupabaseGameID: nil,
+            providerGameID: game.providerGameID,
+            publicGameID: game.publicGameID,
+            recordType: "simpleDbRecords",
+            forceRefresh: forceRefresh
+        ) { [weak self] in
+            guard let self,
+                  let review = await self.fetchGameDetailDatabaseReview(for: game) else {
+                return nil
+            }
+            return GameDetailDatabaseReviewFetchResult(
+                review: review,
+                inputLocalGameID: game.id,
+                rawSupabaseGameID: nil,
+                resolvedSupabaseGameID: nil,
+                providerGameID: game.providerGameID,
+                publicGameID: game.publicGameID,
+                publicBatterRawRowCount: review.awayBatting.lines.count + review.homeBatting.lines.count,
+                publicPitcherRawRowCount: review.awayPitching.lines.count + review.homePitching.lines.count,
+                eventRawRowCount: 0
+            )
+        }
+    }
+
+    // fetchGameDetailDatabaseReviewResultDeduped 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    private func fetchGameDetailDatabaseReviewResultDeduped(
+        rawSupabaseGameID: UUID?,
+        providerGameID: String?,
+        publicGameID: String?,
+        recordType: String,
+        forceRefresh: Bool,
+        operation: @escaping () async throws -> GameDetailDatabaseReviewFetchResult?
+    ) async -> GameDetailDatabaseReviewFetchResult? {
+        let key = gameDetailDatabaseRecordRequestKey(
+            rawSupabaseGameID: rawSupabaseGameID,
+            providerGameID: providerGameID,
+            publicGameID: publicGameID,
+            recordType: recordType,
+            forceRefresh: forceRefresh
+        )
+        if forceRefresh == false,
+           let rawSupabaseGameID,
+           let cached = cachedGameDetailDatabaseReviewsByRawSupabaseID[rawSupabaseGameID] {
+            #if DEBUG
+            print("[GameDetailDBRecords] fetch skipped reason=alreadyLoaded rawSupabaseGameID=\(rawSupabaseGameID.uuidString) recordType=\(recordType)")
+            #endif
+            return cached
+        }
+        if forceRefresh == false,
+           let cached = cachedGameDetailDatabaseReviewsByRequestKey[key] {
+            #if DEBUG
+            print("[GameDetailDBRecords] fetch skipped reason=alreadyLoaded key=\(key)")
+            #endif
+            return cached
+        }
+        if let inFlight = inFlightGameDetailDatabaseReviewTasks[key] {
+            #if DEBUG
+            print("[GameDetailDBRecords] fetch skipped reason=inFlight key=\(key)")
+            #endif
+            return await inFlight.value
+        }
+
+        let stageStartedAt = Date()
+        let task = Task { @MainActor () -> GameDetailDatabaseReviewFetchResult? in
+            do {
+                return try await operation()
+            } catch is CancellationError {
+                return nil
+            } catch {
+                #if DEBUG
+                print("[GameDetailDBRecords] selectedRecordSource=none reason=fetchFailed key=\(key) error=\(error)")
+                #endif
+                return nil
+            }
+        }
+        inFlightGameDetailDatabaseReviewTasks[key] = task
+        let result = await task.value
+        inFlightGameDetailDatabaseReviewTasks[key] = nil
+        if let result {
+            cachedGameDetailDatabaseReviewsByRequestKey[key] = result
+            if let rawSupabaseGameID = rawSupabaseGameID ?? result.rawSupabaseGameID ?? result.resolvedSupabaseGameID {
+                cachedGameDetailDatabaseReviewsByRawSupabaseID[rawSupabaseGameID] = result
+            }
+        }
+        #if DEBUG
+        print("[GameDetailDBRecords] fetch completed key=\(key) durationMs=\(Int(Date().timeIntervalSince(stageStartedAt) * 1_000)) mappedBatterCount=\(result?.mappedBatterCount ?? 0) mappedPitcherCount=\(result?.mappedPitcherCount ?? 0)")
+        #endif
+        return result
+    }
+
+    // gameDetailDatabaseRecordRequestKey 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func gameDetailDatabaseRecordRequestKey(
+        rawSupabaseGameID: UUID?,
+        providerGameID: String?,
+        publicGameID: String?,
+        recordType: String,
+        forceRefresh: Bool
+    ) -> String {
+        [
+            "raw=\(rawSupabaseGameID?.uuidString ?? "<nil>")",
+            "provider=\(providerGameID?.nilIfBlank ?? "<nil>")",
+            "public=\(publicGameID?.nilIfBlank ?? "<nil>")",
+            "recordType=\(recordType)",
+            "forceRefresh=\(forceRefresh)"
+        ].joined(separator: "|")
+    }
+
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetchGameDetailDatabaseReviewResult(
+        rawSupabaseGameID: UUID,
+        providerGameID: String?,
+        publicGameID: String?
+    ) async -> GameDetailDatabaseReviewFetchResult? {
+        guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource else {
+            #if DEBUG
+            print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedRepository rawSupabaseGameId=\(rawSupabaseGameID.uuidString)")
+            #endif
+            return nil
+        }
+        return await fetchGameDetailDatabaseReviewResultDeduped(
+            rawSupabaseGameID: rawSupabaseGameID,
+            providerGameID: providerGameID,
+            publicGameID: publicGameID,
+            recordType: "supabaseDbRecords",
+            forceRefresh: false
+        ) {
+            try await recordSource.fetchGameDetailDatabaseReview(
+                supabaseGameId: rawSupabaseGameID,
+                providerGameID: providerGameID,
+                publicGameID: publicGameID,
+                invokedFrom: "afterFetchGameSingleRawSupabaseId"
+            )
+        }
+    }
+
+    // refreshGameDetail 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     @discardableResult
     func refreshGameDetail(for gameIdentity: String, forceRefresh: Bool = false) async -> GameDetail? {
+        await refreshGameDetailResult(for: gameIdentity, forceRefresh: forceRefresh)?.game
+    }
+
+    // startLiveGameDetailPolling 메서드는 화면 생명주기와 분리된 라이브 경기 상세 갱신을 시작합니다.
+    func startLiveGameDetailPolling(gameIdentity: String) async {
         guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity) else {
+            logGameDetailPollingSkip(identity: gameIdentity, reason: "missingGame")
+            return
+        }
+        let now = currentDateProvider()
+        guard selectedGame.shouldPollGameDetail(now: now) else {
+            logGameDetailPollingSkip(
+                identity: selectedGame.stableDetailIdentity,
+                reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "notEligible"
+            )
+            return
+        }
+
+        let stableIdentity = selectedGame.stableDetailIdentity
+        if activeGameDetailLivePollingIdentity == stableIdentity,
+           let pollingTask = gameDetailLivePollingTask,
+           pollingTask.isCancelled == false {
+            logGameDetailPolling("stream start skipped reason=alreadyStreaming identity=\(stableIdentity)")
+            return
+        }
+
+        if let activeIdentity = activeGameDetailLivePollingIdentity,
+           activeIdentity != stableIdentity {
+            #if DEBUG
+            print("[GameDetailLivePolling] replace old=\(activeIdentity) new=\(stableIdentity)")
+            #endif
+            logGameDetailPolling("stream task cancelled reason=differentGame oldIdentity=\(activeIdentity) newIdentity=\(stableIdentity)")
+            gameDetailLivePollingTask?.cancel()
+        } else if gameDetailLivePollingTask?.isCancelled == true {
+            gameDetailLivePollingTask = nil
+        }
+
+        activeGameDetailLivePollingIdentity = stableIdentity
+        gameDetailLivePollingGeneration += 1
+        let generation = gameDetailLivePollingGeneration
+        let intervalNanoseconds = gameDetailPollingIntervalNanoseconds
+        gameDetailLiveTransport = .streaming
+        logGameDetailPolling("GameDetail streaming started identity=\(stableIdentity)")
+
+        gameDetailLivePollingTask = Task { @MainActor [weak self] in
+            await self?.runGameDetailLiveStreamThenFallback(
+                identity: stableIdentity,
+                generation: generation,
+                intervalNanoseconds: intervalNanoseconds
+            )
+        }
+        logGameDetailPolling("stream task created identity=\(stableIdentity)")
+    }
+
+    // stopLiveGameDetailPolling 메서드는 상세 화면이 사라질 때 자동 갱신을 중단합니다.
+    func stopLiveGameDetailPolling() {
+        guard activeGameDetailLivePollingIdentity != nil || gameDetailLivePollingTask != nil else {
+            logGameDetailPollingSkip(identity: "<none>", reason: "stopWithoutActiveTask")
+            return
+        }
+        let identity = activeGameDetailLivePollingIdentity ?? "<unknown>"
+        gameDetailLivePollingGeneration += 1
+        logGameDetailPolling("stream task cancelled reason=screenDisappear identity=\(identity)")
+        gameDetailLivePollingTask?.cancel()
+        gameDetailLivePollingTask = nil
+        activeGameDetailLivePollingIdentity = nil
+        gameDetailLiveTransport = nil
+        logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=screenDisappear")
+    }
+
+    // resumeLiveGameDetailPollingIfNeeded 메서드는 foreground 복귀 시 기존 라이브 polling task를 복구합니다.
+    func resumeLiveGameDetailPollingIfNeeded() async {
+        guard let activeIdentity = activeGameDetailLivePollingIdentity else {
+            logGameDetailPollingSkip(identity: "<none>", reason: "foregroundNoActiveIdentity")
+            return
+        }
+        if gameDetailLiveTransport == .streaming,
+           let pollingTask = gameDetailLivePollingTask,
+           pollingTask.isCancelled == false {
+            logGameDetailPollingSkip(identity: activeIdentity, reason: "foregroundStreamAlreadyAlive")
+            return
+        }
+        _ = await refreshGameDetailResult(for: activeIdentity, forceRefresh: true)
+        if let pollingTask = gameDetailLivePollingTask,
+           pollingTask.isCancelled == false {
+            return
+        }
+        guard let selectedGame = await resolveGameDetailSelection(for: activeIdentity) else {
+            logGameDetailPollingSkip(identity: activeIdentity, reason: "foregroundMissingGame")
+            return
+        }
+        let now = currentDateProvider()
+        guard selectedGame.shouldPollGameDetail(now: now) else {
+            logGameDetailPollingSkip(
+                identity: activeIdentity,
+                reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "foregroundNotEligible"
+            )
+            return
+        }
+        await startLiveGameDetailPolling(gameIdentity: activeIdentity)
+    }
+
+    var isGameDetailPollingActiveForTesting: Bool {
+        activeGameDetailLivePollingIdentity != nil &&
+            gameDetailLivePollingTask?.isCancelled == false
+    }
+
+    var activeGameDetailPollingIdentityForTesting: String? {
+        activeGameDetailLivePollingIdentity
+    }
+
+    // gameDetailRefreshResultSnapshot 메서드는 공유 저장소에 반영된 상세 경기 상태를 화면 모델에 전달합니다.
+    func gameDetailRefreshResultSnapshot(for gameIdentity: String) -> GameDetailRefreshResult? {
+        guard let game = game(withIdentity: gameIdentity) else { return nil }
+        let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
+        return GameDetailRefreshResult(
+            game: game,
+            rawSupabaseGameID: rawIdentity?.supabaseGameID,
+            providerGameID: rawIdentity?.providerGameID ?? game.providerGameID,
+            publicGameID: rawIdentity?.publicGameID ?? game.publicGameID
+        )
+    }
+
+    // runGameDetailLivePolling 메서드는 선택된 라이브 경기 상세를 2초 간격으로 갱신합니다.
+    private func runGameDetailLiveStreamThenFallback(
+        identity: String,
+        generation: Int,
+        intervalNanoseconds: UInt64
+    ) async {
+        do {
+            try await runGameDetailLiveStream(
+                identity: identity,
+                generation: generation
+            )
+        } catch is CancellationError {
+            logGameDetailPolling("GameDetail streaming stopped identity=\(identity) reason=cancelled")
+        } catch {
+            guard Task.isCancelled == false,
+                  activeGameDetailLivePollingIdentity == identity,
+                  gameDetailLivePollingGeneration == generation else { return }
+            gameDetailLiveTransport = .polling
+            logGameDetailPolling("fallback polling started reason=streamFailed identity=\(identity) error=\(error)")
+            await runGameDetailLivePolling(
+                identity: identity,
+                generation: generation,
+                intervalNanoseconds: intervalNanoseconds
+            )
+            return
+        }
+
+        if activeGameDetailLivePollingIdentity == identity,
+           gameDetailLivePollingGeneration == generation {
+            gameDetailLivePollingTask = nil
+            activeGameDetailLivePollingIdentity = nil
+            gameDetailLiveTransport = nil
+        }
+    }
+
+    private func runGameDetailLiveStream(
+        identity: String,
+        generation: Int
+    ) async throws {
+        guard let selectedGame = await resolveGameDetailSelection(for: identity),
+              selectedGame.shouldPollGameDetail(now: currentDateProvider()),
+              let streamGameID = liveStreamRequestGameID(for: selectedGame, identity: identity) else {
+            logGameDetailPolling("snapshot ignored reason=missingStreamGameId identity=\(identity)")
+            throw GameBoxscoreClientError.invalidURL
+        }
+
+        var endedForTerminalStatus = false
+        var didReceiveSnapshotEvent = false
+        var didRunNoSnapshotFallback = false
+        var snapshotEventFallbackDeadline = currentDateProvider().addingTimeInterval(60)
+        logGameDetailPolling("stream request gameId=\(streamGameID) identity=\(identity)")
+        for try await event in gameLiveStreamClient.streamGame(gameId: streamGameID) {
+            guard Task.isCancelled == false,
+                  activeGameDetailLivePollingIdentity == identity,
+                  gameDetailLivePollingGeneration == generation else {
+                logGameDetailPolling("stream task cancelled reason=staleGeneration identity=\(identity)")
+                throw CancellationError()
+            }
+            switch event {
+            case .heartbeat:
+                logGameDetailPolling("heartbeat received identity=\(identity)")
+                if didReceiveSnapshotEvent == false,
+                   didRunNoSnapshotFallback == false,
+                   currentDateProvider() >= snapshotEventFallbackDeadline,
+                   let selectedGame = await resolveGameDetailSelection(for: identity) {
+                    didRunNoSnapshotFallback = true
+                    snapshotEventFallbackDeadline = currentDateProvider().addingTimeInterval(60)
+                    logGameDetailPolling("fallback polling requested reason=noSnapshotRecently identity=\(identity)")
+                    var result = await refreshLatestGameSnapshotOnlyResult(
+                        for: identity,
+                        selectedGame: selectedGame
+                    )
+                    if result == nil {
+                        result = await refreshGameDetailResult(for: identity, initialGame: selectedGame, forceRefresh: true)
+                    }
+                    if let result {
+                        logStreamSnapshotApplyCompleted(publicGameID: result.publicGameID ?? streamGameID, game: result.game)
+                    }
+                }
+                continue
+            case .snapshot(let liveState), .statusChanged(let liveState):
+                didReceiveSnapshotEvent = true
+                didRunNoSnapshotFallback = false
+                snapshotEventFallbackDeadline = currentDateProvider().addingTimeInterval(60)
+                logGameDetailPolling("stream event received event=snapshot publicGameId=\(liveState.publicGameId)")
+                guard let selectedGame = await resolveGameDetailSelection(for: identity) else {
+                    logGameDetailPolling("snapshot ignored reason=missingSelectedGame identity=\(identity) publicGameId=\(liveState.publicGameId)")
+                    continue
+                }
+                logGameDetailPolling("stream snapshot apply started publicGameId=\(liveState.publicGameId)")
+                var result = await refreshLatestGameSnapshotOnlyResult(
+                    for: identity,
+                    selectedGame: selectedGame
+                )
+                if result == nil {
+                    result = await applyGameLiveState(
+                        liveState,
+                        selectedGame: selectedGame,
+                        gameIdentity: identity,
+                        source: "sse-fallback",
+                        syncLiveActivity: false
+                    )
+                }
+                if let result {
+                    logStreamSnapshotApplyCompleted(publicGameID: liveState.publicGameId, game: result.game)
+                    await startOrUpdateLiveActivityIfNeeded(for: result.game)
+                    logGameDetailPolling("snapshot applied identity=\(identity) publicGameId=\(liveState.publicGameId) rawHash=\(liveState.rawHash) status=\(result.game.status.rawValue)")
+                    if result.game.shouldPollGameDetail(now: currentDateProvider()) {
+                        continue
+                    } else {
+                        endedForTerminalStatus = true
+                        logGameDetailPolling("GameDetail streaming stopped identity=\(identity) reason=terminalStatus")
+                        return
+                    }
+                }
+            }
+        }
+
+        if Task.isCancelled {
+            throw CancellationError()
+        }
+        if endedForTerminalStatus == false {
+            throw GameBoxscoreClientError.invalidResponse
+        }
+    }
+
+    private func liveStreamRequestGameID(for selectedGame: GameDetail, identity: String) -> String? {
+        selectedGame.publicGameID?.nilIfBlank ??
+            selectedGame.officialGameCenterID?.nilIfBlank ??
+            selectedGame.providerGameID?.nilIfBlank ??
+            identity.removingGameIdentityPrefix.nilIfBlank
+    }
+
+    private func runGameDetailLivePolling(
+        identity: String,
+        generation: Int,
+        intervalNanoseconds: UInt64
+    ) async {
+        gameDetailLiveTransport = .polling
+        defer {
+            if Task.isCancelled {
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=cancelled")
+            }
+            if activeGameDetailLivePollingIdentity == identity,
+               gameDetailLivePollingGeneration == generation {
+                gameDetailLivePollingTask = nil
+                gameDetailLiveTransport = nil
+            }
+        }
+
+        while Task.isCancelled == false {
+            do {
+                try await Task.sleep(nanoseconds: intervalNanoseconds)
+            } catch {
+                break
+            }
+            guard Task.isCancelled == false else { break }
+            logGameDetailPolling("GameDetail polling tick identity=\(identity)")
+            guard let selectedGame = await resolveGameDetailSelection(for: identity) else {
+                logGameDetailPollingSkip(identity: identity, reason: "tickMissingGame")
+                continue
+            }
+            let now = currentDateProvider()
+            guard selectedGame.shouldPollGameDetail(now: now) else {
+                logGameDetailPollingSkip(
+                    identity: identity,
+                    reason: selectedGame.gameDetailPollingSkipReason(now: now) ?? "tickNotEligible"
+                )
+                if activeGameDetailLivePollingIdentity == identity,
+                   gameDetailLivePollingGeneration == generation {
+                    activeGameDetailLivePollingIdentity = nil
+                    gameDetailLivePollingTask = nil
+                }
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=notEligible")
+                return
+            }
+            let snapshotOnlyResult = await refreshLatestGameSnapshotOnlyResult(
+                for: identity,
+                selectedGame: selectedGame
+            )
+            let result: GameDetailRefreshResult?
+            if let snapshotOnlyResult {
+                result = snapshotOnlyResult
+            } else {
+                result = await refreshGameDetailResult(for: identity, initialGame: selectedGame, forceRefresh: true)
+            }
+            guard let result else {
+                logGameDetailPolling("GameDetail polling refresh failed identity=\(identity) reason=nilResult")
+                continue
+            }
+            logGameDetailPolling(
+                "GameDetail polling tick latestSnapshot runner_on_first=\(boolDebugText(result.game.bases?.first)) runner_on_second=\(boolDebugText(result.game.bases?.second)) runner_on_third=\(boolDebugText(result.game.bases?.third)) identity=\(identity)"
+            )
+            logGameDetailPolling("GameDetail polling refresh succeeded identity=\(identity) status=\(result.game.status.rawValue)")
+            guard Task.isCancelled == false else { break }
+            if result.game.shouldPollGameDetail(now: currentDateProvider()) {
+                await startOrUpdateLiveActivityIfNeeded(for: result.game)
+            } else {
+                logGameDetailPollingSkip(
+                    identity: identity,
+                    reason: result.game.gameDetailPollingSkipReason(now: currentDateProvider()) ?? "refreshedNotEligible"
+                )
+                if activeGameDetailLivePollingIdentity == identity,
+                   gameDetailLivePollingGeneration == generation {
+                    activeGameDetailLivePollingIdentity = nil
+                    gameDetailLivePollingTask = nil
+                }
+                logGameDetailPolling("GameDetail polling stopped identity=\(identity) reason=refreshedNotEligible")
+                return
+            }
+        }
+    }
+
+    private func refreshLatestGameSnapshotOnlyResult(
+        for identity: String,
+        selectedGame: GameDetail
+    ) async -> GameDetailRefreshResult? {
+        guard selectedGame.status.isLiveLike,
+              let snapshotSource = repository as? any KBOGameDetailLatestSnapshotDataSource else {
+            return nil
+        }
+        let rawGameID = rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID ?? selectedGame.id
+        do {
+            guard let snapshotResult = try await snapshotSource.fetchLatestGameSnapshotResult(
+                gameID: rawGameID,
+                fallbackGame: selectedGame
+            ) else {
+                logGameDetailPolling("latest snapshot-only unavailable identity=\(identity) game_id=\(rawGameID.uuidString)")
+                return nil
+            }
+            let updatedGame = snapshotResult.game
+            logLiveSituationApplied(
+                source: "public_latest_game_snapshots",
+                createdAt: snapshotResult.snapshotCreatedAt,
+                updatedAt: snapshotResult.snapshotUpdatedAt,
+                before: selectedGame,
+                after: updatedGame
+            )
+            let previousKnownGames = allKnownGames()
+            let upsertResult = upsertScheduleGamesIntoLocalStore([updatedGame], source: .gameDetailRefresh)
+            let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([updatedGame])
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: scheduleMonthKey(for: updatedGame.scheduledStart),
+                reason: "gameDetailLatestSnapshot"
+            )
+            let storeResolved = game(withIdentity: updatedGame.canonicalGameIdentityValue) ??
+                game(withIdentity: identity) ??
+                updatedGame
+            let resolved = gameDetailRefreshResultGame(
+                storeResolved: storeResolved,
+                incomingSnapshot: updatedGame
+            )
+            if upsertResult.inserted > 0 || upsertResult.updated > 0 || cacheUpsertResult.inserted > 0 || cacheUpsertResult.updated > 0 {
+                await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+                await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+            }
+            return GameDetailRefreshResult(
+                game: resolved,
+                rawSupabaseGameID: snapshotResult.rawSupabaseGameID,
+                providerGameID: snapshotResult.providerGameID ?? resolved.providerGameID,
+                publicGameID: snapshotResult.publicGameID ?? resolved.publicGameID
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            logGameDetailPolling("latest snapshot-only failed identity=\(identity) game_id=\(rawGameID.uuidString) error=\(error)")
+            return nil
+        }
+    }
+
+    private func logStreamSnapshotApplyCompleted(publicGameID: String, game: GameDetail) {
+        logGameDetailPolling(
+            "stream snapshot apply completed publicGameId=\(publicGameID) inning=\(game.inningText ?? "<nil>") count=\(game.balls.map(String.init) ?? "-")/\(game.strikes.map(String.init) ?? "-")/\(game.outs.map(String.init) ?? "-") bases=\(boolDebugText(game.bases?.first))/\(boolDebugText(game.bases?.second))/\(boolDebugText(game.bases?.third)) runners=\(debugName(game.baseRunners?.first))/\(debugName(game.baseRunners?.second))/\(debugName(game.baseRunners?.third)) batter=\(debugName(game.currentBatterName)) pitcher=\(debugName(game.currentPitcherName)) score=\(game.awayScore.map(String.init) ?? "-"):\(game.homeScore.map(String.init) ?? "-")"
+        )
+    }
+
+    private func logGameDetailPollingSkip(identity: String, reason: String) {
+        let signature = "\(identity)|\(reason)"
+        guard lastGameDetailPollingSkipSignature != signature else { return }
+        lastGameDetailPollingSkipSignature = signature
+        logGameDetailPolling("skipped reason=\(reason) identity=\(identity)")
+    }
+
+    private func logGameDetailPolling(_ message: String) {
+        AppLog.info(.gameDetail, "[GameDetailPolling] \(message)")
+        #if DEBUG
+        print("[GameDetailPolling] \(message)")
+        #endif
+    }
+
+    private func logLiveSituationApplied(
+        source: String,
+        createdAt: Date?,
+        updatedAt: Date?,
+        before: GameDetail,
+        after: GameDetail
+    ) {
+        let message = "source=\(source) snapshot_created_at=\(createdAt.map(KBODateParser.debugTimestamp) ?? "<nil>") snapshot_updated_at=\(updatedAt.map(KBODateParser.debugTimestamp) ?? "<nil>") currentBatter=\(debugName(before.currentBatterName))->\(debugName(after.currentBatterName)) currentPitcher=\(debugName(before.currentPitcherName))->\(debugName(after.currentPitcherName)) runnersBefore=\(liveRunnerDebug(before)) runnersAfter=\(liveRunnerDebug(after)) countBefore=\(countDebug(before)) countAfter=\(countDebug(after)) scoreBefore=\(scoreDebugText(before)) scoreAfter=\(scoreDebugText(after))"
+        AppLog.info(.gameDetail, "[GameDetailLiveSituation] \(message)")
+        #if DEBUG
+        print("[GameDetailLiveSituation] \(message)")
+        #endif
+    }
+
+    private func liveRunnerDebug(_ game: GameDetail) -> String {
+        "flags=\(boolDebugText(game.bases?.first))/\(boolDebugText(game.bases?.second))/\(boolDebugText(game.bases?.third)) names=\(debugName(game.baseRunners?.first))/\(debugName(game.baseRunners?.second))/\(debugName(game.baseRunners?.third))"
+    }
+
+    private func countDebug(_ game: GameDetail) -> String {
+        "\(game.balls.map(String.init) ?? "-")/\(game.strikes.map(String.init) ?? "-")/\(game.outs.map(String.init) ?? "-")"
+    }
+
+    private func debugName(_ value: String?) -> String {
+        value?.nilIfBlank ?? "<nil>"
+    }
+
+    private func refreshGameDetailLiveStateResult(for gameIdentity: String) async -> GameDetailLiveStateRefresh {
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity),
+              selectedGame.status.isLiveLike,
+              let publicGameID = selectedGame.publicGameID?.nilIfBlank else {
+            return .unavailable
+        }
+        do {
+            let liveState = try await gameLiveStateClient.fetchGameLiveState(gameId: publicGameID)
+            guard let result = await applyGameLiveState(
+                liveState,
+                selectedGame: selectedGame,
+                gameIdentity: gameIdentity,
+                source: "rest",
+                syncLiveActivity: true
+            ) else {
+                return .unchanged
+            }
+            return .updated(result)
+        } catch {
+            #if DEBUG
+            print("[GameDetailLivePolling] liveState unavailable identity=\(gameIdentity) error=\(error)")
+            #endif
+            return .unavailable
+        }
+    }
+
+    private func applyGameLiveState(
+        _ liveState: GameLiveStateResponse,
+        selectedGame: GameDetail,
+        gameIdentity: String,
+        source: String,
+        syncLiveActivity: Bool
+    ) async -> GameDetailRefreshResult? {
+        let stableKey = selectedGame.stableDetailIdentity
+        if let selectedPublicGameID = selectedGame.publicGameID?.nilIfBlank,
+           selectedPublicGameID.caseInsensitiveCompare(liveState.publicGameId) != .orderedSame {
+            logGameDetailPolling(
+                "snapshot ignored reason=publicGameIdMismatch source=\(source) identity=\(stableKey) selectedPublicGameId=\(selectedPublicGameID) snapshotPublicGameId=\(liveState.publicGameId)"
+            )
+            return nil
+        }
+        if lastGameDetailLiveStateRawHashByIdentity[stableKey] == liveState.rawHash {
+            logGameDetailPolling("snapshot ignored reason=rawHashUnchanged source=\(source) identity=\(stableKey) rawHash=\(liveState.rawHash)")
+            return nil
+        }
+        lastGameDetailLiveStateRawHashByIdentity[stableKey] = liveState.rawHash
+        let updatedGame = selectedGame.applyingLiveState(liveState)
+        if source == "sse-fallback" {
+            AppLog.info(.gameDetail, "[GameDetailLiveSituation] preserveRunnerNames source=\(source) before=\(liveRunnerDebug(selectedGame)) after=\(liveRunnerDebug(updatedGame))")
+            #if DEBUG
+            print("[GameDetailLiveSituation] preserveRunnerNames source=\(source) before=\(liveRunnerDebug(selectedGame)) after=\(liveRunnerDebug(updatedGame))")
+            #endif
+        }
+        logLiveSituationApplied(
+            source: source,
+            createdAt: nil,
+            updatedAt: nil,
+            before: selectedGame,
+            after: updatedGame
+        )
+        let previousKnownGames = allKnownGames()
+        let upsertResult = upsertScheduleGamesIntoLocalStore([updatedGame], source: .gameDetailRefresh)
+        let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([updatedGame])
+        await refreshLoadedScheduleMonthsFromLocalStore(
+            including: scheduleMonthKey(for: updatedGame.scheduledStart),
+            reason: "gameDetailLiveState"
+        )
+        let resolved = game(withIdentity: updatedGame.canonicalGameIdentityValue) ??
+            game(withIdentity: gameIdentity) ??
+            updatedGame
+        if upsertResult.inserted > 0 || upsertResult.updated > 0 || cacheUpsertResult.inserted > 0 || cacheUpsertResult.updated > 0 {
+            await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+            await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
+        }
+        if syncLiveActivity {
+            await syncFavoriteTeamLiveActivity()
+        }
+        return GameDetailRefreshResult(
+            game: resolved,
+            rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+            providerGameID: selectedGame.providerGameID,
+            publicGameID: liveState.publicGameId
+        )
+    }
+
+    // refreshGameDetailResult 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    @discardableResult
+    func refreshGameDetailResult(
+        for gameIdentity: String,
+        initialGame: GameDetail? = nil,
+        forceRefresh: Bool = false
+    ) async -> GameDetailRefreshResult? {
+        guard let selectedGame = await resolveGameDetailSelection(for: gameIdentity, initialGame: initialGame) else {
             #if DEBUG
             debugLogMissingSelectedGame(gameIdentity)
             #endif
             return nil
         }
+        if forceRefresh,
+           selectedGame.status.isLiveLike,
+           let snapshotOnlyResult = await refreshLatestGameSnapshotOnlyResult(for: gameIdentity, selectedGame: selectedGame) {
+            return snapshotOnlyResult
+        }
+        let isAutomaticStarterRefresh = forceRefresh == false && selectedGame.status == .upcoming
         let stableRefreshKey = selectedGame.stableDetailIdentity
         if let existingTask = inFlightGameDetailRefreshTasks[stableRefreshKey] {
             #if DEBUG
@@ -1890,12 +2914,27 @@ final class AppModel {
            currentDateProvider().timeIntervalSince(refreshedAt) < Self.gameDetailFreshnessThreshold {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(stableRefreshKey) skipped=freshEnough")
+            if isAutomaticStarterRefresh {
+                print("[GameDetailStarterRefresh] skipped reason=freshEnough selectedIdentity=\(gameIdentity) initialAwayStarter=\(selectedGame.awayStartingPitcherName ?? "<nil>") initialHomeStarter=\(selectedGame.homeStartingPitcherName ?? "<nil>")")
+            }
             #endif
-            return selectedGame
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.providerGameID ?? selectedGame.providerGameID,
+                publicGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.publicGameID ?? selectedGame.publicGameID
+            )
         }
 
         let task = Task { @MainActor [weak self] in
-            guard let self else { return Optional(selectedGame) }
+            guard let self else {
+                return Optional(GameDetailRefreshResult(
+                    game: selectedGame,
+                    rawSupabaseGameID: nil,
+                    providerGameID: selectedGame.providerGameID,
+                    publicGameID: selectedGame.publicGameID
+                ))
+            }
             return await self.performRefreshGameDetail(
                 selectedGame: selectedGame,
                 gameIdentity: gameIdentity,
@@ -1909,6 +2948,7 @@ final class AppModel {
         return result
     }
 
+    // fetchSelectedGameFromRepository 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchSelectedGameFromRepository(for gameIdentity: String) async -> GameDetail? {
         #if DEBUG
         debugLogLocalCandidateMiss(gameIdentity)
@@ -1930,9 +2970,12 @@ final class AppModel {
                 #endif
                 return nil
             }
-            let upsertResult = upsertScheduleGamesIntoLocalStore([fetchedGame])
+            let upsertResult = upsertScheduleGamesIntoLocalStore([fetchedGame], source: .gameDetailRefresh)
             let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([fetchedGame])
-            refreshLoadedScheduleMonthsFromLocalStore(including: scheduleMonthKey(for: fetchedGame.scheduledStart))
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: scheduleMonthKey(for: fetchedGame.scheduledStart),
+                reason: "gameDetailIdentityFallback"
+            )
             #if DEBUG
             print("[GameDetailFetch] fallback selectedGame resolved selectedIdentity=\(gameIdentity) publicGameID=\(fetchedGame.publicGameID ?? "<nil>") providerGameID=\(fetchedGame.providerGameID ?? "<nil>") officialProviderGameID=\(fetchedGame.officialProviderGameID ?? "<nil>") localInserted=\(upsertResult.inserted) localUpdated=\(upsertResult.updated) cacheInserted=\(cacheUpsertResult.inserted) cacheUpdated=\(cacheUpsertResult.updated)")
             #endif
@@ -1952,16 +2995,33 @@ final class AppModel {
         }
     }
 
+    // performRefreshGameDetail 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshGameDetail(
         selectedGame: GameDetail,
         gameIdentity: String,
         forceRefresh: Bool
-    ) async -> GameDetail? {
+    ) async -> GameDetailRefreshResult? {
+        AppLog.info(.gameDetail, "[GameDetail] refresh start game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity) publicGameID=\(selectedGame.publicGameID ?? "<nil>") providerGameID=\(selectedGame.providerGameID ?? selectedGame.officialProviderGameID ?? "<nil>") status=\(selectedGame.status.rawValue) forceRefresh=\(forceRefresh)")
+        if forceRefresh == false, selectedGame.status == .upcoming {
+            #if DEBUG
+            print("[GameDetailStarterRefresh] start selectedIdentity=\(gameIdentity) publicGameID=\(selectedGame.publicGameID ?? "<nil>") providerGameID=\(selectedGame.providerGameID ?? "<nil>") initialAwayStarter=\(selectedGame.awayStartingPitcherName ?? "<nil>") initialHomeStarter=\(selectedGame.homeStartingPitcherName ?? "<nil>")")
+            #endif
+        }
+
         guard let detailSource = repository as? any KBOGameDetailSnapshotDataSource else {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) skipped=unsupportedRepository")
+            if selectedGame.status == .upcoming && forceRefresh == false {
+                print("[GameDetailStarterRefresh] skipped reason=unsupportedRepository selectedIdentity=\(gameIdentity)")
+            }
             #endif
-            return selectedGame
+            AppLog.warning(.gameDetail, "[GameDetail] refresh skipped game=\(operationalGameIdentifier(for: selectedGame)) reason=unsupportedRepository finalStatus=\(selectedGame.status.rawValue)")
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         }
 
         #if DEBUG
@@ -1970,56 +3030,266 @@ final class AppModel {
 
         do {
             let previousKnownGames = allKnownGames()
-            guard let incomingGame = try await detailSource.fetchGameDetailSnapshot(
+            let snapshotResult: GameDetailSnapshotFetchResult?
+            if let resultSource = repository as? any KBOGameDetailSnapshotResultDataSource {
+                snapshotResult = try await resultSource.fetchGameDetailSnapshotResult(
+                    for: selectedGame,
+                    identity: gameIdentity,
+                    cachedTeams: teams
+                )
+            } else if let incomingGame = try await detailSource.fetchGameDetailSnapshot(
                 for: selectedGame,
                 identity: gameIdentity,
                 cachedTeams: teams
-            ) else {
-                #if DEBUG
-                print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) fetched count=0 sharedUpdated=false")
-                #endif
-                return selectedGame
+            ) {
+                snapshotResult = GameDetailSnapshotFetchResult(
+                    game: incomingGame,
+                    rawSupabaseGameID: nil,
+                    providerGameID: incomingGame.providerGameID,
+                    publicGameID: incomingGame.publicGameID
+                )
+            } else {
+                snapshotResult = nil
             }
 
-            let upsertResult = upsertScheduleGamesIntoLocalStore([incomingGame])
-            let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([incomingGame])
-            refreshLoadedScheduleMonthsFromLocalStore(including: scheduleMonthKey(for: incomingGame.scheduledStart))
-            let resolved = game(withIdentity: incomingGame.canonicalGameIdentityValue) ??
+            guard let snapshotResult else {
+                #if DEBUG
+                print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) fetched count=0 sharedUpdated=false")
+                if selectedGame.status == .upcoming && forceRefresh == false {
+                    print("[GameDetailStarterRefresh] skipped reason=noRows selectedIdentity=\(gameIdentity) initialAwayStarter=\(selectedGame.awayStartingPitcherName ?? "<nil>") initialHomeStarter=\(selectedGame.homeStartingPitcherName ?? "<nil>")")
+                }
+                #endif
+                AppLog.warning(.gameDetail, "[GameDetail] refresh empty game=\(operationalGameIdentifier(for: selectedGame)) reason=noRows finalStatus=\(selectedGame.status.rawValue)")
+                return GameDetailRefreshResult(
+                    game: selectedGame,
+                    rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                    providerGameID: selectedGame.providerGameID,
+                    publicGameID: selectedGame.publicGameID
+                )
+            }
+            let incomingGame = snapshotResult.game
+            AppLog.info(.gameDetail, "[GameDetail] snapshot received game=\(operationalGameIdentifier(for: incomingGame)) publicGameID=\(incomingGame.publicGameID ?? "<nil>") providerGameID=\(incomingGame.providerGameID ?? incomingGame.officialProviderGameID ?? "<nil>") inning=\(incomingGame.inningText ?? "<nil>") score=\(scoreDebugText(incomingGame)) count=\(incomingGame.balls.map(String.init) ?? "-")/\(incomingGame.strikes.map(String.init) ?? "-")/\(incomingGame.outs.map(String.init) ?? "-") source=\(snapshotResult.rawSupabaseGameID == nil ? "repository" : "supabase") status=\(incomingGame.status.rawValue)")
+            let resolvedIncomingGame = selectedGame.status == .upcoming && forceRefresh == false
+                ? GameMergeResolver.preferredGame(existing: selectedGame, candidate: incomingGame)
+                : incomingGame
+
+            let upsertResult = upsertScheduleGamesIntoLocalStore([resolvedIncomingGame], source: .gameDetailRefresh)
+            let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache([resolvedIncomingGame])
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: scheduleMonthKey(for: resolvedIncomingGame.scheduledStart),
+                reason: "gameDetailRefresh"
+            )
+            let storeResolved = game(withIdentity: resolvedIncomingGame.canonicalGameIdentityValue) ??
                 game(withIdentity: gameIdentity) ??
-                incomingGame
+                resolvedIncomingGame
+            let resolved = gameDetailRefreshResultGame(
+                storeResolved: storeResolved,
+                incomingSnapshot: resolvedIncomingGame
+            )
+            recordRawSupabaseGameDetailIdentity(snapshotResult, selectedGame: selectedGame, incomingGame: resolvedIncomingGame, resolvedGame: resolved, requestedIdentity: gameIdentity)
             let sharedUpdated = upsertResult.inserted > 0 ||
                 upsertResult.updated > 0 ||
                 cacheUpsertResult.inserted > 0 ||
                 cacheUpsertResult.updated > 0
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) stableIdentity=\(selectedGame.stableDetailIdentity) completed changed=\(resolved != selectedGame) before=\(selectedGame.status.rawValue) \(scoreDebugText(selectedGame)) incoming=\(incomingGame.status.rawValue) \(scoreDebugText(incomingGame)) after=\(resolved.status.rawValue) \(scoreDebugText(resolved)) sharedUpdated=\(sharedUpdated) dateWideFetch=false")
+            if selectedGame.status == .upcoming && forceRefresh == false {
+                let appliedStarterUpdate = selectedGame.awayStartingPitcherName != resolved.awayStartingPitcherName ||
+                    selectedGame.homeStartingPitcherName != resolved.homeStartingPitcherName
+                print("[GameDetailStarterRefresh] success selectedIdentity=\(gameIdentity) fetchedAwayStarter=\(incomingGame.awayStartingPitcherName ?? "<nil>") fetchedHomeStarter=\(incomingGame.homeStartingPitcherName ?? "<nil>") appliedStarterUpdate=\(appliedStarterUpdate)")
+            }
             #endif
+            AppLog.info(.gameDetail, "[GameDetail] refresh completed game=\(operationalGameIdentifier(for: resolved)) before=\(selectedGame.status.rawValue) incoming=\(incomingGame.status.rawValue) finalStatus=\(resolved.status.rawValue) sharedUpdated=\(sharedUpdated)")
             await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: [resolved])
             await syncFavoriteTeamLiveActivity()
-            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
-            return resolved
+            if shouldSyncFavoriteTeamWidget(afterGameUpdate: resolved) {
+                await syncFavoriteTeamWidgetSnapshot(includePrefetch: false, reason: "gameDetailRefresh")
+            } else {
+                #if DEBUG
+                print("[WidgetSnapshot] skipped reason=detailGameOutsideVisibleFavoriteTodaySnapshot gameID=\(resolved.id.uuidString)")
+                #endif
+            }
+            return GameDetailRefreshResult(
+                game: resolved,
+                rawSupabaseGameID: snapshotResult.rawSupabaseGameID,
+                providerGameID: snapshotResult.providerGameID ?? resolved.providerGameID,
+                publicGameID: snapshotResult.publicGameID ?? resolved.publicGameID
+            )
         } catch is CancellationError {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) cancelled=true")
+            if selectedGame.status == .upcoming && forceRefresh == false {
+                print("[GameDetailStarterRefresh] skipped reason=cancelled selectedIdentity=\(gameIdentity)")
+            }
             #endif
-            return selectedGame
+            AppLog.warning(.gameDetail, "[GameDetail] refresh cancelled game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity)")
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         } catch {
             #if DEBUG
             print("[GameDetailFetch] mode=singleGame selectedIdentity=\(gameIdentity) failed error=\(error)")
+            if selectedGame.status == .upcoming && forceRefresh == false {
+                print("[GameDetailStarterRefresh] skipped reason=error selectedIdentity=\(gameIdentity)")
+            }
             #endif
-            return selectedGame
+            AppLog.error(.gameDetail, "[GameDetail] refresh failed game=\(operationalGameIdentifier(for: selectedGame)) selectedIdentity=\(gameIdentity) error=\(error)")
+            if activeGameDetailLivePollingIdentity == selectedGame.stableDetailIdentity {
+                logGameDetailPolling("GameDetail polling refresh failed identity=\(selectedGame.stableDetailIdentity) error=\(error)")
+            }
+            return GameDetailRefreshResult(
+                game: selectedGame,
+                rawSupabaseGameID: rawSupabaseGameDetailIdentity(for: selectedGame)?.supabaseGameID,
+                providerGameID: selectedGame.providerGameID,
+                publicGameID: selectedGame.publicGameID
+            )
         }
     }
 
+    private func gameDetailRefreshResultGame(
+        storeResolved: GameDetail,
+        incomingSnapshot: GameDetail
+    ) -> GameDetail {
+        let bases = incomingSnapshot.bases ?? storeResolved.bases
+        let baseRunners = baseRunnersForLatestSnapshotPriority(
+            incomingSnapshot: incomingSnapshot,
+            storeResolved: storeResolved,
+            bases: bases
+        )
+        let game = GameDetail(
+            id: storeResolved.id,
+            scheduledStart: storeResolved.scheduledStart,
+            venue: storeResolved.venue,
+            awayTeam: storeResolved.awayTeam,
+            homeTeam: storeResolved.homeTeam,
+            awayScore: storeResolved.awayScore,
+            homeScore: storeResolved.homeScore,
+            status: storeResolved.status,
+            seasonClassification: storeResolved.seasonClassification,
+            inningText: storeResolved.inningText,
+            bases: bases,
+            baseRunners: baseRunners,
+            balls: incomingSnapshot.balls ?? storeResolved.balls,
+            strikes: incomingSnapshot.strikes ?? storeResolved.strikes,
+            outs: incomingSnapshot.outs ?? storeResolved.outs,
+            highlightText: storeResolved.highlightText,
+            events: storeResolved.events,
+            note: storeResolved.note,
+            providerGameID: storeResolved.providerGameID,
+            awayStartingPitcherName: storeResolved.awayStartingPitcherName,
+            homeStartingPitcherName: storeResolved.homeStartingPitcherName,
+            currentPitcherName: incomingSnapshot.currentPitcherName?.nilIfBlank ?? storeResolved.currentPitcherName,
+            currentBatterName: incomingSnapshot.currentBatterName?.nilIfBlank ?? storeResolved.currentBatterName
+        )
+        #if DEBUG
+        print("[GameDetailFetch] result latestSnapshot bases first=\(boolDebugText(incomingSnapshot.bases?.first)) second=\(boolDebugText(incomingSnapshot.bases?.second)) third=\(boolDebugText(incomingSnapshot.bases?.third)) final first=\(boolDebugText(game.bases?.first)) second=\(boolDebugText(game.bases?.second)) third=\(boolDebugText(game.bases?.third))")
+        #endif
+        return game
+    }
+
+    private func boolDebugText(_ value: Bool?) -> String {
+        value.map(String.init) ?? "nil"
+    }
+
+    private func baseRunnersForLatestSnapshotPriority(
+        incomingSnapshot: GameDetail,
+        storeResolved: GameDetail,
+        bases: RunnerState?
+    ) -> GameBaseRunners? {
+        guard let bases else {
+            return incomingSnapshot.baseRunners ?? storeResolved.baseRunners
+        }
+        if incomingSnapshot.bases != nil {
+            return incomingSnapshot.baseRunners.map {
+                GameBaseRunners(
+                    first: bases.first ? $0.first?.nilIfBlank : nil,
+                    second: bases.second ? $0.second?.nilIfBlank : nil,
+                    third: bases.third ? $0.third?.nilIfBlank : nil
+                )
+            }
+        }
+        guard let runners = incomingSnapshot.baseRunners ?? storeResolved.baseRunners else {
+            return nil
+        }
+        let first = bases.first ? runners.first?.nilIfBlank : nil
+        let second = bases.second ? runners.second?.nilIfBlank : nil
+        let third = bases.third ? runners.third?.nilIfBlank : nil
+        guard first != nil || second != nil || third != nil else {
+            return nil
+        }
+        return GameBaseRunners(first: first, second: second, third: third)
+    }
+
+    // recordRawSupabaseGameDetailIdentity 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
+    private func recordRawSupabaseGameDetailIdentity(
+        _ result: GameDetailSnapshotFetchResult,
+        selectedGame: GameDetail,
+        incomingGame: GameDetail,
+        resolvedGame: GameDetail,
+        requestedIdentity: String
+    ) {
+        guard let rawSupabaseGameID = result.rawSupabaseGameID else { return }
+        let identity = RawSupabaseGameDetailIdentity(
+            supabaseGameID: rawSupabaseGameID,
+            providerGameID: result.providerGameID ?? incomingGame.providerGameID ?? resolvedGame.providerGameID,
+            publicGameID: result.publicGameID ?? incomingGame.publicGameID ?? resolvedGame.publicGameID
+        )
+        let keys = [
+            requestedIdentity,
+            selectedGame.id.uuidString,
+            selectedGame.stableDetailIdentity,
+            selectedGame.canonicalGameIdentityValue,
+            incomingGame.id.uuidString,
+            incomingGame.stableDetailIdentity,
+            incomingGame.canonicalGameIdentityValue,
+            resolvedGame.id.uuidString,
+            resolvedGame.stableDetailIdentity,
+            resolvedGame.canonicalGameIdentityValue,
+            incomingGame.providerGameID.map { "provider:\($0)" },
+            resolvedGame.providerGameID.map { "provider:\($0)" },
+            incomingGame.publicGameID.map { "public:\($0)" },
+            resolvedGame.publicGameID.map { "public:\($0)" }
+        ].compactMap { $0?.nilIfBlank }
+        for key in Set(keys) {
+            rawSupabaseGameDetailIdentities[key] = identity
+        }
+        #if DEBUG
+        print("[GameDetailDBRecords] rawSupabaseGameId cached localGameId=\(selectedGame.id.uuidString) rawSupabaseGameId=\(rawSupabaseGameID.uuidString) providerGameID=\(identity.providerGameID ?? "<nil>") publicGameID=\(identity.publicGameID ?? "<nil>")")
+        #endif
+    }
+
+    // rawSupabaseGameDetailIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func rawSupabaseGameDetailIdentity(for game: GameDetail) -> RawSupabaseGameDetailIdentity? {
+        let keys = [
+            game.id.uuidString,
+            game.stableDetailIdentity,
+            game.canonicalGameIdentityValue,
+            game.providerGameID.map { "provider:\($0)" },
+            game.publicGameID.map { "public:\($0)" }
+        ].compactMap { $0?.nilIfBlank }
+        for key in keys {
+            if let identity = rawSupabaseGameDetailIdentities[key] {
+                return identity
+            }
+        }
+        return nil
+    }
+
+    // gameNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameNavigationIdentity(for game: GameDetail) -> String {
         game.canonicalGameIdentityValue
     }
 
+    // gameNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameNavigationIdentity(for summary: GameSummary) -> String {
         game(withID: summary.id)?.canonicalGameIdentityValue ?? summary.id.uuidString
     }
 
+    // shouldShowLiveActivityAction 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func shouldShowLiveActivityAction(for game: GameDetail) -> Bool {
         LiveActivityActionPresentation.shouldShow(
             game: game,
@@ -2027,6 +3297,7 @@ final class AppModel {
         )
     }
 
+    // shouldAutoStartLiveActivity 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func shouldAutoStartLiveActivity(for game: GameDetail) -> Bool {
         game.involves(teamID: settings.favoriteTeamID) &&
             LiveActivityAutoStartEligibility.isEligibleForAutomaticLiveActivityStart(
@@ -2035,10 +3306,12 @@ final class AppModel {
             )
     }
 
+    // isLiveActivityOn 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLiveActivityOn(for gameID: UUID) -> Bool {
         activeLiveActivityGameID == gameID
     }
 
+    // isLiveActivityActionEnabled 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isLiveActivityActionEnabled(for game: GameDetail) -> Bool {
         LiveActivityActionPresentation.isEnabled(
             game: game,
@@ -2048,6 +3321,7 @@ final class AppModel {
         )
     }
 
+    // liveActivityButtonTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func liveActivityButtonTitle(for game: GameDetail) -> String {
         LiveActivityActionPresentation.buttonTitle(
             game: game,
@@ -2058,14 +3332,17 @@ final class AppModel {
         )
     }
 
+    // liveActivityButtonSystemImage 메서드는 이 타입의 주요 동작을 수행합니다.
     func liveActivityButtonSystemImage(for game: GameDetail) -> String {
         LiveActivityActionPresentation.buttonSystemImage(isActive: isLiveActivityOn(for: game.id))
     }
 
+    // toggleLiveActivity 메서드는 이 타입의 주요 동작을 수행합니다.
     func toggleLiveActivity(for game: GameDetail) async {
         guard shouldShowLiveActivityAction(for: game) else { return }
 
         if isLiveActivityOn(for: game.id) {
+            AppLog.info(.liveActivity, "[LiveActivity] end requested source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
             await liveActivityController.endCurrent()
             activeLiveActivityGameID = nil
             return
@@ -2073,17 +3350,22 @@ final class AppModel {
 
         guard isLiveActivityActionEnabled(for: game),
               let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: game, favoriteTeamID: settings.favoriteTeamID) else {
+            AppLog.info(.liveActivity, "[LiveActivity] start rejected source=manual game=\(operationalGameIdentifier(for: game)) reason=actionDisabledOrSnapshotMissing status=\(game.status.rawValue)")
             return
         }
 
         do {
+            AppLog.info(.liveActivity, "[LiveActivity] start requested source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
             try await liveActivityController.startOrUpdate(using: snapshot)
             activeLiveActivityGameID = game.id
+            AppLog.info(.liveActivity, "[LiveActivity] start completed source=manual game=\(operationalGameIdentifier(for: game)) status=\(game.status.rawValue)")
         } catch {
             activeLiveActivityGameID = nil
+            AppLog.error(.liveActivity, "[LiveActivity] start failed source=manual game=\(operationalGameIdentifier(for: game)) error=\(error)")
         }
     }
 
+    // startOrUpdateLiveActivityIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func startOrUpdateLiveActivityIfNeeded(for game: GameDetail) async {
         liveActivitySupported = liveActivityController.isSupported
         let resolvedGame = self.game(withIdentity: game.canonicalGameIdentityValue) ??
@@ -2091,17 +3373,17 @@ final class AppModel {
             game
 
         guard settings.liveActivitiesEnabled else {
-            #if DEBUG
             logLiveActivityAutoStartSkipped(reason: "disabledInSettings", game: resolvedGame)
-            #endif
             return
         }
 
         guard liveActivitySupported else {
+            logLiveActivityAutoStartSkipped(reason: "unsupported", game: resolvedGame)
             return
         }
 
         guard resolvedGame.involves(teamID: settings.favoriteTeamID) else {
+            logLiveActivityAutoStartSkipped(reason: "noFavoriteTeam", game: resolvedGame)
             return
         }
 
@@ -2110,75 +3392,345 @@ final class AppModel {
             now: currentDateProvider()
         )
         guard eligibilityDecision == .eligible else {
-            #if DEBUG
             logLiveActivityAutoStartSkipped(reason: eligibilityDecision.logReason, game: resolvedGame)
-            #endif
             return
         }
 
         #if DEBUG
         print("[LiveActivityAutoStart] eligible gameID=\(resolvedGame.id.uuidString) status=\(resolvedGame.status.rawValue) scheduledAt=\(resolvedGame.scheduledStart)")
         #endif
+        AppLog.info(.liveActivity, "[LiveActivity] autoStart allowed game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue) scheduledAt=\(resolvedGame.scheduledStart)")
 
         guard let snapshot = FavoriteTeamLiveActivitySnapshot.make(from: resolvedGame, favoriteTeamID: settings.favoriteTeamID) else {
+            logLiveActivityAutoStartSkipped(reason: "snapshotMissing", game: resolvedGame)
             return
         }
 
         do {
+            AppLog.info(.liveActivity, "[LiveActivity] startOrUpdate requested source=auto game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue)")
             try await liveActivityController.startOrUpdate(using: snapshot)
             activeLiveActivityGameID = resolvedGame.id
+            AppLog.info(.liveActivity, "[LiveActivity] startOrUpdate completed source=auto game=\(operationalGameIdentifier(for: resolvedGame)) status=\(resolvedGame.status.rawValue)")
         } catch {
             #if DEBUG
             print("[LiveActivityPayload] auto start/update failed gameID=\(resolvedGame.id.uuidString) error=\(error)")
             #endif
+            AppLog.error(.liveActivity, "[LiveActivity] startOrUpdate failed source=auto game=\(operationalGameIdentifier(for: resolvedGame)) error=\(error)")
         }
     }
 
-    #if DEBUG
+    // logLiveActivityAutoStartSkipped 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logLiveActivityAutoStartSkipped(reason: String, game: GameDetail) {
+        AppLog.info(.liveActivity, "[LiveActivity] autoStart rejected game=\(operationalGameIdentifier(for: game)) reason=\(reason) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
+        #if DEBUG
         print("[LiveActivityAutoStart] skipped reason=\(reason) gameID=\(game.id.uuidString) status=\(game.status.rawValue) scheduledAt=\(game.scheduledStart)")
+        #endif
     }
-    #endif
 
+    // isGameAlertEnabled 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isGameAlertEnabled(for gameID: UUID) -> Bool {
         gameAlertOverrides[gameID, default: true]
     }
 
+    // setGameAlert 메서드는 이 타입의 주요 동작을 수행합니다.
     func setGameAlert(_ isEnabled: Bool, for gameID: UUID) {
         gameAlertOverrides[gameID] = isEnabled
     }
 
+    // isGameAttended 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func isGameAttended(_ game: GameDetail) -> Bool {
-        AttendanceKeyResolver.isAttended(
-            game: game,
-            equivalentGames: equivalentGames(to: game),
-            attendedKeys: attendedGameKeys
+        guard let key = attendanceCanonicalKey(for: game) else { return false }
+        return attendedGameKeys.contains(key)
+    }
+
+    func isGameDetailAttended(_ game: GameDetail) -> Bool {
+        guard let key = attendanceCanonicalKey(for: game) else { return false }
+        return attendedGameKeys.contains(key)
+    }
+
+    func attendanceGameID(for game: GameDetail) -> UUID? {
+        attendanceDatabaseGameID(for: game)
+    }
+
+    var isAttendanceSyncAvailable: Bool {
+        attendanceSyncDisabled == false
+    }
+
+    func isAttendanceSyncPending(for game: GameDetail) -> Bool {
+        guard let databaseGameID = attendanceDatabaseGameID(for: game) else { return false }
+        return inFlightAttendanceTasks[databaseGameID] != nil
+    }
+
+    func toggleGameDetailAttendance(for game: GameDetail) {
+        toggleGameAttendance(for: game)
+    }
+
+    // toggleGameAttendance 메서드는 이 타입의 주요 동작을 수행합니다.
+    func toggleGameAttendance(for game: GameDetail) {
+        guard attendanceSyncDisabled == false else {
+            attendanceSyncFailureMessage = "직관 기록 서버 설정을 확인할 수 없습니다."
+            return
+        }
+        guard let databaseGameID = attendanceDatabaseGameID(for: game) else {
+            logInvalidAttendanceGameID(game.id)
+            attendanceSyncFailureMessage = "직관 기록을 저장할 수 없는 경기입니다."
+            return
+        }
+        let resolvedGame = attendanceResolvedGame(for: game)
+        let attendanceKey = GameIdentifier.attendanceCanonicalKey(databaseGameID)
+        let isAttended = attendedGameKeys.contains(attendanceKey)
+        let nextIsAttended = !isAttended
+        #if DEBUG
+        debugLogAttendanceToggle(game: resolvedGame, storedKey: attendanceKey, equivalentKeys: [attendanceKey], isAttended: nextIsAttended)
+        #endif
+        syncAttendanceChange(
+            game: resolvedGame,
+            databaseGameID: databaseGameID,
+            nextIsAttended: nextIsAttended
         )
     }
 
-    func toggleGameAttendance(for game: GameDetail) {
-        let equivalentGames = equivalentGames(to: game)
-        let equivalentKeys = AttendanceKeyResolver.equivalentKeys(for: game, equivalentGames: equivalentGames)
-        let key = AttendanceKeyResolver.canonicalStorageKey(for: game, equivalentKeys: equivalentKeys)
-        let isAttended = attendedGameKeys.isDisjoint(with: equivalentKeys) == false
-        attendedGameKeys = AttendanceKeyResolver.toggledKeys(
-            for: game,
-            equivalentGames: equivalentGames,
-            attendedKeys: attendedGameKeys
-        )
+    // refreshAttendanceRecordsFromServer 메서드는 서버 직관 목록을 로컬 상태와 병합합니다.
+    func refreshAttendanceRecordsFromServer() async {
+        guard attendanceSyncDisabled == false,
+              attendanceListSyncInFlight == false,
+              attendanceListSyncSuppressed == false else {
+            return
+        }
+        guard let installationID = attendanceInstallationUUID() else {
+            return
+        }
+        attendanceListSyncInFlight = true
+        defer { attendanceListSyncInFlight = false }
+
+        do {
+            let gameIDs = try await attendanceClient.fetchAttendedGameIDs(installationID: installationID)
+            guard Task.isCancelled == false else { return }
+            let previousIDs = attendedGameIDs
+            let rawCount = gameIDs.count
+            setAttendedGameIDs(gameIDs)
+            #if DEBUG
+            print("[Attendance] confirmed replace source=server rawCount=\(rawCount) normalizedCount=\(attendedGameKeys.count)")
+            #endif
+            attendanceSyncFailureMessage = nil
+            attendanceListSyncSuppressed = false
+            lastAttendanceListFailureSignature = nil
+            if attendedGameIDs != previousIDs {
+                persistAttendedGameKeys()
+                invalidateScheduleDerivedCaches()
+            }
+        } catch is CancellationError {
+        } catch {
+            if Self.isUnconfiguredAttendanceError(error) {
+                attendanceSyncDisabled = true
+            }
+            attendanceListSyncSuppressed = true
+            attendanceSyncFailureMessage = "직관 기록을 동기화하지 못했습니다."
+            #if DEBUG
+            let signature = "\(type(of: error)):\(error)"
+            if lastAttendanceListFailureSignature != signature {
+                lastAttendanceListFailureSignature = signature
+                print("[Attendance] sync failed action=list gameID=none error=\(error)")
+            }
+            #endif
+        }
+    }
+
+    private func setAttendedGameIDs(_ gameIDs: Set<UUID>) {
+        let keys = Self.attendanceKeys(fromGameIDs: gameIDs)
+        attendedGameKeys = keys
+        attendedGameIDs = Self.gameIDs(fromAttendanceKeys: keys)
+    }
+
+    private func setGameAttendance(_ gameID: UUID, isAttended: Bool) {
+        let key = GameIdentifier.attendanceCanonicalKey(gameID)
+        if isAttended {
+            attendedGameKeys.insert(key)
+        } else {
+            attendedGameKeys.remove(key)
+        }
+        attendedGameIDs = Self.gameIDs(fromAttendanceKeys: attendedGameKeys)
+    }
+
+    private static func attendanceKeys(fromGameIDs gameIDs: Set<UUID>) -> Set<String> {
+        Set(gameIDs.map(GameIdentifier.attendanceCanonicalKey))
+    }
+
+    private static func gameIDs(fromAttendanceKeys keys: Set<String>) -> Set<UUID> {
+        Set(keys.compactMap(GameIdentifier.attendanceUUID(fromCanonicalKey:)))
+    }
+
+    private func attendanceResolvedGame(for game: GameDetail) -> GameDetail {
+        self.game(withID: game.id) ??
+            self.game(withIdentity: game.stableDetailIdentity) ??
+            self.game(withIdentity: game.canonicalGameIdentityValue) ??
+            game.publicGameID.flatMap { self.game(withIdentity: $0) } ??
+            game.providerGameID.flatMap { self.game(withIdentity: "provider:\($0)") } ??
+            game
+    }
+
+    private func attendanceDatabaseGameID(for game: GameDetail) -> UUID? {
+        if let rawSupabaseGameID = rawSupabaseGameDetailIdentity(for: game)?.supabaseGameID {
+            return rawSupabaseGameID
+        }
+        if let supabaseGameID = game.supabaseGameID {
+            return supabaseGameID
+        }
+        if let supabaseGameID = Self.supabaseGameID(from: game.note) {
+            return supabaseGameID
+        }
+        let resolvedGame = attendanceResolvedGame(for: game)
+        if let rawSupabaseGameID = rawSupabaseGameDetailIdentity(for: resolvedGame)?.supabaseGameID {
+            return rawSupabaseGameID
+        }
+        if let supabaseGameID = resolvedGame.supabaseGameID {
+            return supabaseGameID
+        }
+        if let supabaseGameID = Self.supabaseGameID(from: resolvedGame.note) {
+            return supabaseGameID
+        }
+        guard Self.isLikelySupabaseDatabaseUUID(resolvedGame.id) else {
+            return nil
+        }
+        return resolvedGame.id
+    }
+
+    private func attendanceCanonicalKey(for game: GameDetail) -> String? {
+        attendanceDatabaseGameID(for: game).map(GameIdentifier.attendanceCanonicalKey)
+    }
+
+    private static func supabaseGameID(from note: String?) -> UUID? {
+        guard let note else { return nil }
+        return note
+            .split(whereSeparator: \.isWhitespace)
+            .compactMap { component -> UUID? in
+                let parts = component.split(separator: "=", maxSplits: 1).map {
+                    String($0).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                guard parts.count == 2,
+                      parts[0] == "supabase_game_id" else {
+                    return nil
+                }
+                return UUID(uuidString: parts[1])
+            }
+            .first
+    }
+
+    private static func isLikelySupabaseDatabaseUUID(_ id: UUID) -> Bool {
+        let groups = id.uuidString.split(separator: "-")
+        guard groups.count == 5,
+              let version = groups.dropFirst(2).first?.first else {
+            return false
+        }
+        return version == "4"
+    }
+
+    private func logInvalidAttendanceGameID(_ gameID: UUID) {
         #if DEBUG
-        debugLogAttendanceToggle(game: game, storedKey: key, equivalentKeys: equivalentKeys, isAttended: !isAttended)
+        print("[Attendance] invalid gameID source=generated reason=notSupabaseDBID valuePrefix=\(String(gameID.uuidString.prefix(8)))")
         #endif
+    }
+
+#if DEBUG
+    func replaceAttendedGameIDsForTesting(_ gameIDs: Set<UUID>) {
+        setAttendedGameIDs(gameIDs)
         persistAttendedGameKeys()
         invalidateScheduleDerivedCaches()
     }
+#endif
 
+    // syncAttendanceChange 메서드는 optimistic update 결과를 백엔드에 반영하고 실패 시 롤백합니다.
+    private func syncAttendanceChange(
+        game: GameDetail,
+        databaseGameID: UUID,
+        nextIsAttended: Bool
+    ) {
+        guard attendanceSyncDisabled == false else {
+            attendanceSyncFailureMessage = "직관 기록 서버 설정을 확인할 수 없습니다."
+            return
+        }
+        guard let installationID = attendanceInstallationUUID() else {
+            return
+        }
+        let gameID = databaseGameID
+        let action = nextIsAttended ? "mark" : "unmark"
+        let actionKey = "\(action):\(gameID.uuidString)"
+        guard failedAttendanceActionKeys.contains(actionKey) == false else {
+            return
+        }
+        inFlightAttendanceTasks[gameID]?.cancel()
+        let client = attendanceClient
+        inFlightAttendanceTasks[gameID] = Task { [weak self] in
+            do {
+                try await client.setAttendance(
+                    nextIsAttended,
+                    installationID: installationID,
+                    gameID: gameID,
+                    publicGameID: game.publicGameID,
+                    providerGameID: game.providerGameID
+                )
+                await MainActor.run {
+                    guard let self else { return }
+                    self.setGameAttendance(gameID, isAttended: nextIsAttended)
+                    self.persistAttendedGameKeys()
+                    self.invalidateScheduleDerivedCaches()
+                    self.attendanceSyncFailureMessage = nil
+                    self.inFlightAttendanceTasks[gameID] = nil
+                    self.failedAttendanceActionKeys.remove(actionKey)
+                    self.attendanceSyncDisabled = false
+                    #if DEBUG
+                    let action = nextIsAttended ? "mark" : "unmark"
+                    print("[Attendance] \(action) confirmed dbGameID=\(gameID.uuidString)")
+                    #endif
+                }
+            } catch is CancellationError {
+            } catch {
+                await MainActor.run {
+                    guard let self else { return }
+                    if Self.isUnconfiguredAttendanceError(error) {
+                        self.attendanceSyncDisabled = true
+                    }
+                    self.failedAttendanceActionKeys.insert(actionKey)
+                    self.attendanceSyncFailureMessage = "직관 기록을 저장하지 못했습니다."
+                    self.inFlightAttendanceTasks[gameID] = nil
+                    #if DEBUG
+                    let action = nextIsAttended ? "mark" : "unmark"
+                    print("[Attendance] \(action) failed dbGameID=\(gameID.uuidString) error=\(error) rollback=true")
+                    print("[Attendance] sync failed action=\(action) dbGameID=\(gameID.uuidString) publicGameID=\(game.publicGameID ?? "none") providerGameID=\(game.providerGameID ?? "none") error=\(error)")
+                    #endif
+                }
+            }
+        }
+    }
+
+    private static func isUnconfiguredAttendanceError(_ error: Error) -> Bool {
+        guard let attendanceError = error as? AttendanceClientError else { return false }
+        if case .unconfigured = attendanceError {
+            return true
+        }
+        return false
+    }
+
+    // attendanceInstallationUUID 메서드는 기존 알림 등록 installation id를 UUID로 재사용합니다.
+    private func attendanceInstallationUUID() -> UUID? {
+        let value = NotificationInstallationID.current
+        guard let uuid = UUID(uuidString: value) else {
+            #if DEBUG
+            print("[Attendance] sync skipped reason=invalidInstallationId prefix=\(String(value.prefix(8)))")
+            #endif
+            return nil
+        }
+        return uuid
+    }
+
+    // markNotificationRead 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     func markNotificationRead(_ notificationID: UUID) {
         guard let index = notifications.firstIndex(where: { $0.id == notificationID }) else { return }
         notifications[index].isRead = true
         persistNotificationHistory()
     }
 
+    // notificationGameDetailNavigationIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     func notificationGameDetailNavigationIdentity(for item: NotificationItem) -> String? {
         let selectedIdentity = item.preferredGameNavigationIdentity
         #if DEBUG
@@ -2212,6 +3764,7 @@ final class AppModel {
         return selectedIdentity
     }
 
+    // connectNotificationDelegate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func connectNotificationDelegate(_ delegate: AppNotificationDelegate) {
         guard !hasConnectedNotificationDelegate else { return }
         hasConnectedNotificationDelegate = true
@@ -2226,15 +3779,17 @@ final class AppModel {
         )
     }
 
+    // refreshNotificationAuthorizationStatus 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func refreshNotificationAuthorizationStatus() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         notificationAuthorizationStatus = AppNotificationAuthorizationStatus(settings.authorizationStatus)
         #if DEBUG
         print("[NotificationPipeline] authorizationStatus=\(notificationAuthorizationStatus.rawValue)")
         #endif
-        scheduleNotificationRegistrationSync(force: true)
+        scheduleNotificationRegistrationSync(force: false)
     }
 
+    // syncNotificationRegistrationState 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     func syncNotificationRegistrationState() async {
         guard shouldShowFavoriteTeamOnboarding == false,
               settings.favoriteTeamID != nil else {
@@ -2253,6 +3808,7 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: false)
     }
 
+    // requestNotificationAuthorization 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func requestNotificationAuthorization() async {
         do {
             let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
@@ -2265,7 +3821,7 @@ final class AppModel {
             print("[NotificationPipeline] registerForRemoteNotifications called")
             #endif
             UIApplication.shared.registerForRemoteNotifications()
-            scheduleNotificationRegistrationSync(force: true)
+            scheduleNotificationRegistrationSync(force: false)
         } catch {
             await refreshNotificationAuthorizationStatus()
             #if DEBUG
@@ -2274,6 +3830,7 @@ final class AppModel {
         }
     }
 
+    // scheduleDebugNotification 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func scheduleDebugNotification() async {
         #if DEBUG
         let targetGame = myTeamTodayGame ?? todayGames.first ?? games.first
@@ -2315,36 +3872,41 @@ final class AppModel {
         #endif
     }
 
+    // dismissPresentedGameDetail 메서드는 이 타입의 주요 동작을 수행합니다.
     func dismissPresentedGameDetail() {
         presentedGameIdentity = nil
     }
 
+    // presentNotifications 메서드는 이 타입의 주요 동작을 수행합니다.
     func presentNotifications() {
         isNotificationsPresented = true
     }
 
+    // dismissNotifications 메서드는 이 타입의 주요 동작을 수행합니다.
     func dismissNotifications() {
         isNotificationsPresented = false
     }
 
+    // previewModel 메서드는 이 타입의 주요 동작을 수행합니다.
     static func previewModel() -> AppModel {
         AppModel(bootstrap: MockKBOData.makeBootstrap(), usePersistedSettings: false)
     }
 
-    private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async {
+    // loadMyTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    @discardableResult
+    private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async -> Bool {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         if let existingTask = inFlightScheduleMonthTasks[key] {
             #if DEBUG
             print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight reason=awaitExistingFetch")
             #endif
-            await existingTask.value
-            return
+            return await existingTask.value
         }
 
         let loadID = UUID().uuidString
         let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performLoadMyTeamSchedule(
+            guard let self else { return false }
+            return await self.performLoadMyTeamSchedule(
                 for: month,
                 key: key,
                 forceRefresh: forceRefresh,
@@ -2352,16 +3914,18 @@ final class AppModel {
             )
         }
         inFlightScheduleMonthTasks[key] = task
-        await task.value
+        let succeeded = await task.value
         inFlightScheduleMonthTasks[key] = nil
+        return succeeded
     }
 
+    // performLoadMyTeamSchedule 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performLoadMyTeamSchedule(
         for month: Date,
         key: KBOMonthScheduleKey,
         forceRefresh: Bool,
         loadID: String
-    ) async {
+    ) async -> Bool {
         let hasLocalMonth = monthlyScheduleGames[key] != nil
 
         if forceRefresh == false, hasLocalMonth {
@@ -2372,26 +3936,27 @@ final class AppModel {
                 monthlyScheduleDecisionLogKeys[key] = logKey
             }
             #endif
-            return
+            return true
         }
 
-        guard !loadingScheduleMonths.contains(key) else { return }
+        guard !loadingScheduleMonths.contains(key) else { return false }
 
         loadingScheduleMonths.insert(key)
         defer { loadingScheduleMonths.remove(key) }
 
         let localReason = forceRefresh ? "manualRefreshLocal" : "monthNavigation"
-        await loadScheduleMonthFromRepository(for: key, reason: localReason, loadID: loadID, bypassingCache: forceRefresh)
+        return await loadScheduleMonthFromRepository(for: key, reason: localReason, loadID: loadID, bypassingCache: forceRefresh)
     }
 
+    // loadScheduleMonthFromRepository 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func loadScheduleMonthFromRepository(
         for key: KBOMonthScheduleKey,
         reason: String,
         loadID: String,
         bypassingCache: Bool
-    ) async {
+    ) async -> Bool {
+        let startedAt = Date()
         do {
-            let previousKnownGames = allKnownGames()
             let fetched = try await repository.fetchMonthlySchedule(for: key, bypassingCache: bypassingCache)
             let snapshot = await refreshMonthlyScheduleDebugInfo(for: key)
             let normalized = await reconcileOfficialScheduleStartTimesIfNeeded(
@@ -2400,23 +3965,36 @@ final class AppModel {
             )
             monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalized, for: key)
                 .sorted { $0.scheduledStart < $1.scheduledStart }
-            _ = upsertScheduleGamesIntoLocalStore(normalized)
+            if key == currentWidgetMonthKey(), let favoriteTeamID = settings.favoriteTeamID {
+                storeFavoriteTeamWidgetMonthSource(
+                    monthlyScheduleGames[key] ?? [],
+                    monthKey: key,
+                    favoriteTeamID: favoriteTeamID,
+                    source: .appModelMonthly
+                )
+            }
             failedScheduleMonths.remove(key)
             invalidateScheduleDerivedCaches(for: key)
+            await syncFavoriteTeamWidgetSnapshot(
+                includePrefetch: false,
+                reason: "scheduleMonthLoad:\(reason)",
+                monthKey: key
+            )
             #if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) loadID=\(loadID) gameCount=\(monthlyScheduleGames[key]?.count ?? 0)")
+            print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) loadID=\(loadID) gameCount=\(monthlyScheduleGames[key]?.count ?? 0) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
             #endif
-            await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: monthlyScheduleGames[key] ?? [])
-            await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: monthlyScheduleGames[key] ?? [])
+            return true
         } catch {
             failedScheduleMonths.insert(key)
             #if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) failed error=\(error)")
+            print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) failed durationMs=\(Self.durationMilliseconds(since: startedAt)) error=\(error)")
             #endif
             await hydrateScheduleMonthFromLocalStore(for: key, reason: reason, loadID: loadID)
+            return false
         }
     }
 
+    // hydrateScheduleMonthFromLocalStore 메서드는 이 타입의 주요 동작을 수행합니다.
     private func hydrateScheduleMonthFromLocalStore(
         for key: KBOMonthScheduleKey,
         reason: String,
@@ -2437,6 +4015,11 @@ final class AppModel {
             .sorted { $0.scheduledStart < $1.scheduledStart }
         failedScheduleMonths.remove(key)
         invalidateScheduleDerivedCaches(for: key)
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: "scheduleMonthLocalHydrate:\(reason)",
+            monthKey: key
+        )
         #if DEBUG
         print("[ScheduleCache] month=\(key.yearMonthText) source=local reason=\(reason) loadID=\(loadID) gameCount=\(monthlyScheduleGames[key]?.count ?? 0)")
         if scheduleMonthKey(for: currentDateProvider()) == key {
@@ -2449,17 +4032,9 @@ final class AppModel {
         }
         monthlyScheduleDecisionLogKeys[key] = "local:\(reason)"
         #endif
-        await notifyCancellationTransitions(
-            previousGames: previousKnownGames,
-            updatedGames: monthlyScheduleGames[key] ?? []
-        )
-        await notifyGameContentTransitions(
-            previousGames: previousKnownGames,
-            updatedGames: monthlyScheduleGames[key] ?? []
-        )
-        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
     }
 
+    // runStartupScheduleCountCheckIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func runStartupScheduleCountCheckIfNeeded() async {
         switch scheduleStartupSyncState {
         case .completed:
@@ -2501,6 +4076,7 @@ final class AppModel {
         await task.value
     }
 
+    // performStartupScheduleCountCheck 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performStartupScheduleCountCheck(
         repository scheduleSyncRepository: any KBOScheduleRemoteSyncDataSource
     ) async {
@@ -2526,8 +4102,8 @@ final class AppModel {
             #endif
             let previousKnownGames = allKnownGames()
             let result = try await scheduleSyncRepository.fetchMissingScheduleGames(excludingKnownGames: localGames)
-            let upsertResult = upsertScheduleGamesIntoLocalStore(result.games)
-            refreshLoadedScheduleMonthsFromLocalStore()
+            let upsertResult = upsertScheduleGamesIntoLocalStore(result.games, source: .startupSync)
+            await refreshLoadedScheduleMonthsFromLocalStore(reason: "startupSyncLocalStoreRefresh")
             scheduleStartupSyncState = .completed
             #if DEBUG
             print(
@@ -2547,32 +4123,32 @@ final class AppModel {
         }
     }
 
+    // refreshTodayGamesFromSupabase 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshTodayGamesFromSupabase(
         for date: Date,
         monthKey: KBOMonthScheduleKey,
         reason: String
-    ) async {
+    ) async -> [GameDetail] {
         let dayKey = scheduleDayKey(for: date)
         let todayKey = scheduleDayKey(for: currentDateProvider())
         guard dayKey == todayKey else {
             #if DEBUG
             print("[ScheduleCache] selectedDate=\(dayKey) source=local reason=\(reason) gameCount=\((groupedScheduleGamesByDay(for: date, filter: .all)[dayKey] ?? []).count)")
             #endif
-            return
+            return []
         }
-        let explicitReasons: Set<String> = ["manualTodayRefresh", "manualRefresh", "liveActivity", "notification"]
+        let explicitReasons: Set<String> = ["manualTodayRefresh", "manualRefresh", "liveActivity", "notification", "scheduleTodayLiveRefresh"]
         guard explicitReasons.contains(reason) else {
             #if DEBUG
             print("[ScheduleSync] todayLiveRefresh skipped date=\(dayKey) reason=\(reason)")
             #endif
-            return
+            return []
         }
         if let existingTask = inFlightTodayLiveRefreshTasks[dayKey] {
             #if DEBUG
             print("[ScheduleSync] todayLiveRefresh source=inFlight reason=awaitExistingFetch date=\(dayKey)")
             #endif
-            await existingTask.value
-            return
+            return await existingTask.value
         }
         if reason != "manualTodayRefresh",
            let refreshedAt = lastTodayLiveRefreshAt[dayKey],
@@ -2580,12 +4156,12 @@ final class AppModel {
             #if DEBUG
             print("[ScheduleSync] todayLiveRefresh skipped date=\(dayKey) reason=recent")
             #endif
-            return
+            return []
         }
 
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performRefreshTodayGamesFromSupabase(
+        let task = Task<[GameDetail], Never> { @MainActor [weak self] in
+            guard let self else { return [GameDetail]() }
+            return await self.performRefreshTodayGamesFromSupabase(
                 for: date,
                 monthKey: monthKey,
                 dayKey: dayKey,
@@ -2594,17 +4170,19 @@ final class AppModel {
             )
         }
         inFlightTodayLiveRefreshTasks[dayKey] = task
-        await task.value
+        let refreshedGames = await task.value
         inFlightTodayLiveRefreshTasks[dayKey] = nil
+        return refreshedGames
     }
 
+    // performRefreshTodayGamesFromSupabase 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performRefreshTodayGamesFromSupabase(
         for date: Date,
         monthKey: KBOMonthScheduleKey,
         dayKey: String,
         todayKey: String,
         reason: String
-    ) async {
+    ) async -> [GameDetail] {
         do {
             let previousKnownGames = allKnownGames()
             #if DEBUG
@@ -2614,9 +4192,24 @@ final class AppModel {
             #if DEBUG
             print("[ScheduleSync] todayRefresh date=\(dayKey) fetched=\(fetched.count)")
             #endif
-            let upsertResult = upsertScheduleGamesIntoLocalStore(fetched)
+            guard fetched.isEmpty == false else {
+                lastTodayLiveRefreshAt[dayKey] = Date()
+                #if DEBUG
+                print("[ScheduleSync] todayRefresh empty=true preserveMonthCache=true date=\(dayKey) month=\(monthKey.yearMonthText)")
+                #endif
+                await syncFavoriteTeamWidgetSnapshot(
+                    includePrefetch: false,
+                    reason: "todayLiveRefreshEmptyPreserveMonth",
+                    monthKey: monthKey
+                )
+                return []
+            }
+            let upsertResult = upsertScheduleGamesIntoLocalStore(fetched, source: .todayLiveRefresh)
             let cacheUpsertResult = await upsertScheduleGamesIntoRepositoryCache(fetched)
-            refreshLoadedScheduleMonthsFromLocalStore(including: monthKey)
+            await refreshLoadedScheduleMonthsFromLocalStore(
+                including: monthKey,
+                reason: "todayLiveRefreshLocalStoreRefresh"
+            )
             monthlyScheduleRefreshDayKeys[monthKey] = todayKey
             lastTodayLiveRefreshAt[dayKey] = Date()
             #if DEBUG
@@ -2626,18 +4219,26 @@ final class AppModel {
             await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: fetched)
             await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: fetched)
             await syncFavoriteTeamLiveActivity()
-            await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+            await syncFavoriteTeamWidgetSnapshot(
+                includePrefetch: false,
+                reason: "todayLiveRefresh",
+                monthKey: monthKey
+            )
+            return fetched
         } catch is CancellationError {
             #if DEBUG
             print("[ScheduleSync] todayRefresh date=\(dayKey) cancelled=true usingLocalOnly")
             #endif
+            return []
         } catch {
             #if DEBUG
             print("[ScheduleSync] todayRefresh date=\(dayKey) failed usingLocalOnly error=\(error)")
             #endif
+            return []
         }
     }
 
+    // upsertScheduleGamesIntoRepositoryCache 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func upsertScheduleGamesIntoRepositoryCache(_ incomingGames: [GameDetail]) async -> (inserted: Int, updated: Int, skippedExisting: Int) {
         guard let localStore = repository as? any KBOLocalGameCacheUpserting else {
             return (0, 0, incomingGames.count)
@@ -2645,29 +4246,40 @@ final class AppModel {
         return await localStore.upsertLocalGames(incomingGames)
     }
 
-    private func upsertScheduleGamesIntoLocalStore(_ incomingGames: [GameDetail]) -> (inserted: Int, updated: Int, skippedExisting: Int) {
+    // upsertScheduleGamesIntoLocalStore 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
+    private func upsertScheduleGamesIntoLocalStore(
+        _ incomingGames: [GameDetail],
+        source: ScheduleGameMergeSource = .unspecified
+    ) -> (inserted: Int, updated: Int, skippedExisting: Int) {
         var updatedGames = games
         var inserted = 0
         var updated = 0
         var skippedExisting = 0
+        var standingsRelevantChange = false
 
         for candidate in incomingGames {
-            let candidateAliases = identityAliases(for: candidate)
+            let candidateAliases = candidate.gameIdentityAliases
             if let existingIndex = updatedGames.firstIndex(where: { existing in
-                identityAliases(for: existing).isDisjoint(with: candidateAliases) == false
+                existing.gameIdentityAliases.isDisjoint(with: candidateAliases) == false
             }) {
                 let existing = updatedGames[existingIndex]
-                let selected = preferredKnownScheduleGame(existing: existing, candidate: candidate)
+                let selected = GameMergeResolver.preferredGame(existing: existing, candidate: candidate)
                 #if DEBUG
                 logPitcherMerge(existing: existing, incoming: candidate, merged: selected)
                 #endif
                 if selected != existing {
+                    if hasStandingsRelevantGameChange(existing: existing, selected: selected) {
+                        standingsRelevantChange = true
+                    }
                     updatedGames[existingIndex] = selected
                     updated += 1
                 } else {
                     skippedExisting += 1
                 }
             } else {
+                if hasStandingsRelevantGameChange(existing: nil, selected: candidate) {
+                    standingsRelevantChange = true
+                }
                 updatedGames.append(candidate)
                 inserted += 1
             }
@@ -2678,34 +4290,73 @@ final class AppModel {
         if mergedGames != games {
             games = mergedGames
             invalidateScheduleDerivedCaches()
-            scheduleLocalStandingsProbabilityRefresh()
-            refreshPublishedStandingsRowsWithCurrentSource(
-                season: currentStandingsSeason(),
-                reason: "gamesMerge"
-            )
+            if shouldRepublishStandingsAfterGameMerge(source: source, standingsRelevantChange: standingsRelevantChange) {
+                scheduleLocalStandingsProbabilityRefresh()
+                refreshPublishedStandingsRowsWithCurrentSource(
+                    season: currentStandingsSeason(),
+                    reason: source.rawValue
+                )
+            } else {
+                #if DEBUG
+                print("[StandingsRankMovement] republish skipped source=\(source.rawValue)")
+                #endif
+            }
         }
         #if DEBUG
-        print("[ScheduleSync] mergeSummary fetched=\(incomingGames.count) inserted=\(inserted) updated=\(updated) skipped=\(skippedExisting)")
+        print("[ScheduleSync] mergeSummary source=\(source.rawValue) fetched=\(incomingGames.count) inserted=\(inserted) updated=\(updated) skipped=\(skippedExisting) standingsRelevantChange=\(standingsRelevantChange)")
         #endif
         return (inserted, updated, skippedExisting)
     }
 
+    // shouldRepublishStandingsAfterGameMerge 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
+    private func shouldRepublishStandingsAfterGameMerge(
+        source: ScheduleGameMergeSource,
+        standingsRelevantChange: Bool
+    ) -> Bool {
+        switch source {
+        case .scheduleMonthLoad, .homeFavoriteRefresh, .todayLiveRefresh, .gameDetailRefresh, .staleReconciliation:
+            return false
+        case .unspecified, .standingsRefresh, .startupSync:
+            break
+        }
+        if source == .scheduleMonthLoad, standingsRelevantChange == false {
+            return false
+        }
+        return true
+    }
+
+    // hasStandingsRelevantGameChange 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
+    private func hasStandingsRelevantGameChange(existing: GameDetail?, selected: GameDetail) -> Bool {
+        guard selected.isRegularSeason || existing?.isRegularSeason == true else { return false }
+        guard let existing else {
+            return selected.hasCompleteFinalScore
+        }
+        return existing.seasonClassification != selected.seasonClassification ||
+            existing.awayTeam.id != selected.awayTeam.id ||
+            existing.homeTeam.id != selected.homeTeam.id ||
+            existing.status != selected.status ||
+            existing.awayScore != selected.awayScore ||
+            existing.homeScore != selected.homeScore
+    }
+
+    // overlayScheduleGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func overlayScheduleGames(
         _ incomingGames: [GameDetail],
-        intoMonth monthKey: KBOMonthScheduleKey
-    ) -> (games: [GameDetail], before: Int, inserted: Int, updated: Int, unchanged: Int, after: Int) {
+        intoMonth monthKey: KBOMonthScheduleKey,
+        reason: String
+    ) async -> (games: [GameDetail], before: Int, inserted: Int, updated: Int, unchanged: Int, after: Int) {
         var overlaidGames = monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
         let before = overlaidGames.count
         var inserted = 0
         var updated = 0
 
         for candidate in incomingGames {
-            let candidateAliases = identityAliases(for: candidate)
+            let candidateAliases = candidate.gameIdentityAliases
             if let existingIndex = overlaidGames.firstIndex(where: { existing in
-                identityAliases(for: existing).isDisjoint(with: candidateAliases) == false
+                existing.gameIdentityAliases.isDisjoint(with: candidateAliases) == false
             }) {
                 let existing = overlaidGames[existingIndex]
-                let selected = preferredKnownScheduleGame(existing: existing, candidate: candidate)
+                let selected = GameMergeResolver.preferredGame(existing: existing, candidate: candidate)
                 if selected != existing {
                     overlaidGames[existingIndex] = selected
                     updated += 1
@@ -2720,6 +4371,11 @@ final class AppModel {
             .sorted { $0.scheduledStart < $1.scheduledStart }
         monthlyScheduleGames[monthKey] = mergedGames
         invalidateScheduleDerivedCaches(for: monthKey)
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: reason,
+            monthKey: monthKey
+        )
 
         return (
             games: mergedGames,
@@ -2732,6 +4388,7 @@ final class AppModel {
     }
 
 #if DEBUG
+    // logPitcherMerge 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logPitcherMerge(existing: GameDetail, incoming: GameDetail, merged: GameDetail) {
         if existing.awayStartingPitcherName != merged.awayStartingPitcherName ||
             incoming.awayStartingPitcherName != merged.awayStartingPitcherName {
@@ -2744,7 +4401,11 @@ final class AppModel {
     }
 #endif
 
-    private func refreshLoadedScheduleMonthsFromLocalStore(including key: KBOMonthScheduleKey? = nil) {
+    // refreshLoadedScheduleMonthsFromLocalStore 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    private func refreshLoadedScheduleMonthsFromLocalStore(
+        including key: KBOMonthScheduleKey? = nil,
+        reason: String
+    ) async {
         var keys = Set(monthlyScheduleGames.keys)
         if let key {
             keys.insert(key)
@@ -2755,14 +4416,21 @@ final class AppModel {
                 .sorted { $0.scheduledStart < $1.scheduledStart }
         }
         invalidateScheduleDerivedCaches()
+        await syncFavoriteTeamWidgetSnapshot(
+            includePrefetch: false,
+            reason: reason,
+            monthKey: key
+        )
     }
 
+    // scheduleMonthKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleMonthKey(for date: Date) -> KBOMonthScheduleKey {
         var scheduleCalendar = calendar
         scheduleCalendar.timeZone = scheduleTimeZone
         return KBOMonthScheduleKey(date: date, calendar: scheduleCalendar)
     }
 
+    // refreshMonthlyScheduleDebugInfo 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshMonthlyScheduleDebugInfo(for key: KBOMonthScheduleKey) async -> RepositoryDebugSnapshot? {
         guard let repositoryRuntimeState else { return nil }
         let snapshot = await repositoryRuntimeState.snapshot()
@@ -2772,6 +4440,7 @@ final class AppModel {
         return snapshot
     }
 
+    // refreshGames 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshGames(for scopes: Set<RefreshScope>) async {
         guard activeRefreshScopes.isDisjoint(with: scopes) else { return }
         activeRefreshScopes.formUnion(scopes)
@@ -2796,17 +4465,13 @@ final class AppModel {
                 )
                 await notifyCancellationTransitions(previousGames: previousKnownGames, updatedGames: games)
                 await notifyGameContentTransitions(previousGames: previousKnownGames, updatedGames: games)
-                scheduleLocalStandingsProbabilityRefresh()
-                refreshPublishedStandingsRowsWithCurrentSource(
-                    season: currentStandingsSeason(),
-                    reason: "gamesRefresh"
-                )
+                logStandingsLocalCalculationSkipped(reason: "remoteRankSource", source: "gamesRefresh")
                 if repositoryRuntimeState == nil {
                     markRefreshSuccess(for: .games, at: Date(), isStale: false)
                 }
                 await refreshRepositoryDebugInfo(dataSets: [.games])
             }
-            await refreshTodayGamesFromSupabase(
+            _ = await refreshTodayGamesFromSupabase(
                 for: currentDateProvider(),
                 monthKey: scheduleMonthKey(for: currentDateProvider()),
                 reason: scopes.contains(.home) ? "homeRefresh" : "refresh"
@@ -2818,6 +4483,7 @@ final class AppModel {
         }
     }
 
+    // refreshNotifications 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshNotifications(for scopes: Set<RefreshScope>) async {
         guard activeRefreshScopes.isDisjoint(with: scopes) else { return }
         activeRefreshScopes.formUnion(scopes)
@@ -2844,6 +4510,7 @@ final class AppModel {
         }
     }
 
+    // refreshRepositoryDebugInfo 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshRepositoryDebugInfo(dataSets: Set<RefreshDataSet>) async {
         guard let repositoryRuntimeState else { return }
         let snapshot = await repositoryRuntimeState.snapshot()
@@ -2863,6 +4530,7 @@ final class AppModel {
 
     }
 
+    // applyRepositoryDebugSnapshot 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func applyRepositoryDebugSnapshot(_ snapshot: RepositoryDebugSnapshot) {
         debugActiveDataSource = snapshot.activeSource.rawValue
         debugDeliverySource = snapshot.deliverySource.rawValue
@@ -2879,8 +4547,9 @@ final class AppModel {
     }
 
 #if DEBUG
+    // debugGameIdentifier 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugGameIdentifier(for game: GameDetail) -> String {
-        gameNoteValue("public_game_id", in: game.note) ??
+        game.publicGameID ??
             game.officialGameCenterID ??
             game.id.uuidString
     }
@@ -2891,6 +4560,7 @@ final class AppModel {
         return reasons.first
     }
 
+    // logGameDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logGameDiagnostics(context: String) {
         let sourceGames = standingsCalculationGames
         let completedGames = sourceGames.filter(\.hasCompleteFinalScore)
@@ -2903,7 +4573,7 @@ final class AppModel {
         let standingsReason = commonStandingsUnavailableReason?.rawValue ?? "none"
         let homeReason = debugHomeFallbackDiagnosticMessage ?? "none"
 
-        print("[StandingsDebug] context=\(context) backend=\(backend) schema=\(SupabaseConfiguration.exposedSchema) source=\(debugActiveDataSource) delivery=\(debugDeliverySource)")
+        print("[StandingsDebug] context=\(context) backend=\(backend) source=\(debugActiveDataSource) delivery=\(debugDeliverySource)")
         print("[StandingsDebug] endpoint=rest/v1/games standingsMode=local-calculation todayKST=\(scheduleDayKey(for: currentDateProvider())) gameCount=\(sourceGames.count) completedGames=\(completedGames.count) completedRegularSeasonGames=\(completedRegularSeasonGames.count)")
         print("[StandingsDebug] classificationCounts total=\(sourceGames.count) regularSeason=\(regularSeasonGames.count) preseason=\(preseasonGames.count) postseason=\(postseasonGames.count) unknown=\(unknownGames.count)")
         print("[StandingsDebug] homeFallbackCompletedGames=\(fallbackCompletedGames.count) homeFallbackSnapshots=\(homeFallbackStandingsSnapshots.count) standingsReason=\(standingsReason) homeReason=\(homeReason)")
@@ -2915,6 +4585,7 @@ final class AppModel {
     }
 #endif
 
+    // shouldReloadBootstrapForLocalData 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldReloadBootstrapForLocalData() async -> Bool {
         if repository is BundledJSONKBORepository {
             return true
@@ -2926,6 +4597,7 @@ final class AppModel {
             (snapshot.activeSource == .mock && snapshot.baseURL == nil)
     }
 
+    // reloadBootstrapFromRepository 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reloadBootstrapFromRepository() async throws {
         let bootstrap = try await repository.fetchBootstrapData()
         if hasLoaded,
@@ -2945,6 +4617,7 @@ final class AppModel {
         invalidateMonthlyScheduleCache()
     }
 
+    // invalidateMonthlyScheduleCache 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func invalidateMonthlyScheduleCache() {
         monthlyScheduleGames = [:]
         monthlyScheduleDebugSnapshots = [:]
@@ -2964,6 +4637,7 @@ final class AppModel {
         isDataSetStale(.notifications)
     }
 
+    // isDataSetStale 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isDataSetStale(_ dataSet: RefreshDataSet) -> Bool {
         if refreshFailures.contains(dataSet) {
             return true
@@ -2976,6 +4650,7 @@ final class AppModel {
         return Date().timeIntervalSince(lastRefreshAt) > Self.staleThreshold
     }
 
+    // markRefreshSuccess 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markRefreshSuccess(for dataSet: RefreshDataSet, at date: Date, isStale: Bool) {
         lastSuccessfulRefresh[dataSet] = date
         if isStale {
@@ -2988,6 +4663,7 @@ final class AppModel {
         isShowingStaleData = isGamesStale || isNotificationsStale
     }
 
+    // markRefreshFailure 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markRefreshFailure(for dataSet: RefreshDataSet, hasUsableData: Bool) {
         refreshFailures.insert(dataSet)
         isShowingStaleData = isGamesStale || isNotificationsStale
@@ -3002,12 +4678,14 @@ final class AppModel {
         }
     }
 
+    // localBootstrapDocumentsPath 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func localBootstrapDocumentsPath() -> String? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("LocalBootstrapData.json", isDirectory: false)
             .path
     }
 
+    // staleStatusMessage 메서드는 이 타입의 주요 동작을 수행합니다.
     private func staleStatusMessage(lastRefreshAt: Date?) -> String {
         guard let lastRefreshAt else {
             return "업데이트가 지연되고 있습니다."
@@ -3015,77 +4693,248 @@ final class AppModel {
         return "업데이트 지연 · 마지막 갱신 \(lastRefreshAt.formatted(date: .omitted, time: .shortened))"
     }
 
+    // canonicalTeamIdentifier 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func canonicalTeamIdentifier(_ value: String?) -> String? {
         guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.isEmpty == false else {
             return nil
         }
 
-        let lowered = raw.lowercased()
-        if TeamIdentity.catalog[lowered] != nil {
-            return lowered
-        }
-
-        if let matched = TeamIdentity.catalog.first(where: { _, identity in
-            identity.shortLabel.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.monogram.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.displayName == raw
-        })?.key {
-            return matched
-        }
-
-        return lowered
+        return Team.canonicalID(for: raw) ?? raw.lowercased()
     }
 
-    private func syncFavoriteTeamWidgetSnapshot(includePrefetch: Bool) async {
+    // syncFavoriteTeamWidgetSnapshot 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    private func syncFavoriteTeamWidgetSnapshot(
+        includePrefetch: Bool,
+        reason: String = "unspecified",
+        monthKey: KBOMonthScheduleKey? = nil,
+        preferredMonthGames: [GameDetail]? = nil,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource? = nil
+    ) async {
         guard settings.favoriteTeamID != nil else {
-            guard lastFavoriteTeamWidgetSemanticKey != "nil" else { return }
+            guard lastFavoriteTeamWidgetSemanticKey != "nil" else {
+                #if DEBUG
+                print("[WidgetSnapshot] skipped reason=unchanged source=\(reason)")
+                #endif
+                return
+            }
             FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: nil, snapshot: nil)
             lastFavoriteTeamWidgetSemanticKey = "nil"
+            lastFavoriteTeamWidgetSnapshot = nil
             reloadFavoriteTeamWidgetTimelines()
             return
         }
 
-        if includePrefetch {
+        let requestedFavoriteTeamID = settings.favoriteTeamID
+        if includePrefetch, shouldPrefetchFavoriteTeamWidgetSchedule() {
             await prepareFavoriteTeamWidgetScheduleIfNeeded()
+            guard settings.favoriteTeamID == requestedFavoriteTeamID else { return }
         }
 
-        let snapshot = makeFavoriteTeamWidgetSnapshot()
+        let resolvedIncomingSource = incomingSource ?? favoriteTeamWidgetSnapshotSource(for: reason)
+        let widgetMonthKey = currentWidgetMonthKey()
+        if reason.contains("favoriteTeamChanged") == false,
+           shouldPreserveFullMonthWidgetSnapshot(
+            monthKey: widgetMonthKey,
+            incomingSource: resolvedIncomingSource,
+            incomingMonthGames: preferredMonthGames
+        ) {
+            return
+        }
+
+        let snapshot = makeFavoriteTeamWidgetSnapshot(
+            referenceDate: currentDateProvider(),
+            preferredMonthKey: monthKey,
+            preferredMonthGames: preferredMonthGames
+        )
+        let sourceMonthlyGames = favoriteTeamWidgetSourceMonthlyGames(
+            for: widgetMonthKey,
+            preferredMonthGames: preferredMonthGames
+        )
+        let incomingSourceMonthlyCount = sourceMonthlyGames.count
+        let incomingMyTeamCount = settings.favoriteTeamID.map { favoriteTeamID in
+            sourceMonthlyGames.filter { $0.involves(teamID: favoriteTeamID) }.count
+        } ?? 0
+        if shouldSkipPartialWidgetSnapshotStore(
+            snapshot: snapshot,
+            monthKey: widgetMonthKey,
+            incomingSource: resolvedIncomingSource,
+            incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+            incomingMyTeamCount: incomingMyTeamCount,
+            reason: reason
+        ) {
+            return
+        }
+        if shouldPreserveExistingWidgetSnapshot(over: snapshot, incomingSource: resolvedIncomingSource) {
+            #if DEBUG
+            print("[WidgetSnapshot] skipped reason=emptySchedulePreserved source=\(reason)")
+            #endif
+            return
+        }
         let semanticKey = FavoriteTeamWidgetSnapshotBuilder.semanticKey(
             favoriteTeamID: settings.favoriteTeamID,
             snapshot: snapshot
         )
-        guard semanticKey != lastFavoriteTeamWidgetSemanticKey else { return }
-        FavoriteTeamScheduleWidgetShared.saveState(favoriteTeamID: settings.favoriteTeamID, snapshot: snapshot)
+        guard semanticKey != lastFavoriteTeamWidgetSemanticKey else {
+            #if DEBUG
+            print("[WidgetSnapshot] skipped reason=unchanged source=\(reason)")
+            #endif
+            return
+        }
+        logFavoriteTeamScheduleWidgetStoreSave(
+            reason: reason,
+            monthKey: widgetMonthKey,
+            snapshot: snapshot,
+            sourceMonthlyGames: sourceMonthlyGames
+        )
+        FavoriteTeamScheduleWidgetShared.saveState(
+            favoriteTeamID: settings.favoriteTeamID,
+            snapshot: snapshot,
+            sourceMonthlyCount: incomingSourceMonthlyCount,
+            myTeamCount: incomingMyTeamCount,
+            source: reason,
+            monthKey: widgetMonthKey.yearMonthText
+        )
+        let persistedState = FavoriteTeamScheduleWidgetShared.loadState()
+        guard persistedState.favoriteTeamID == settings.favoriteTeamID,
+              persistedState.snapshot == snapshot else {
+            return
+        }
         lastFavoriteTeamWidgetSemanticKey = semanticKey
+        lastFavoriteTeamWidgetSnapshot = snapshot
         reloadFavoriteTeamWidgetTimelines()
     }
 
-    private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
-        guard settings.favoriteTeamID != nil else { return }
-
-        let scheduleCalendar = widgetScheduleCalendar()
-        let today = scheduleCalendar.startOfDay(for: Date())
-        let requestedMonth = startOfMonth(for: today)
-
-        await loadMyTeamSchedule(for: requestedMonth, forceRefresh: false)
-
-        if let resolvedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam),
-           scheduleCalendar.isDate(resolvedMonth, equalTo: requestedMonth, toGranularity: .month) == false {
-            await loadMyTeamSchedule(for: resolvedMonth, forceRefresh: false)
+    // shouldSyncFavoriteTeamWidget 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
+    private func shouldSyncFavoriteTeamWidget(afterGameUpdate game: GameDetail) -> Bool {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return true }
+        if game.involves(teamID: favoriteTeamID) {
+            return true
         }
+        return scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
     }
 
-    private func makeFavoriteTeamWidgetSnapshot(referenceDate: Date = Date()) -> FavoriteTeamScheduleWidgetSnapshot? {
+    private func favoriteTeamWidgetSnapshotSource(for reason: String) -> FavoriteTeamScheduleWidgetSnapshotSource {
+        if reason.contains("scheduleTab") {
+            return .scheduleTabCurrentMonth
+        }
+        if reason.contains("scheduleMonth") {
+            return .appModelMonthly
+        }
+        if reason.contains("today") || reason.contains("Today") || reason.contains("liveActivity") {
+            return .todayLiveRefresh
+        }
+        if reason.contains("homeFavorite") || reason.contains("home") {
+            return .homeFavoriteRefresh
+        }
+        return .unspecified
+    }
+
+    // shouldPreserveFullMonthWidgetSnapshot 메서드는 작은 오늘 데이터가 월간 스냅샷을 덮지 않게 방어합니다.
+    private func shouldPreserveFullMonthWidgetSnapshot(
+        monthKey: KBOMonthScheduleKey?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource,
+        incomingMonthGames: [GameDetail]?
+    ) -> Bool {
+        guard let monthKey,
+              let existingSource = favoriteTeamWidgetMonthSources[monthKey],
+              existingSource.source.rawValue > incomingSource.rawValue else {
+            return false
+        }
+        let incomingCount = incomingMonthGames?.count ?? widgetSourceMonthlyGames(for: monthKey).count
+        guard incomingCount < existingSource.games.count else { return false }
+        #if DEBUG
+        print("[WidgetSnapshot] skipped reason=preserveFullMonthSnapshot incomingSource=\(incomingSource.logName) incomingCount=\(incomingCount) existingCount=\(existingSource.games.count) month=\(monthKey.yearMonthText)")
+        #endif
+        return true
+    }
+
+    // prepareFavoriteTeamWidgetScheduleIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return }
+
+        let scheduleCalendar = widgetScheduleCalendar()
+        let today = scheduleCalendar.startOfDay(for: currentDateProvider())
+        let requestedMonth = startOfMonth(for: today, calendar: scheduleCalendar)
+        let requestedMonthKey = KBOMonthScheduleKey(date: requestedMonth, calendar: scheduleCalendar)
+        let snapshot = FavoriteTeamScheduleWidgetShared.loadSnapshot()
+        let needsRefresh = snapshot?.teamID == favoriteTeamID
+            && (snapshot?.refreshAfter ?? .distantPast) <= currentDateProvider()
+
+        let succeeded = await loadMyTeamSchedule(for: requestedMonth, forceRefresh: needsRefresh)
+        guard succeeded,
+              settings.favoriteTeamID == favoriteTeamID,
+              currentWidgetMonthKey() == requestedMonthKey,
+              let games = monthlyScheduleGames[requestedMonthKey] else { return }
+        storeFavoriteTeamWidgetMonthSource(
+            games,
+            monthKey: requestedMonthKey,
+            favoriteTeamID: favoriteTeamID,
+            source: .appModelMonthly
+        )
+    }
+
+    private func shouldPrefetchFavoriteTeamWidgetSchedule() -> Bool {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return false }
+        let monthKey = currentWidgetMonthKey()
+        let source = favoriteTeamWidgetMonthSources[monthKey]
+        let snapshot = FavoriteTeamScheduleWidgetShared.loadSnapshot()
+        return source?.favoriteTeamID != favoriteTeamID
+            || snapshot?.teamID != favoriteTeamID
+            || snapshot.map { FavoriteTeamScheduleWidgetSnapshotMonthPolicy.isCurrentMonth(snapshot: $0, now: currentDateProvider()) } != true
+            || snapshot.map { $0.refreshAfter <= currentDateProvider() } != false
+    }
+
+    private func storeFavoriteTeamWidgetMonthSource(
+        _ games: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        favoriteTeamID: String?,
+        source: FavoriteTeamScheduleWidgetSnapshotSource
+    ) {
+        guard let favoriteTeamID, settings.favoriteTeamID == favoriteTeamID else { return }
+        favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
+            monthKey: monthKey,
+            favoriteTeamID: favoriteTeamID,
+            games: games,
+            source: source,
+            updatedAt: currentDateProvider()
+        )
+    }
+
+    // makeFavoriteTeamWidgetSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
+    private func makeFavoriteTeamWidgetSnapshot(
+        referenceDate: Date = Date(),
+        preferredMonthKey: KBOMonthScheduleKey? = nil,
+        preferredMonthGames: [GameDetail]? = nil
+    ) -> FavoriteTeamScheduleWidgetSnapshot? {
         guard let favoriteTeam = favoriteTeamWidgetMetadata() else { return nil }
 
         let scheduleCalendar = widgetScheduleCalendar()
-        let requestedMonth = startOfMonth(for: referenceDate)
+        let currentMonthKey = currentWidgetMonthKey()
+        let requestedMonth = monthStart(for: currentMonthKey, calendar: scheduleCalendar)
         let hasAnyMyTeamGames = knownScheduleGames(filter: .myTeam).isEmpty == false
-        let displayedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam) ?? requestedMonth
-        let calendarDays = scheduleCalendarDays(for: displayedMonth, filter: .myTeam)
+        let displayedMonthKey = currentMonthKey
+        let displayedMonthSourceGames: [GameDetail]?
+        if preferredMonthKey == currentMonthKey {
+            displayedMonthSourceGames = preferredMonthGames ?? favoriteTeamWidgetMonthSources[displayedMonthKey]
+                .flatMap { $0.favoriteTeamID == favoriteTeam.id ? $0.games : nil }
+        } else {
+            displayedMonthSourceGames = favoriteTeamWidgetMonthSources[displayedMonthKey]
+                .flatMap { $0.favoriteTeamID == favoriteTeam.id ? $0.games : nil }
+        }
+        let calendarDays: [MyTeamCalendarDay]
+        if let displayedMonthSourceGames {
+            calendarDays = favoriteTeamWidgetCalendarDays(
+                monthKey: displayedMonthKey,
+                monthGames: displayedMonthSourceGames,
+                favoriteTeamID: favoriteTeam.id,
+                calendar: scheduleCalendar
+            )
+        } else {
+            calendarDays = scheduleCalendarDays(for: requestedMonth, filter: .myTeam)
+        }
 
-        if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty {
+        if hasAnyMyTeamGames == false && games.isEmpty && monthlyScheduleGames.isEmpty && displayedMonthSourceGames == nil {
             return nil
         }
 
@@ -3093,14 +4942,91 @@ final class AppModel {
             teamID: favoriteTeam.id,
             teamName: favoriteTeam.name,
             teamShortName: favoriteTeam.shortName,
-            displayedMonth: displayedMonth,
-            monthTitle: calendarMonthTitle(for: displayedMonth),
+            displayedMonth: monthStart(for: displayedMonthKey, calendar: scheduleCalendar),
+            monthTitle: calendarMonthTitle(for: monthStart(for: displayedMonthKey, calendar: scheduleCalendar)),
             days: calendarDays,
             referenceDate: referenceDate,
             calendar: scheduleCalendar
         )
     }
 
+    private func favoriteTeamWidgetCalendarDays(
+        monthKey: KBOMonthScheduleKey,
+        monthGames: [GameDetail],
+        favoriteTeamID: String,
+        calendar scheduleCalendar: Calendar
+    ) -> [MyTeamCalendarDay] {
+        let monthStart = monthStart(for: monthKey, calendar: scheduleCalendar)
+        let groupedGames = Dictionary(grouping: monthGames.filter { $0.involves(teamID: favoriteTeamID) }) { game in
+            scheduleDayKey(for: game.scheduledStart)
+        }
+        let todayKey = scheduleDayKey(for: currentDateProvider())
+        return ScheduleCalendarDayBuilder.makeDays(
+            monthStart: monthStart,
+            gamesByDate: groupedGames,
+            filter: .myTeam,
+            favoriteTeamID: favoriteTeamID,
+            calendar: scheduleCalendar,
+            dayKey: { [self] date in scheduleDayKey(for: date) },
+            isToday: { [self] _, cursorKey in cursorKey == todayKey },
+            hasAttendedGame: { [self] games in games.contains(where: isGameAttended) },
+            favoriteTeamResult: { [self] games, _ in calendarFavoriteTeamResult(for: games) }
+        )
+    }
+
+    private func logFavoriteTeamScheduleWidgetStoreSave(
+        reason: String,
+        monthKey: KBOMonthScheduleKey?,
+        snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        sourceMonthlyGames: [GameDetail] = []
+    ) {
+        #if DEBUG
+        guard let favoriteTeamID = settings.favoriteTeamID else { return }
+        let resolvedMonthKey = monthKey ?? snapshot.map {
+            KBOMonthScheduleKey(date: $0.displayedMonth, calendar: widgetScheduleCalendar())
+        }
+        let myTeamGames = sourceMonthlyGames
+            .filter { $0.involves(teamID: favoriteTeamID) }
+            .sorted { $0.scheduledStart < $1.scheduledStart }
+        let firstDate = myTeamGames.first.map { scheduleDayKey(for: $0.scheduledStart) } ?? "nil"
+        let lastDate = myTeamGames.last.map { scheduleDayKey(for: $0.scheduledStart) } ?? "nil"
+        print(
+            "[WidgetScheduleStore] save reason=\(reason) " +
+            "month=\(resolvedMonthKey?.yearMonthText ?? "nil") " +
+            "favoriteTeam=\(favoriteTeamID) " +
+            "sourceMonthlyCount=\(sourceMonthlyGames.count) " +
+            "myTeamCount=\(myTeamGames.count) " +
+            "first=\(firstDate) last=\(lastDate)"
+        )
+        #endif
+    }
+
+    private func favoriteTeamWidgetSourceMonthlyGames(
+        for monthKey: KBOMonthScheduleKey?,
+        preferredMonthGames: [GameDetail]?
+    ) -> [GameDetail] {
+        if let preferredMonthGames {
+            return preferredMonthGames
+        }
+        if let monthKey, let widgetMonthSource = favoriteTeamWidgetMonthSources[monthKey] {
+            return widgetMonthSource.games
+        }
+        if let monthKey {
+            return monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+        }
+        return []
+    }
+
+    private func widgetSourceMonthlyGames(for monthKey: KBOMonthScheduleKey) -> [GameDetail] {
+        monthlyScheduleGames[monthKey] ?? fallbackMonthSchedule(for: monthKey)
+    }
+
+    // currentWidgetMonthKey 메서드는 위젯이 항상 보여야 하는 KST 기준 현재 월을 반환합니다.
+    private func currentWidgetMonthKey() -> KBOMonthScheduleKey {
+        KBOMonthScheduleKey(date: currentDateProvider(), calendar: widgetScheduleCalendar())
+    }
+
+    // favoriteTeamWidgetMetadata 메서드는 이 타입의 주요 동작을 수행합니다.
     private func favoriteTeamWidgetMetadata() -> (id: String, name: String, shortName: String)? {
         guard let favoriteTeamID = settings.favoriteTeamID else { return nil }
 
@@ -3115,12 +5041,14 @@ final class AppModel {
         return (favoriteTeamID, favoriteTeamID.uppercased(), favoriteTeamID.uppercased())
     }
 
+    // widgetScheduleCalendar 메서드는 이 타입의 주요 동작을 수행합니다.
     private func widgetScheduleCalendar() -> Calendar {
         var scheduleCalendar = calendar
         scheduleCalendar.timeZone = scheduleTimeZone
         return scheduleCalendar
     }
 
+    // reloadFavoriteTeamWidgetTimelines 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reloadFavoriteTeamWidgetTimelines() {
         #if canImport(WidgetKit)
         WidgetCenter.shared.reloadTimelines(ofKind: FavoriteTeamScheduleWidgetShared.widgetKind)
@@ -3128,6 +5056,179 @@ final class AppModel {
         #endif
     }
 
+    private func shouldPreserveExistingWidgetSnapshot(
+        over snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource
+    ) -> Bool {
+        guard let snapshot else {
+            return false
+        }
+        let incomingCount = snapshotDisplayedMonthGameCount(snapshot)
+
+        if let lastFavoriteTeamWidgetSnapshot,
+           shouldPreserveWidgetSnapshot(
+            existing: lastFavoriteTeamWidgetSnapshot,
+            incoming: snapshot,
+            incomingCount: incomingCount,
+            incomingSource: incomingSource
+           ) {
+            return true
+        }
+
+        guard let persisted = FavoriteTeamScheduleWidgetShared.loadSnapshot(),
+              persisted.teamID == snapshot.teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: persisted.displayedMonth) ==
+                FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: snapshot.displayedMonth) else {
+            return false
+        }
+        return shouldPreserveWidgetSnapshot(
+            existing: persisted,
+            incoming: snapshot,
+            incomingCount: incomingCount,
+            incomingSource: incomingSource
+        )
+    }
+
+    private func shouldPreserveWidgetSnapshot(
+        existing: FavoriteTeamScheduleWidgetSnapshot,
+        incoming: FavoriteTeamScheduleWidgetSnapshot,
+        incomingCount: Int,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource
+    ) -> Bool {
+        guard existing.teamID == incoming.teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: existing.displayedMonth) ==
+                FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: incoming.displayedMonth) else {
+            return false
+        }
+
+        let existingCount = snapshotDisplayedMonthGameCount(existing)
+        guard existingCount > 0,
+              incomingCount < existingCount,
+              incomingSource != .scheduleTabCurrentMonth,
+              incomingSource != .appModelMonthly else {
+            return false
+        }
+        #if DEBUG
+        print("[WidgetSnapshot] skipped reason=partialSnapshotPreserved incomingSource=\(incomingSource.logName) incomingCount=\(incomingCount) existingCount=\(existingCount)")
+        #endif
+        return true
+    }
+
+    private func snapshotDisplayedMonthGameCount(_ snapshot: FavoriteTeamScheduleWidgetSnapshot) -> Int {
+        snapshot.days.reduce(0) { partialResult, day in
+            partialResult + (day.isInDisplayedMonth ? day.gameCount : 0)
+        }
+    }
+
+    private func shouldSkipPartialWidgetSnapshotStore(
+        snapshot: FavoriteTeamScheduleWidgetSnapshot?,
+        monthKey: KBOMonthScheduleKey?,
+        incomingSource: FavoriteTeamScheduleWidgetSnapshotSource,
+        incomingSourceMonthlyCount: Int,
+        incomingMyTeamCount: Int,
+        reason: String
+    ) -> Bool {
+        guard incomingSource != .scheduleTabCurrentMonth,
+              incomingSource != .appModelMonthly,
+              snapshot != nil,
+              let monthKey,
+              let favoriteTeamID = settings.favoriteTeamID,
+              let existing = existingWidgetSnapshotForPartialStoreCheck(
+                teamID: favoriteTeamID,
+                monthKey: monthKey
+              ) else {
+            return false
+        }
+
+        if incomingSource == .homeFavoriteRefresh,
+           incomingSourceMonthlyCount <= 1 {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        if let existingSourceMonthlyCount = existing.sourceMonthlyCount,
+           incomingSourceMonthlyCount < existingSourceMonthlyCount {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        if let existingMyTeamCount = existing.myTeamCount,
+           incomingMyTeamCount < existingMyTeamCount {
+            logPartialWidgetSnapshotStoreSkipped(
+                reason: reason,
+                monthKey: monthKey,
+                favoriteTeamID: favoriteTeamID,
+                incomingSourceMonthlyCount: incomingSourceMonthlyCount,
+                existingSourceMonthlyCount: existing.sourceMonthlyCount
+            )
+            return true
+        }
+
+        return false
+    }
+
+    private func logPartialWidgetSnapshotStoreSkipped(
+        reason: String,
+        monthKey: KBOMonthScheduleKey,
+        favoriteTeamID: String,
+        incomingSourceMonthlyCount: Int,
+        existingSourceMonthlyCount: Int?
+    ) {
+        #if DEBUG
+        let existingSourceMonthlyCountText = existingSourceMonthlyCount.map(String.init) ?? "unknown"
+        print(
+            "[WidgetScheduleStore] skipped reason=partialSnapshotWouldOverwriteExisting " +
+            "source=\(reason) " +
+            "month=\(monthKey.yearMonthText) " +
+            "favoriteTeam=\(favoriteTeamID) " +
+            "incomingSourceMonthlyCount=\(incomingSourceMonthlyCount) " +
+            "existingSourceMonthlyCount=\(existingSourceMonthlyCountText) " +
+            "skipped=true"
+        )
+        #endif
+    }
+
+    private func existingWidgetSnapshotForPartialStoreCheck(
+        teamID: String,
+        monthKey: KBOMonthScheduleKey
+    ) -> (snapshot: FavoriteTeamScheduleWidgetSnapshot, sourceMonthlyCount: Int?, myTeamCount: Int?)? {
+        let persistedMetadata = FavoriteTeamScheduleWidgetShared.loadSnapshotMetadata()
+        if let lastFavoriteTeamWidgetSnapshot,
+           lastFavoriteTeamWidgetSnapshot.teamID == teamID,
+           FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: lastFavoriteTeamWidgetSnapshot.displayedMonth) == monthKey.yearMonthText {
+            let count = favoriteTeamWidgetMonthSources[monthKey]?.games.count
+                ?? FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount()
+                ?? persistedMetadata?.sourceMonthlyCount
+            let myTeamCount = persistedMetadata?.myTeamCount
+                ?? snapshotDisplayedMonthGameCount(lastFavoriteTeamWidgetSnapshot)
+            return (lastFavoriteTeamWidgetSnapshot, count, myTeamCount)
+        }
+
+        guard let persisted = FavoriteTeamScheduleWidgetShared.loadSnapshot(),
+              persisted.teamID == teamID,
+              FavoriteTeamScheduleWidgetSnapshotMonthPolicy.monthKey(for: persisted.displayedMonth) == monthKey.yearMonthText else {
+            return nil
+        }
+        let count = FavoriteTeamScheduleWidgetShared.loadSnapshotSourceMonthlyCount()
+            ?? persistedMetadata?.sourceMonthlyCount
+        let myTeamCount = persistedMetadata?.myTeamCount
+            ?? snapshotDisplayedMonthGameCount(persisted)
+        return (persisted, count, myTeamCount)
+    }
+
+    // persistSettings 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistSettings() {
         FavoriteTeamScheduleWidgetShared.saveState(
             favoriteTeamID: settings.favoriteTeamID,
@@ -3137,10 +5238,14 @@ final class AppModel {
         AppModelPersistenceStore.saveSettings(settings)
     }
 
+    // updateAPNsDeviceToken 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func updateAPNsDeviceToken(_ token: String) {
         #if DEBUG
-        print("[NotificationPipeline] APNs token stored prefix=\(token.prefix(12)) length=\(token.count)")
+        print("[NotificationPipeline] APNs token stored hasToken=\(!token.isEmpty) environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
+        #else
+        print("[NotificationPipeline] APNs token stored reason=registrationSucceeded environment=\(NotificationRegistrationEnvironment.current)")
         #endif
+        AppLog.info(.notification, "[NotificationPipeline] APNs token stored environment=\(NotificationRegistrationEnvironment.current) buildConfiguration=\(AppBuildConfiguration.current)")
         guard apnsDeviceToken != token else {
             scheduleNotificationRegistrationSync(force: false)
             return
@@ -3153,11 +5258,13 @@ final class AppModel {
         scheduleNotificationRegistrationSync(force: true)
     }
 
+    // persistNotificationHistory 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistNotificationHistory() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveNotificationHistory(notifications)
     }
 
+    // mergedNotifications 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergedNotifications(with incoming: [NotificationItem]) -> [NotificationItem] {
         var byID: [UUID: NotificationItem] = [:]
         for item in notifications {
@@ -3169,27 +5276,32 @@ final class AppModel {
         return byID.values.sorted { $0.sentAt > $1.sentAt }
     }
 
+    // persistAttendedGameKeys 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistAttendedGameKeys() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveAttendedGameKeys(attendedGameKeys)
     }
 
+    // persistCancellationNotificationKeys 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistCancellationNotificationKeys() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveCancellationNotificationKeys(notifiedCancellationKeys)
     }
 
+    // persistOnboardingCompletion 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func persistOnboardingCompletion() {
         guard usesPersistedSettings else { return }
         AppModelPersistenceStore.saveOnboardingCompletion(hasCompletedOnboarding)
     }
 
+    // handleNotificationUserInfo 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     func handleNotificationUserInfo(_ userInfo: [AnyHashable: Any]) {
         guard let payload = ScoreNotificationPayloadExtractor.payload(from: userInfo) else { return }
         recordReceivedNotification(payload)
         routeNotification(payload)
     }
 
+    // recordReceivedNotification 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func recordReceivedNotification(_ payload: ScoreNotificationPayload) {
         let receivedAt = currentDateProvider()
         let item = NotificationHistoryBuilder.makeItem(from: payload, receivedAt: receivedAt)
@@ -3198,6 +5310,7 @@ final class AppModel {
         persistNotificationHistory()
     }
 
+    // routeNotification 메서드는 이 타입의 주요 동작을 수행합니다.
     private func routeNotification(_ payload: ScoreNotificationPayload) {
         switch ScoreNotificationPayloadExtractor.route(from: payload) {
         case .gameDetail(let gameIdentity):
@@ -3222,16 +5335,103 @@ final class AppModel {
         )
     }
 
+    func startLiveActivityPushToStartTokenObservation() {
+        #if canImport(ActivityKit)
+        guard liveActivityPushToStartTokenObservationTask == nil else { return }
+        guard FavoriteTeamLiveActivitySupport.hasWidgetExtension() else {
+            print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+            return
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("[LiveActivity] push-to-start observation skipped reason=activities_disabled")
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=activities_disabled")
+            return
+        }
+        liveActivityPushToStartTokenObservationTask = Task { [weak self] in
+            if #available(iOS 17.2, *) {
+                for await tokenData in Activity<FavoriteTeamGameActivityAttributes>.pushToStartTokenUpdates {
+                    let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                    await self?.registerPushToStartToken(token, reason: "tokenUpdate")
+                }
+            } else {
+                #if DEBUG
+                print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+                #endif
+                AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+            }
+        }
+        #else
+        #if DEBUG
+        print("[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+        #endif
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start observation skipped reason=unsupported_os_or_capability")
+        #endif
+    }
+
+    private func registerLastKnownPushToStartTokenIfNeeded(reason: String) async {
+        guard let lastLiveActivityPushToStartToken else { return }
+        await registerPushToStartToken(lastLiveActivityPushToStartToken, reason: reason)
+    }
+
+    private func registerPushToStartToken(_ token: String, reason: String) async {
+        guard token.isEmpty == false else { return }
+        lastLiveActivityPushToStartToken = token
+        let payload = LiveActivityPushToStartTokenRegistrationPayload(
+            pushToStartToken: token,
+            settings: settings,
+            authorizationStatus: notificationAuthorizationStatus
+        )
+        let key = LiveActivityPushToStartTokenRegistrationKey(
+            payload: payload,
+            endpointDescription: liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription
+        )
+        guard registeredPushToStartTokenKeys.insert(key).inserted else {
+            #if DEBUG
+            print("[LiveActivity] push-to-start registration skipped duplicate reason=\(reason) \(key)")
+            #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration skipped duplicate reason=\(reason)")
+            return
+        }
+
+        #if DEBUG
+        print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
+        #else
+        print("[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment)")
+        #endif
+        AppLog.info(.liveActivity, "[LiveActivity] push-to-start token received reason=\(reason) environment=\(payload.environment) autoStart=\(payload.liveActivityAutoStartEnabled) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
+        do {
+            _ = try await liveActivityPushToStartTokenRegistrationClient.register(payload)
+            #if DEBUG
+            print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
+            #else
+            print("[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) retry=false")
+            #endif
+            AppLog.info(.liveActivity, "[LiveActivity] push-to-start registration success reason=\(reason) environment=\(payload.environment) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false")
+        } catch {
+            #if DEBUG
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) endpoint=\(liveActivityPushToStartTokenRegistrationClient.debugEndpointDescription ?? "missing") hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false error=\(error)")
+            #else
+            print("[LiveActivity] push-to-start registration failure reason=\(reason) retry=false")
+            #endif
+            AppLog.error(.liveActivity, "[LiveActivity] push-to-start registration failure reason=\(reason) hasFavoriteTeamID=\(payload.favoriteTeamID?.isEmpty == false) retry=false error=\(error)")
+        }
+    }
+
+    // scheduleNotificationRegistrationSyncIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleNotificationRegistrationSyncIfNeeded(oldSettings: AppSettings) {
         guard oldSettings.favoriteTeamID != settings.favoriteTeamID ||
                 oldSettings.notificationPreferences != settings.notificationPreferences ||
-                oldSettings.quietHours != settings.quietHours else {
+                oldSettings.quietHours != settings.quietHours ||
+                oldSettings.liveActivitiesEnabled != settings.liveActivitiesEnabled ||
+                oldSettings.liveActivityAutoStartEnabled != settings.liveActivityAutoStartEnabled else {
             return
         }
 
         scheduleNotificationRegistrationSync(force: false)
     }
 
+    // scheduleNotificationRegistrationSync 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleNotificationRegistrationSync(force: Bool) {
         guard let payload = currentNotificationRegistrationPayload else {
             notificationRegistrationSyncStatus = .waitingForToken
@@ -3245,22 +5445,6 @@ final class AppModel {
             #endif
             return
         }
-        guard payload.alertTypes.isEmpty == false else {
-            notificationRegistrationSyncStatus = .idle
-            #if DEBUG
-            print("[NotificationPipeline] registration skipped reason=notificationsDisabled favoriteTeamID=\(favoriteTeamID)")
-            #endif
-            return
-        }
-        guard notificationAuthorizationStatus == .authorized ||
-                notificationAuthorizationStatus == .provisional else {
-            notificationRegistrationSyncStatus = .idle
-            #if DEBUG
-            print("[NotificationPipeline] registration skipped reason=authorizationNotGranted status=\(notificationAuthorizationStatus.rawValue)")
-            #endif
-            return
-        }
-
         let key = NotificationRegistrationKey(
             payload: payload,
             endpointDescription: notificationRegistrationClient.debugEndpointDescription
@@ -3297,6 +5481,7 @@ final class AppModel {
         }
     }
 
+    // performNotificationRegistrationSync 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func performNotificationRegistrationSync(
         _ payload: NotificationRegistrationPayload,
         key: NotificationRegistrationKey,
@@ -3308,8 +5493,11 @@ final class AppModel {
         do {
             try Task.checkCancellation()
             #if DEBUG
-            print("[NotificationPipeline] registration request start endpoint=\(notificationRegistrationClient.debugEndpointDescription ?? "missing") \(payload.debugBooleanDescription)")
+            print("[NotificationPipeline] registration sync start buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugRegistrationDescription)")
+            #else
+            print("[NotificationPipeline] registration sync start reason=deviceRegistration environment=\(payload.environment) buildConfiguration=\(AppBuildConfiguration.current)")
             #endif
+            AppLog.info(.notification, "[NotificationPipeline] registration sync start buildConfiguration=\(AppBuildConfiguration.current) \(payload.debugRegistrationDescription)")
             let status = try await notificationRegistrationClient.syncRegistration(payload)
             guard generation == notificationRegistrationSyncGeneration else {
                 notificationRegistrationDeduplicationState.fail(key)
@@ -3351,6 +5539,23 @@ final class AppModel {
         }
     }
 
+    // refreshActiveLiveActivityGameDetailIfNeeded 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
+    private func refreshActiveLiveActivityGameDetailIfNeeded(reason: String) async {
+        guard let activeLiveActivityGameID,
+              let activeGame = game(withID: activeLiveActivityGameID) else {
+            return
+        }
+
+        #if DEBUG
+        print("[LiveActivityBackgroundRefresh] activeGameDetailRefresh start reason=\(reason) gameID=\(activeLiveActivityGameID.uuidString)")
+        #endif
+        _ = await refreshGameDetailResult(
+            for: activeGame.canonicalGameIdentityValue,
+            forceRefresh: true
+        )
+    }
+
+    // syncFavoriteTeamLiveActivity 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func syncFavoriteTeamLiveActivity() async {
         liveActivitySupported = liveActivityController.isSupported
 
@@ -3382,6 +5587,7 @@ final class AppModel {
         }
     }
 
+    // resolvedRawGameID 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func resolvedRawGameID(for game: GameDetail) -> String {
         if let officialGame = self.game(withIdentity: game.canonicalGameIdentityValue) {
             return officialGame.canonicalGameIdentityValue
@@ -3389,46 +5595,22 @@ final class AppModel {
         return game.canonicalGameIdentityValue
     }
 
-    private func homePriority(for summary: GameSummary) -> Int {
-        HomeGameSelector.priority(for: summary)
-    }
-
+    // matchesHomeFilter 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func matchesHomeFilter(_ summary: GameSummary) -> Bool {
         HomeGameSelector.matches(summary, filter: homeFilter)
     }
 
+    // homeSummaryComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func homeSummaryComparator(_ lhs: GameSummary, _ rhs: GameSummary) -> Bool {
         HomeGameSelector.compare(lhs, rhs)
     }
 
+    // todayGameComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func todayGameComparator(_ lhs: GameDetail, _ rhs: GameDetail) -> Bool {
         HomeGameSelector.compareTodayGames(lhs, rhs, favoriteTeamID: settings.favoriteTeamID)
     }
 
-    private func dominantStatus(for games: [GameDetail]) -> GameStatus? {
-        ScheduleDayStatusResolver.dominantStatus(for: games)
-    }
-
-    private func calendarMyTeamGames(for games: [GameDetail]) -> [GameDetail] {
-        guard let favoriteTeamID = settings.favoriteTeamID else { return [] }
-        return games.filter { $0.involves(teamID: favoriteTeamID) }
-    }
-
-    private func calendarOpponentTeam(for games: [GameDetail], filter: ScheduleFilter) -> Team? {
-        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
-
-        for game in games {
-            if game.awayTeam.id == favoriteTeamID {
-                return game.homeTeam
-            }
-            if game.homeTeam.id == favoriteTeamID {
-                return game.awayTeam
-            }
-        }
-
-        return nil
-    }
-
+    // calendarFavoriteTeamResult 메서드는 이 타입의 주요 동작을 수행합니다.
     private func calendarFavoriteTeamResult(for games: [GameDetail]) -> TeamGameResult? {
         for game in games {
             if let result = game.finalResult(for: settings.favoriteTeamID) {
@@ -3438,21 +5620,7 @@ final class AppModel {
         return nil
     }
 
-    private func calendarFavoriteTeamIsHome(for games: [GameDetail], filter: ScheduleFilter) -> Bool? {
-        guard filter == .myTeam, let favoriteTeamID = settings.favoriteTeamID else { return nil }
-
-        for game in games {
-            if game.homeTeam.id == favoriteTeamID {
-                return true
-            }
-            if game.awayTeam.id == favoriteTeamID {
-                return false
-            }
-        }
-
-        return nil
-    }
-
+    // makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshot(
         for team: Team,
         probabilitySignalsByTeamID: [String: LocalStandingsProbabilitySignal] = [:]
@@ -3469,6 +5637,7 @@ final class AppModel {
         )
     }
 
+    // makeStandingsSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeStandingsSnapshot(
         for team: Team,
         completedGames: [GameDetail],
@@ -3484,6 +5653,7 @@ final class AppModel {
         )
     }
 
+    // refreshLocalStandingsProbabilitySignalsSynchronously 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshLocalStandingsProbabilitySignalsSynchronously() {
         localStandingsProbabilityRefreshTask?.cancel()
         localStandingsProbabilitySignalsByTeamID = localPostseasonQualificationCalculator.makeSignals(
@@ -3492,6 +5662,7 @@ final class AppModel {
         )
     }
 
+    // refreshLocalStandingsProbabilitySignals 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.
     private func refreshLocalStandingsProbabilitySignals(for sourceGames: [GameDetail]) {
         localStandingsProbabilityRefreshTask?.cancel()
         localStandingsProbabilityGeneration += 1
@@ -3501,6 +5672,7 @@ final class AppModel {
         )
     }
 
+    // scheduleLocalStandingsProbabilityRefresh 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleLocalStandingsProbabilityRefresh() {
         guard standingsSourceGamesBySeason[currentStandingsSeason()] == nil else { return }
         localStandingsProbabilityRefreshTask?.cancel()
@@ -3531,10 +5703,12 @@ final class AppModel {
         }
     }
 
+    // standingsComparator 메서드는 이 타입의 주요 동작을 수행합니다.
     private func standingsComparator(_ lhs: TeamStandingsSnapshot, _ rhs: TeamStandingsSnapshot) -> Bool {
         StandingsSorter.compare(lhs, rhs, previousRankProvider: previousRegularSeasonRank)
     }
 
+    // previousRegularSeasonRank 메서드는 이 타입의 주요 동작을 수행합니다.
     private func previousRegularSeasonRank(for team: Team) -> Int? {
         if let previousRegularSeasonRank = team.previousRegularSeasonRank {
             return previousRegularSeasonRank
@@ -3545,6 +5719,7 @@ final class AppModel {
         return Self.previousRegularSeasonRankByTeamID[teamID]
     }
 
+    // notifyGameContentTransitions 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func notifyGameContentTransitions(
         previousGames: [GameDetail],
         updatedGames: [GameDetail]
@@ -3573,54 +5748,7 @@ final class AppModel {
         }
     }
 
-    private func notificationEvent(
-        previous: GameContentNotificationState,
-        current: GameContentNotificationState
-    ) -> ScoreNotificationEventType? {
-        if previous.awayScore != current.awayScore || previous.homeScore != current.homeScore {
-            return .scoreChange
-        }
-        if current.status.isLiveLike,
-           nonBlank(current.currentBatterName) != nil,
-           nonBlank(current.currentPitcherName) != nil,
-           baseOccupancyCount(current.bases) > baseOccupancyCount(previous.bases),
-           (current.outs ?? previous.outs ?? 0) <= (previous.outs ?? current.outs ?? 0) {
-            return .onBase
-        }
-        return nil
-    }
-
-    private func notificationPreferenceAllows(_ event: ScoreNotificationEventType) -> Bool {
-        switch event {
-        case .gameStart:
-            return settings.notificationPreferences.gameStart
-        case .scoreChange:
-            return settings.notificationPreferences.scoreChange
-        case .onBase:
-            return settings.notificationPreferences.scoreChange
-        case .leadChange:
-            return settings.notificationPreferences.leadChange
-        case .gameEnd:
-            return settings.notificationPreferences.gameEnd
-        case .inningChange:
-            return settings.notificationPreferences.inningChangeEnabled
-        case .rainDelay:
-            return settings.notificationPreferences.rainDelay
-        case .general:
-            return true
-        }
-    }
-
-    private func baseOccupancyCount(_ bases: RunnerState?) -> Int {
-        guard let bases else { return 0 }
-        return (bases.first ? 1 : 0) + (bases.second ? 1 : 0) + (bases.third ? 1 : 0)
-    }
-
-    private func baseFingerprint(_ bases: RunnerState?) -> String {
-        guard let bases else { return "---" }
-        return "\(bases.first ? "1" : "-")\(bases.second ? "2" : "-")\(bases.third ? "3" : "-")"
-    }
-
+    // notifyCancellationTransitions 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func notifyCancellationTransitions(
         previousGames: [GameDetail],
         updatedGames: [GameDetail]
@@ -3683,6 +5811,7 @@ final class AppModel {
         }
     }
 
+    // cancellationNotificationState 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func cancellationNotificationState(for game: GameDetail) -> GameCancellationNotificationState? {
         switch game.status {
         case .cancelled:
@@ -3697,6 +5826,7 @@ final class AppModel {
         }
     }
 
+    // cancellationNotificationFingerprint 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func cancellationNotificationFingerprint(
         for game: GameDetail,
         state: GameCancellationNotificationState
@@ -3709,20 +5839,17 @@ final class AppModel {
         ].joined(separator: "|")
     }
 
+    // equivalentGame 메서드는 이 타입의 주요 동작을 수행합니다.
     private func equivalentGame(to game: GameDetail, in candidates: [GameDetail]) -> GameDetail? {
-        let lookupAliases = identityAliases(for: game)
-        return candidates.reduce(nil) { preferred, candidate in
-            guard identityAliases(for: candidate).isDisjoint(with: lookupAliases) == false else {
-                return preferred
-            }
-            return preferredKnownScheduleGame(existing: preferred, candidate: candidate)
-        }
+        GameMergeResolver.equivalentGame(to: game, in: candidates)
     }
 
+    // isTodayInKorea 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isTodayInKorea(_ game: GameDetail) -> Bool {
         scheduleDayKey(for: game.scheduledStart) == scheduleDayKey(for: currentDateProvider())
     }
 
+    // isWeatherRelatedCancellation 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isWeatherRelatedCancellation(_ game: GameDetail) -> Bool {
         let text = ([game.note, game.highlightText, game.inningText].compactMap { $0 } + game.events.map(\.headline))
             .joined(separator: " ")
@@ -3731,6 +5858,7 @@ final class AppModel {
         return weatherTokens.contains { text.contains($0) }
     }
 
+    // availableScheduleMonths 메서드는 이 타입의 주요 동작을 수행합니다.
     private func availableScheduleMonths(filter: ScheduleFilter) -> [Date] {
         let monthStarts = knownScheduleGames(filter: filter)
             .map { startOfMonth(for: $0.scheduledStart) }
@@ -3738,6 +5866,7 @@ final class AppModel {
         return Array(Set(monthStarts)).sorted()
     }
 
+    // knownScheduleGames 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func knownScheduleGames(filter: ScheduleFilter) -> [GameDetail] {
         let mergedGames = mergeEquivalentGames(games + monthlyScheduleGames.values.flatMap { $0 })
         switch filter {
@@ -3749,6 +5878,7 @@ final class AppModel {
         }
     }
 
+    // mergeMonthlyScheduleGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergeMonthlyScheduleGames(_ monthGames: [GameDetail], for key: KBOMonthScheduleKey) -> [GameDetail] {
         let stateGamesInMonth = games.filter {
             let components = calendar.dateComponents([.year, .month], from: $0.scheduledStart)
@@ -3757,266 +5887,31 @@ final class AppModel {
         return mergeEquivalentGames(monthGames + stateGamesInMonth)
     }
 
+    // mergeEquivalentGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func mergeEquivalentGames(_ sourceGames: [GameDetail]) -> [GameDetail] {
-        var gamesByMergeKey: [String: GameDetail] = [:]
-        var mergeKeyByAlias: [String: String] = [:]
-
-        for candidate in sourceGames {
-            let candidateAliases = identityAliases(for: candidate)
-            let mergeKey = candidateAliases
-                .compactMap { mergeKeyByAlias[$0] }
-                .sorted()
-                .first ?? candidate.canonicalGameIdentityKey
-
-            let selected = preferredKnownScheduleGame(existing: gamesByMergeKey[mergeKey], candidate: candidate)
-            gamesByMergeKey[mergeKey] = selected
-
-            let selectedAliases = identityAliases(for: selected)
-            for alias in candidateAliases.union(selectedAliases) {
-                mergeKeyByAlias[alias] = mergeKey
-            }
-        }
-
-        return Array(gamesByMergeKey.values)
+        GameMergeResolver.mergeEquivalentGames(sourceGames)
     }
 
-    private func preferredKnownScheduleGame(existing: GameDetail?, candidate: GameDetail) -> GameDetail {
-        guard let existing else { return candidate }
-        let stateSource = preferredGameStateSource(existing: existing, candidate: candidate)
-        let supplementalSource = stateSource == candidate ? existing : candidate
-        return GameDetail(
-            id: existing.id,
-            scheduledStart: stateSource.scheduledStart,
-            venue: nonBlank(candidate.venue) ?? existing.venue,
-            awayTeam: preferredTeam(candidate.awayTeam, fallback: existing.awayTeam),
-            homeTeam: preferredTeam(candidate.homeTeam, fallback: existing.homeTeam),
-            awayScore: stateSource.awayScore ?? supplementalSource.awayScore,
-            homeScore: stateSource.homeScore ?? supplementalSource.homeScore,
-            status: stateSource.status,
-            seasonClassification: stateSource.seasonClassification == .unknown ? existing.seasonClassification : stateSource.seasonClassification,
-            inningText: nonBlank(stateSource.inningText) ?? supplementalSource.inningText,
-            bases: stateSource.bases,
-            baseRunners: mergedBaseRunners(
-                primary: stateSource.baseRunners,
-                supplemental: supplementalSource.baseRunners,
-                bases: stateSource.bases
-            ),
-            balls: stateSource.balls,
-            strikes: stateSource.strikes,
-            outs: stateSource.outs,
-            highlightText: nonBlank(candidate.highlightText) ?? existing.highlightText,
-            events: candidate.events.isEmpty ? existing.events : candidate.events,
-            note: mergedGameNote(existing: existing.note, candidate: candidate.note),
-            providerGameID: nonBlank(candidate.providerGameID) ?? existing.providerGameID,
-            awayStartingPitcherName: nonBlank(candidate.awayStartingPitcherName) ?? existing.awayStartingPitcherName,
-            homeStartingPitcherName: nonBlank(candidate.homeStartingPitcherName) ?? existing.homeStartingPitcherName,
-            currentPitcherName: nonBlank(stateSource.currentPitcherName),
-            currentBatterName: nonBlank(stateSource.currentBatterName)
-        )
-    }
-
-    private func mergedBaseRunners(
-        primary: GameBaseRunners?,
-        supplemental: GameBaseRunners?,
-        bases: RunnerState?
-    ) -> GameBaseRunners? {
-        guard let bases else {
-            return primary ?? supplemental
-        }
-        let first = bases.first ? (nonBlank(primary?.first) ?? nonBlank(supplemental?.first)) : nil
-        let second = bases.second ? (nonBlank(primary?.second) ?? nonBlank(supplemental?.second)) : nil
-        let third = bases.third ? (nonBlank(primary?.third) ?? nonBlank(supplemental?.third)) : nil
-        guard first != nil || second != nil || third != nil else {
-            return nil
-        }
-        return GameBaseRunners(first: first, second: second, third: third)
-    }
-
-    private func preferredGameStateSource(existing: GameDetail, candidate: GameDetail) -> GameDetail {
-        if shouldRecoverUnconfirmedFinal(existing: existing, candidate: candidate) {
-            return candidate
-        }
-        let candidatePriority = gameStateMergePriority(candidate)
-        let existingPriority = gameStateMergePriority(existing)
-        if candidatePriority != existingPriority {
-            return candidatePriority > existingPriority ? candidate : existing
-        }
-        let candidateFreshness = freshnessDate(for: candidate)
-        let existingFreshness = freshnessDate(for: existing)
-        if let candidateFreshness, let existingFreshness, candidateFreshness != existingFreshness {
-            return candidateFreshness > existingFreshness ? candidate : existing
-        }
-        if candidateFreshness != nil, existingFreshness == nil {
-            return candidate
-        }
-        if candidate.hasCompleteFinalScore != existing.hasCompleteFinalScore {
-            return candidate.hasCompleteFinalScore ? candidate : existing
-        }
-        let candidateHasProvider = candidate.officialGameCenterID != nil
-        let existingHasProvider = existing.officialGameCenterID != nil
-        if candidateHasProvider != existingHasProvider {
-            return candidateHasProvider ? candidate : existing
-        }
-        return candidate
-    }
-
-    private func shouldRecoverUnconfirmedFinal(existing: GameDetail, candidate: GameDetail) -> Bool {
-        guard existing.status == .final,
-              hasConfirmedFinalStatus(existing) == false,
-              isLiveLike(candidate) else {
-            return false
-        }
-        let candidateFreshness = freshnessDate(for: candidate)
-        let existingFreshness = freshnessDate(for: existing)
-        if let candidateFreshness, let existingFreshness {
-            return candidateFreshness >= existingFreshness
-        }
-        if candidateFreshness != nil, existingFreshness == nil {
-            return true
-        }
-        return hasLiveProgress(candidate)
-    }
-
-    private func hasConfirmedFinalStatus(_ game: GameDetail) -> Bool {
-        game.status == .final && gameNoteValue("final_confirmed_at", in: game.note) != nil
-    }
-
-    private func isLiveLike(_ game: GameDetail) -> Bool {
-        game.status.isLiveLike || hasLiveProgress(game)
-    }
-
-    private func hasLiveProgress(_ game: GameDetail) -> Bool {
-        nonBlank(game.currentPitcherName) != nil
-            || nonBlank(game.currentBatterName) != nil
-            || game.balls != nil
-            || game.strikes != nil
-            || game.outs != nil
-    }
-
-    private func preferredTeam(_ candidate: Team, fallback: Team) -> Team {
-        candidate.id.hasPrefix("unknown-") ? fallback : candidate
-    }
-
-    private func mergedGameNote(existing: String?, candidate: String?) -> String? {
-        let components = [candidate, existing].compactMap(nonBlank)
-        guard components.isEmpty == false else { return nil }
-
-        var seen: Set<String> = []
-        let merged = components
-            .flatMap { $0.split(separator: " ").map(String.init) }
-            .filter { seen.insert($0).inserted }
-            .joined(separator: " ")
-        return nonBlank(merged)
-    }
-
-    private func nonBlank(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func freshnessDate(for game: GameDetail) -> Date? {
-        [
-            gameNoteValue("live_last_checked_at", in: game.note),
-            gameNoteValue("updated_at", in: game.note),
-            gameNoteValue("source_updated_at", in: game.note)
-        ]
-        .compactMap(KBODateParser.parseTimestamp)
-        .max()
-    }
-
-    private func gameNoteValue(_ key: String, in note: String?) -> String? {
-        guard let note,
-              let range = note.range(of: "\(key)=") else {
-            return nil
-        }
-        let suffix = note[range.upperBound...]
-        return suffix.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init)
-    }
-
-    private func gameStateMergePriority(_ game: GameDetail) -> Int {
-        switch game.status {
-        case .final, .cancelled:
-            return 3
-        case .live, .rainDelay:
-            return 2
-        case .upcoming:
-            return 1
-        }
-    }
-
-    private func identityMatchDescription(existing: GameDetail, candidate: GameDetail) -> String {
-        let sharedAliases = identityAliases(for: existing).intersection(identityAliases(for: candidate))
-        let orderedPrefixes = [
-            "provider:",
-            "public:",
-            "date-team:",
-            "date-team-venue:",
-            "match:",
-            "id:"
-        ]
-        for prefix in orderedPrefixes {
-            if let alias = sharedAliases.sorted().first(where: { $0.hasPrefix(prefix) }) {
-                return alias
-            }
-        }
-        return sharedAliases.sorted().first ?? "unknown"
-    }
-
+    // scoreDebugText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func scoreDebugText(_ game: GameDetail) -> String {
         "\(game.awayScore.map(String.init) ?? "-"):\(game.homeScore.map(String.init) ?? "-")"
     }
 
-    private func baseDebugText(_ bases: RunnerState?) -> String {
-        guard let bases else { return "---" }
-        return [
-            bases.first ? "1" : "-",
-            bases.second ? "2" : "-",
-            bases.third ? "3" : "-"
-        ].joined()
+    // operationalGameIdentifier 메서드는 운영 로그용 비민감 경기 식별자를 선택합니다.
+    private func operationalGameIdentifier(for game: GameDetail) -> String {
+        game.publicGameID ??
+            game.providerGameID ??
+            game.officialProviderGameID ??
+            game.id.uuidString
     }
 
-    private struct SelectedGameMatch {
-        let game: GameDetail
-        let priority: Int
-        let token: String
-        let reason: String
-    }
-
-    private func selectedGameMatch(for gameIdentity: String) -> SelectedGameMatch? {
-        let requestTokens = GameIdentifier.requestedIdentityTokens(from: gameIdentity)
-        guard requestTokens.isEmpty == false else { return nil }
-
-        let matches = allKnownGames().compactMap { game -> SelectedGameMatch? in
-            guard let match = GameIdentifier.bestMatch(
-                requestTokens: requestTokens,
-                candidateTokens: identityMatchTokens(for: game)
-            ) else {
-                return nil
-            }
-            return SelectedGameMatch(game: game, priority: match.priority, token: match.token, reason: match.reason)
-        }
-
-        guard let bestPriority = matches.map(\.priority).min() else { return nil }
-        let bestMatches = matches.filter { $0.priority == bestPriority }
-        let publicIDs = Set(bestMatches.compactMap { nonBlank($0.game.publicGameID) })
-        if bestMatches.count > 1, publicIDs.count > 1 {
-            #if DEBUG
-            print("[GameDetailFetch] selectedGame ambiguous selectedIdentity=\(gameIdentity) priority=\(bestPriority) token=\(bestMatches.map(\.token).sorted().joined(separator: ",")) publicIDs=\(publicIDs.sorted().joined(separator: ","))")
-            #endif
-            return nil
-        }
-
-        let selected = bestMatches.reduce(nil as GameDetail?) { preferred, match in
-            preferredKnownScheduleGame(existing: preferred, candidate: match.game)
-        }
-        guard let selected else { return nil }
-        let reason = bestMatches.first?.reason ?? "unknown"
-        let token = bestMatches.first?.token ?? ""
-        return SelectedGameMatch(game: selected, priority: bestPriority, token: token, reason: reason)
+    // selectedGameMatch 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
+    private func selectedGameMatch(for gameIdentity: String) -> SelectedGameResolution? {
+        SelectedGameResolver.match(for: gameIdentity, in: allKnownGames())
     }
 
     #if DEBUG
+    // debugLogLocalCandidateMiss 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogLocalCandidateMiss(_ gameIdentity: String) {
         let rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
         let candidates = allKnownGames()
@@ -4026,18 +5921,19 @@ final class AppModel {
         print("[GameDetailFetch] selectedGame localMiss selectedIdentity=\(gameIdentity) rawIdentifier=\(rawIdentifier) candidateCount=\(candidates.count) requestedTokens=[\(requestTokens)]")
     }
 
+    // debugLogMissingSelectedGame 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogMissingSelectedGame(_ gameIdentity: String) {
         let rawIdentifier: String
         rawIdentifier = GameIdentifier.rawIdentifier(from: gameIdentity)
         let candidates = allKnownGames()
-        let hasPublicIDs = candidates.contains { nonBlank($0.publicGameID) != nil }
-        let hasProviderIDs = candidates.contains { nonBlank($0.providerGameID) != nil }
-        let hasOfficialIDs = candidates.contains { nonBlank($0.officialProviderGameID) != nil }
+        let hasPublicIDs = candidates.contains { GameMergeResolver.nonBlank($0.publicGameID) != nil }
+        let hasProviderIDs = candidates.contains { GameMergeResolver.nonBlank($0.providerGameID) != nil }
+        let hasOfficialIDs = candidates.contains { GameMergeResolver.nonBlank($0.officialProviderGameID) != nil }
         let requestTokens = GameIdentifier.requestedIdentityTokens(from: gameIdentity)
             .sorted()
             .joined(separator: ",")
         let candidateDescriptions = candidates.map { candidate in
-            let tokens = identityMatchTokens(for: candidate)
+            let tokens = candidate.gameIdentityMatchTokens
                 .map { "\($0.priority):\($0.value)" }
                 .sorted()
                 .joined(separator: "|")
@@ -4048,42 +5944,22 @@ final class AppModel {
     }
     #endif
 
+    // equivalentGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func equivalentGames(to game: GameDetail) -> [GameDetail] {
-        var equivalentAliases = identityAliases(for: game)
-        var didExpand = true
-
-        while didExpand {
-            didExpand = false
-            for candidate in allKnownGames() {
-                let candidateAliases = identityAliases(for: candidate)
-                guard equivalentAliases.isDisjoint(with: candidateAliases) == false else { continue }
-                let previousCount = equivalentAliases.count
-                equivalentAliases.formUnion(candidateAliases)
-                didExpand = equivalentAliases.count != previousCount
-            }
-        }
-
-        return allKnownGames().filter { candidate in
-            identityAliases(for: candidate).isDisjoint(with: equivalentAliases) == false
-        }
+        GameMergeResolver.equivalentGames(to: game, in: allKnownGames())
     }
 
+    // allKnownGames 메서드는 이 타입의 주요 동작을 수행합니다.
     private func allKnownGames() -> [GameDetail] {
         games + monthlyScheduleGames.values.flatMap { $0 }
     }
 
-    private func identityAliases(for game: GameDetail) -> Set<String> {
-        game.gameIdentityAliases
-    }
-
-    private func identityMatchTokens(for game: GameDetail) -> [GameIdentifier.IdentityMatchToken] {
-        game.gameIdentityMatchTokens
-    }
-
     #if DEBUG
+    // debugLogAttendanceToggle 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogAttendanceToggle(game: GameDetail, storedKey: String, equivalentKeys: Set<String>, isAttended: Bool) {
     }
 
+    // debugLogAttendanceSummaryCandidate 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogAttendanceSummaryCandidate(
         _ game: GameDetail,
         favoriteTeamID: String,
@@ -4093,6 +5969,7 @@ final class AppModel {
     }
     #endif
 
+    // makeScheduleCalendarCacheKey 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeScheduleCalendarCacheKey(for date: Date, filter: ScheduleFilter) -> ScheduleCalendarCacheKey {
         ScheduleCalendarCacheKey(
             month: KBOMonthScheduleKey(date: date, calendar: calendar),
@@ -4101,6 +5978,7 @@ final class AppModel {
         )
     }
 
+    // invalidateScheduleDerivedCaches 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func invalidateScheduleDerivedCaches(for month: KBOMonthScheduleKey? = nil) {
         guard let month else {
             scheduleCalendarDaysCache.removeAll()
@@ -4111,6 +5989,7 @@ final class AppModel {
         scheduleGamesByDayCache = scheduleGamesByDayCache.filter { $0.key.month != month }
     }
 
+    // groupedScheduleGamesByDay 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func groupedScheduleGamesByDay(for date: Date, filter: ScheduleFilter) -> [String: [GameDetail]] {
         let cacheKey = makeScheduleCalendarCacheKey(for: date, filter: filter)
         if let cached = scheduleGamesByDayCache[cacheKey] {
@@ -4124,11 +6003,13 @@ final class AppModel {
         return grouped
     }
 
+    // myTeamMonthScheduleSource 메서드는 이 타입의 주요 동작을 수행합니다.
     private func myTeamMonthScheduleSource(for date: Date) -> [GameDetail] {
         let key = KBOMonthScheduleKey(date: date, calendar: calendar)
         return monthlyScheduleGames[key] ?? fallbackMonthSchedule(for: key)
     }
 
+    // filteredScheduleGames 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func filteredScheduleGames(for date: Date, filter: ScheduleFilter) -> [GameDetail] {
         let monthGames = myTeamMonthScheduleSource(for: date)
         switch filter {
@@ -4140,6 +6021,7 @@ final class AppModel {
         }
     }
 
+    // fallbackMonthSchedule 메서드는 이 타입의 주요 동작을 수행합니다.
     private func fallbackMonthSchedule(for key: KBOMonthScheduleKey) -> [GameDetail] {
         games
             .filter {
@@ -4149,6 +6031,7 @@ final class AppModel {
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // reconcileOfficialScheduleStartTimesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reconcileOfficialScheduleStartTimesIfNeeded(
         in games: [GameDetail],
         snapshot: RepositoryDebugSnapshot?
@@ -4160,6 +6043,7 @@ final class AppModel {
         return await officialGameCenterClient.reconcileScheduledStartTimes(in: games)
     }
 
+    // reconcileOfficialScheduleStartTimesIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reconcileOfficialScheduleStartTimesIfNeeded(
         in bootstrap: KBOBootstrapData,
         snapshot: RepositoryDebugSnapshot?
@@ -4176,6 +6060,7 @@ final class AppModel {
         )
     }
 
+    // shouldReconcileOfficialScheduleStartTimes 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldReconcileOfficialScheduleStartTimes(
         snapshot: RepositoryDebugSnapshot?,
         games: [GameDetail]
@@ -4193,16 +6078,12 @@ final class AppModel {
         return snapshot.deliverySource != .live
     }
 
+    // scheduleDayKey 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDayKey(for date: Date) -> String {
-        var scheduleCalendar = calendar
-        scheduleCalendar.timeZone = scheduleTimeZone
-        let components = scheduleCalendar.dateComponents([.year, .month, .day], from: date)
-        let year = components.year ?? 1970
-        let month = components.month ?? 1
-        let day = components.day ?? 1
-        return String(format: "%04d-%02d-%02d", year, month, day)
+        ScheduleDateKeyFormatter.dayKey(for: date)
     }
 
+    // scheduleDate 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduleDate(fromDayKey dayKey: String) throws -> Date {
         let parts = dayKey.split(separator: "-").compactMap { Int($0) }
         guard parts.count == 3 else {
@@ -4223,6 +6104,7 @@ final class AppModel {
         return date
     }
 
+    // markScheduleDatesRecentlyReconciled 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markScheduleDatesRecentlyReconciled(_ dateKeys: [String]) {
         let now = Date()
         for dateKey in dateKeys {
@@ -4233,6 +6115,7 @@ final class AppModel {
         #endif
     }
 
+    // clearRecentlyReconciledScheduleDates 메서드는 저장된 상태나 캐시 값을 정리합니다.
     private func clearRecentlyReconciledScheduleDates(_ dateKeys: [String]) {
         for dateKey in dateKeys {
             recentlyReconciledScheduleDates.removeValue(forKey: dateKey)
@@ -4242,6 +6125,7 @@ final class AppModel {
         #endif
     }
 
+    // pruneExpiredRecentlyReconciledScheduleDates 메서드는 이 타입의 주요 동작을 수행합니다.
     private func pruneExpiredRecentlyReconciledScheduleDates() {
         let now = Date()
         let expiredDateKeys = recentlyReconciledScheduleDates.compactMap { dateKey, markedAt in
@@ -4252,6 +6136,7 @@ final class AppModel {
     }
 }
 
+// ScheduleStalePreflightRefreshResult 구조체는 ScheduleStalePreflightRefreshResult 타입의 역할과 값을 정의합니다.
 struct ScheduleStalePreflightRefreshResult: Sendable {
     let requestedDateKeys: [String]
     let remainingStaleDateKeys: [String]
@@ -4259,6 +6144,7 @@ struct ScheduleStalePreflightRefreshResult: Sendable {
     let failedDateKeys: [String]
 }
 
+// SchedulePostReconciliationRefreshResult 구조체는 SchedulePostReconciliationRefreshResult 타입의 역할과 값을 정의합니다.
 struct SchedulePostReconciliationRefreshResult: Sendable {
     let dateResults: [SchedulePostReconciliationDateRefreshResult]
 
@@ -4267,6 +6153,7 @@ struct SchedulePostReconciliationRefreshResult: Sendable {
     }
 }
 
+// SchedulePostReconciliationDateRefreshResult 구조체는 SchedulePostReconciliationDateRefreshResult 타입의 역할과 값을 정의합니다.
 struct SchedulePostReconciliationDateRefreshResult: Sendable {
     let dateKey: String
     let games: [GameDetail]
@@ -4275,19 +6162,126 @@ struct SchedulePostReconciliationDateRefreshResult: Sendable {
     let skippedExisting: Int
 }
 
+// SchedulePostReconciliationRefreshError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 enum SchedulePostReconciliationRefreshError: Error, Sendable {
     case invalidDateKey(String)
 }
 
+// ScheduleCalendarCacheKey 구조체는 ScheduleCalendarCacheKey 타입의 역할과 값을 정의합니다.
 private struct ScheduleCalendarCacheKey: Hashable {
     let month: KBOMonthScheduleKey
     let filter: ScheduleFilter
     let favoriteTeamID: String?
 }
 
+// ScheduleStartupSyncState 열거형는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 private enum ScheduleStartupSyncState {
     case notStarted
     case inFlight(Task<Void, Never>)
     case completed
     case failedButDoNotRetryAutomatically
+}
+
+private extension GameDetail {
+    func applyingLiveState(_ liveState: GameLiveStateResponse) -> GameDetail {
+        let updatedBases = RunnerState(first: liveState.bases.first, second: liveState.bases.second, third: liveState.bases.third)
+        let canPreserveRunnerNames = canPreserveBaseRunnerNames(for: liveState)
+        let preservedBaseRunners = GameBaseRunners(
+            first: canPreserveRunnerNames && updatedBases.first && bases?.first == true ? baseRunners?.first?.nilIfBlank : nil,
+            second: canPreserveRunnerNames && updatedBases.second && bases?.second == true ? baseRunners?.second?.nilIfBlank : nil,
+            third: canPreserveRunnerNames && updatedBases.third && bases?.third == true ? baseRunners?.third?.nilIfBlank : nil
+        )
+        let nextBaseRunners = preservedBaseRunners.first != nil ||
+            preservedBaseRunners.second != nil ||
+            preservedBaseRunners.third != nil ? preservedBaseRunners : nil
+        return GameDetail(
+            id: id,
+            scheduledStart: scheduledStart,
+            venue: venue,
+            awayTeam: awayTeam,
+            homeTeam: homeTeam,
+            awayScore: liveState.awayScore,
+            homeScore: liveState.homeScore,
+            status: GameStatus(liveStateStatus: liveState.status),
+            seasonClassification: seasonClassification,
+            inningText: Self.inningText(inning: liveState.inning, half: liveState.half) ?? inningText,
+            bases: updatedBases,
+            baseRunners: nextBaseRunners,
+            balls: liveState.balls,
+            strikes: liveState.strikes,
+            outs: liveState.outs,
+            highlightText: highlightText,
+            events: events,
+            note: note,
+            providerGameID: providerGameID,
+            awayStartingPitcherName: awayStartingPitcherName,
+            homeStartingPitcherName: homeStartingPitcherName,
+            currentPitcherName: liveState.currentPitcherName?.nilIfBlank,
+            currentBatterName: liveState.currentBatterName?.nilIfBlank
+        )
+    }
+
+    private func canPreserveBaseRunnerNames(for liveState: GameLiveStateResponse) -> Bool {
+        if let previousBatter = currentBatterName?.nilIfBlank,
+           let nextBatter = liveState.currentBatterName?.nilIfBlank,
+           previousBatter != nextBatter {
+            return false
+        }
+        if let previousOuts = outs, let nextOuts = liveState.outs, nextOuts > previousOuts {
+            return false
+        }
+        if liveState.balls == 0,
+           liveState.strikes == 0,
+           (balls ?? 0) > 0 || (strikes ?? 0) > 0 {
+            return false
+        }
+        return true
+    }
+
+    private static func inningText(inning: Int?, half: String?) -> String? {
+        guard let inning else { return nil }
+        let normalizedHalf = half?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let halfText: String?
+        switch normalizedHalf {
+        case "top", "초":
+            halfText = "초"
+        case "bottom", "bot", "말":
+            halfText = "말"
+        default:
+            halfText = nil
+        }
+        guard let halfText else { return "\(inning)회" }
+        return "\(inning)회 \(halfText)"
+    }
+}
+
+private extension GameStatus {
+    init(liveStateStatus: String) {
+        let normalized = liveStateStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.contains("cancel") || normalized.contains("postpon") {
+            self = .cancelled
+        } else if normalized.contains("final") || normalized.contains("complete") || normalized == "ended" {
+            self = .final
+        } else if normalized.contains("suspend") || normalized.contains("delay") {
+            self = .rainDelay
+        } else if normalized.contains("live") || normalized.contains("progress") || normalized.contains("playing") {
+            self = .live
+        } else {
+            self = .upcoming
+        }
+    }
+}
+
+private extension String {
+    var removingGameIdentityPrefix: String {
+        for prefix in ["provider:", "public:"] where hasPrefix(prefix) {
+            return String(dropFirst(prefix.count))
+        }
+        return self
+    }
+
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

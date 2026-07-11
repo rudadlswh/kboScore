@@ -1,12 +1,17 @@
 //
 //  GameDetailView.swift
 //  kboScore
+//  기능 설명: 선택한 경기의 상세 정보, 기록, 알림 액션 화면을 표시합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// GameDetailView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct GameDetailView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.scenePhase) private var scenePhase
@@ -15,17 +20,20 @@ struct GameDetailView: View {
 
     let gameIdentity: String
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(gameID: UUID) {
         let identity = gameID.uuidString
         self.gameIdentity = identity
         self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: identity))
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(gameIdentity: String) {
         self.gameIdentity = gameIdentity
         self._viewModel = StateObject(wrappedValue: GameDetailViewModel(gameIdentity: gameIdentity))
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(stableIdentity: String, initialGame: GameDetail) {
         self.gameIdentity = stableIdentity
         self._viewModel = StateObject(
@@ -37,6 +45,7 @@ struct GameDetailView: View {
         )
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(game: GameDetail) {
         self.gameIdentity = game.stableDetailIdentity
         self._viewModel = StateObject(
@@ -56,24 +65,22 @@ struct GameDetailView: View {
                     payload: screenModel.detail,
                     cachedLineScore: screenModel.cachedLineScore,
                     boxscore: screenModel.boxscore,
+                    databaseRecordReview: screenModel.databaseRecordReview,
                     officialFallbackReview: screenModel.officialFallbackReview,
                     baseRunnerDisplay: viewModel.baseRunnerDisplay
                 )
-                let availableSections = GameDetailSection.availableSections(for: presentation.status)
-
                 VStack(alignment: .leading, spacing: 12) {
                     GameStatusSummaryCard(presentation: presentation)
-                    actionButtons(for: game)
-                    sectionPicker(availableSections: availableSections)
-                    selectedSection(presentation: presentation)
+
+                    if presentation.status != .cancelled {
+                        actionButtons(for: game)
+                        overviewSection(presentation: presentation)
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-                .task(id: viewModel.stableIdentity) {
-                    await screenModel.load(for: game)
-                }
-                .task(id: presentation.status) {
-                    screenModel.syncSelection(for: presentation.status)
+                .onAppear {
+                    logAttendanceDetailAppear(game)
                 }
             } else if viewModel.isResolvingInitialGame || viewModel.hasAttemptedInitialResolution == false {
                 ProgressView("경기 정보를 불러오는 중")
@@ -106,96 +113,146 @@ struct GameDetailView: View {
         .stadiumNavigationChrome(appModel.favoriteStadiumPalette)
         .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
         .task(id: viewModel.stableIdentity) {
+            let initialRenderStartedAt = Date()
             viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
+            let inputLocalGameID = viewModel.game?.id
+            if let initialGame = viewModel.game {
+                #if DEBUG
+                print("[GameDetail] initialRenderCompleted stableIdentity=\(viewModel.stableIdentity) publicGameID=\(initialGame.publicGameID ?? "<nil>") providerGameID=\(initialGame.providerGameID ?? "<nil>") durationMs=\(Int(Date().timeIntervalSince(initialRenderStartedAt) * 1_000))")
+                #endif
+                await screenModel.load(
+                    for: initialGame,
+                    forceRefresh: false,
+                    fetchDatabaseRecordReview: { game in
+                        await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
+                    }
+                )
+            }
+            await Task.yield()
             let refreshedGame = await viewModel.refreshIfNeeded(
                 appModel: appModel,
                 bypassAutomaticThrottle: true
             ) ?? viewModel.game
             if let refreshedGame {
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
+                await loadDetailPresentation(
+                    for: refreshedGame,
+                    inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                    forceRefresh: refreshedGame.shouldPollGameDetail(now: Date())
+                )
                 await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
-            }
-        }
-        .task(id: viewModel.liveRefreshTaskID) {
-            guard viewModel.shouldAutoRefreshLiveGame else {
-                #if DEBUG
-                print("[GameDetailLive] refresh stop reason=notLive stableIdentity=\(viewModel.stableIdentity)")
-                #endif
-                return
-            }
-            #if DEBUG
-            print("[GameDetailLive] refresh start stableIdentity=\(viewModel.stableIdentity) intervalSeconds=\(GameDetailViewModel.livePollingIntervalNanoseconds / 1_000_000_000)")
-            #endif
-            defer {
-                #if DEBUG
-                print("[GameDetailLive] refresh stop stableIdentity=\(viewModel.stableIdentity)")
-                #endif
-            }
-            while Task.isCancelled == false {
-                do {
-                    try await Task.sleep(nanoseconds: GameDetailViewModel.livePollingIntervalNanoseconds)
-                } catch {
-                    break
-                }
-                guard Task.isCancelled == false, viewModel.shouldAutoRefreshLiveGame else { break }
-                guard let refreshedGame = await viewModel.refreshIfNeeded(
-                    appModel: appModel,
-                    bypassAutomaticThrottle: true
-                ) else { continue }
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
-                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
+                await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active, viewModel.shouldAutoRefreshLiveGame else { return }
             Task {
-                guard let refreshedGame = await viewModel.refreshIfNeeded(
-                    appModel: appModel,
-                    bypassAutomaticThrottle: true
-                ) else { return }
-                await screenModel.load(for: refreshedGame, forceRefresh: refreshedGame.status.isLiveLike)
-                await appModel.startOrUpdateLiveActivityIfNeeded(for: refreshedGame)
+                await refreshCurrentGame(forceRefresh: true)
+            }
+        }
+        .onDisappear {
+            appModel.stopLiveGameDetailPolling()
+        }
+        .onChange(of: appModel.game(withIdentity: viewModel.stableIdentity)) { _, updatedGame in
+            guard let updatedGame else { return }
+            Task {
+                await applySharedGameDetailUpdate(updatedGame)
             }
         }
         .refreshable {
+            await refreshCurrentGame(forceRefresh: true)
+        }
+    }
+
+    // refreshCurrentGame 메서드는 수동 새로고침과 자동 polling/foreground 복귀의 상세 갱신 경로를 맞춥니다.
+    private func refreshCurrentGame(forceRefresh: Bool) async {
+        if forceRefresh {
+            let inputLocalGameID = viewModel.game?.id
             await viewModel.refreshIfNeeded(appModel: appModel, manual: true)
             guard let refreshedGame = viewModel.game else { return }
-            await screenModel.load(for: refreshedGame, forceRefresh: true)
-        }
-    }
-
-    @ViewBuilder
-    private func sectionPicker(availableSections: [GameDetailSection]) -> some View {
-        if let palette = appModel.favoriteStadiumPalette {
-            DoosanGameDetailSectionPicker(
-                selection: $screenModel.selectedSection,
-                sections: availableSections,
-                palette: palette
+            await loadDetailPresentation(
+                for: refreshedGame,
+                inputLocalGameId: inputLocalGameID ?? refreshedGame.id,
+                rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                forceRefresh: true
             )
-        } else {
-            Picker("상세 섹션", selection: $screenModel.selectedSection) {
-                ForEach(availableSections) { section in
-                    Text(section.rawValue)
-                        .tag(section)
-                }
+            await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
+        } else if let refreshedGame = await viewModel.refreshIfNeeded(appModel: appModel) {
+            await loadDetailPresentation(
+                for: refreshedGame,
+                inputLocalGameId: refreshedGame.id,
+                rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                forceRefresh: refreshedGame.shouldPollGameDetail(now: Date())
+            )
+            await appModel.startLiveGameDetailPolling(gameIdentity: refreshedGame.stableDetailIdentity)
+        }
+    }
+
+    // applySharedGameDetailUpdate 메서드는 AppModel의 live polling 결과를 현재 표시 중인 상세 화면에 반영합니다.
+    private func applySharedGameDetailUpdate(_ updatedGame: GameDetail) async {
+        let inputLocalGameID = viewModel.game?.id ?? updatedGame.id
+        if let result = appModel.gameDetailRefreshResultSnapshot(for: updatedGame.stableDetailIdentity) ??
+            appModel.gameDetailRefreshResultSnapshot(for: viewModel.stableIdentity) {
+            viewModel.applyExternalRefreshResult(result)
+        }
+        await loadDetailPresentation(
+            for: updatedGame,
+            inputLocalGameId: inputLocalGameID,
+            rawSupabaseGameID: viewModel.rawSupabaseGameID,
+            rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+            rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+            forceRefresh: updatedGame.shouldPollGameDetail(now: Date())
+        )
+    }
+
+    // loadDetailPresentation 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    private func loadDetailPresentation(
+        for game: GameDetail,
+        inputLocalGameId: UUID,
+        rawSupabaseGameID: UUID?,
+        rawSupabaseProviderGameID: String?,
+        rawSupabasePublicGameID: String?,
+        forceRefresh: Bool
+    ) async {
+        await screenModel.load(
+            for: game,
+            forceRefresh: forceRefresh,
+            fetchDatabaseRecordReview: { game in
+                await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
             }
-            .pickerStyle(.segmented)
-        }
+        )
+        await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
+            inputLocalGameId: inputLocalGameId,
+            resolvedGame: game,
+            rawSupabaseGameID: rawSupabaseGameID,
+            rawSupabaseProviderGameID: rawSupabaseProviderGameID,
+            rawSupabasePublicGameID: rawSupabasePublicGameID,
+            fetchDatabaseRecordReviewResult: appModel.fetchGameDetailDatabaseReviewResult,
+            fetchDatabaseRecordReviewResultByRawSupabaseID: appModel.fetchGameDetailDatabaseReviewResult
+        )
     }
 
+    // overviewSection 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
-    private func selectedSection(presentation: GameDetailPresentation) -> some View {
-        switch screenModel.selectedSection {
-        case .overview:
-            overviewSection(presentation: presentation)
-        case .review:
-            reviewSection(for: presentation)
+    private func overviewSection(
+        presentation: GameDetailPresentation
+    ) -> some View {
+        switch GameDetailOverviewContentKind.contentKind(for: presentation.status) {
         case .preview:
-            previewSection(for: presentation)
+            previewOverviewContent(for: presentation)
+        case .overview:
+            gameStatusOverviewContent(presentation: presentation)
         }
     }
 
-    private func overviewSection(
+    // gameStatusOverviewContent 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func gameStatusOverviewContent(
         presentation: GameDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -236,67 +293,46 @@ struct GameDetailView: View {
         }
     }
 
-    private func reviewSection(
+    // previewOverviewContent 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func previewOverviewContent(
         for presentation: GameDetailPresentation
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if presentation.status != .final {
-                EmptyStateView(
-                    systemImage: "doc.text.magnifyingglass",
-                    title: "리뷰는 경기 종료 후 제공됩니다",
-                    message: "경기 종료 후 박스스코어와 기록 요약이 준비되면 이 섹션에 표시됩니다."
-                )
-            } else {
-                if screenModel.isLoading && screenModel.detail == nil {
-                    DetailLoadingCard(message: "리뷰 데이터를 준비하는 중")
-                }
-
-                GameLineScoreCard(presentation: presentation)
-
-                GameDetailRecordsPanel(presentation: presentation, isLoading: screenModel.isLoading)
+            if screenModel.isLoading && screenModel.detail == nil {
+                DetailLoadingCard(message: "프리뷰 데이터를 준비하는 중")
             }
-        }
-    }
 
-    private func previewSection(
-        for presentation: GameDetailPresentation
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if presentation.status == .final || presentation.status == .cancelled {
-                EmptyStateView(
-                    systemImage: "sportscourt",
-                    title: "프리뷰는 경기 전에 제공됩니다",
-                    message: "예정 경기일 때 선발 예상과 매치업 요약을 확인할 수 있습니다."
-                )
-            } else {
-                if screenModel.isLoading && screenModel.detail == nil {
-                    DetailLoadingCard(message: "프리뷰 데이터를 준비하는 중")
+            if let preview = presentation.preview {
+                if presentation.probableStarters?.away != nil || presentation.probableStarters?.home != nil {
+                    ProbableStartersCard(
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam,
+                        starters: presentation.probableStarters
+                    )
                 }
 
-                if let preview = presentation.preview {
-                    if preview.probableStarters?.away != nil || preview.probableStarters?.home != nil {
-                        ProbableStartersCard(
-                            awayTeam: presentation.game.awayTeam,
-                            homeTeam: presentation.game.homeTeam,
-                            starters: preview.probableStarters
-                        )
-                    }
+                if let awayMatchup = preview.awayMatchup,
+                   let homeMatchup = preview.homeMatchup {
+                    MatchupComparisonCard(awayMatchup: awayMatchup, homeMatchup: homeMatchup)
+                }
 
-                    if let awayMatchup = preview.awayMatchup,
-                       let homeMatchup = preview.homeMatchup {
-                        MatchupComparisonCard(awayMatchup: awayMatchup, homeMatchup: homeMatchup)
-                    }
-
-                    if preview.probableStarters?.away == nil,
-                       preview.probableStarters?.home == nil,
-                       preview.awayMatchup == nil,
-                       preview.homeMatchup == nil {
-                        EmptyStateView(
-                            systemImage: "person.crop.circle.badge.questionmark",
-                            title: "프리뷰 정보가 아직 없습니다",
-                            message: "선발 예고와 팀 비교 데이터가 준비되면 이 섹션에 표시됩니다."
-                        )
-                    }
+                if presentation.probableStarters?.away == nil,
+                   presentation.probableStarters?.home == nil,
+                   preview.awayMatchup == nil,
+                   preview.homeMatchup == nil {
+                    EmptyStateView(
+                        systemImage: "person.crop.circle.badge.questionmark",
+                        title: "프리뷰 정보가 아직 없습니다",
+                        message: "선발 예고와 팀 비교 데이터가 준비되면 이 섹션에 표시됩니다."
+                    )
+                }
+            } else {
+                if presentation.probableStarters?.away != nil || presentation.probableStarters?.home != nil {
+                    ProbableStartersCard(
+                        awayTeam: presentation.game.awayTeam,
+                        homeTeam: presentation.game.homeTeam,
+                        starters: presentation.probableStarters
+                    )
                 } else {
                     EmptyStateView(
                         systemImage: "person.crop.circle.badge.questionmark",
@@ -308,16 +344,26 @@ struct GameDetailView: View {
         }
     }
 
+    // actionButtons 메서드는 이 타입의 주요 동작을 수행합니다.
     @ViewBuilder
     private func actionButtons(for game: GameDetail) -> some View {
         let palette = appModel.favoriteStadiumPalette
+        let attendanceGameID = appModel.attendanceGameID(for: game)
+        let isAttended = appModel.isGameDetailAttended(game)
+        let isAttendancePending = appModel.isAttendanceSyncPending(for: game)
+        let isAttendanceButtonDisabled = attendanceGameID == nil || appModel.isAttendanceSyncAvailable == false || isAttendancePending
         HStack(spacing: 10) {
             Button {
-                appModel.toggleGameAttendance(for: game)
+                guard let attendanceGameID else { return }
+                let before = appModel.isGameDetailAttended(game)
+                #if DEBUG
+                print("[AttendanceDetail] toggle rawGameID=\(attendanceGameID.uuidString) canonicalGameID=\(GameIdentifier.attendanceCanonicalKey(attendanceGameID)) publicGameID=\(game.publicGameID ?? "none") from=\(before) to=\(!before)")
+                #endif
+                appModel.toggleGameDetailAttendance(for: game)
             } label: {
                 Label(
-                    appModel.isGameAttended(game) ? "직관 해제" : "직관",
-                    systemImage: appModel.isGameAttended(game) ? "checkmark.circle.fill" : "checkmark.circle"
+                    isAttended ? "직관 해제" : "직관",
+                    systemImage: isAttended ? "checkmark.circle.fill" : "checkmark.circle"
                 )
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity)
@@ -326,9 +372,11 @@ struct GameDetailView: View {
                     palette?.elevatedCard ?? Color(.secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
-                .foregroundStyle(appModel.isGameAttended(game) ? (palette?.primary ?? appModel.currentTheme.accent) : (palette?.textPrimary ?? .primary))
+                .foregroundStyle(isAttended ? (palette?.primary ?? appModel.currentTheme.accent) : (palette?.textPrimary ?? .primary))
+                .opacity(isAttendanceButtonDisabled ? 0.55 : 1)
             }
             .buttonStyle(.plain)
+            .disabled(isAttendanceButtonDisabled)
 
 //            ShareLink(item: game.shareText) {
 //                Label("경기 공유하기", systemImage: "square.and.arrow.up")
@@ -343,44 +391,129 @@ struct GameDetailView: View {
 //            }
         }
     }
-}
 
-private struct DoosanGameDetailSectionPicker: View {
-    @Binding var selection: GameDetailSection
-    let sections: [GameDetailSection]
-    let palette: StadiumPalette
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(sections) { section in
-                Button {
-                    selection = section
-                } label: {
-                    Text(section.rawValue)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(selection == section ? Color.white : palette.textSecondary)
-                        .frame(maxWidth: .infinity, minHeight: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(selection == section ? palette.primary : Color.clear)
-                        )
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == section ? .isSelected : [])
-            }
+    private func logAttendanceDetailAppear(_ game: GameDetail) {
+        #if DEBUG
+        let attendanceGameID = appModel.attendanceGameID(for: game)
+        let reason: String
+        if attendanceGameID == nil {
+            reason = "missingAttendanceGameID"
+        } else if appModel.isAttendanceSyncAvailable == false {
+            reason = "missingBackendBaseURL"
+        } else if appModel.isAttendanceSyncPending(for: game) {
+            reason = "pending"
+        } else {
+            reason = "ready"
         }
-        .padding(4)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(palette.recessedSurface)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(palette.ghostBorder, lineWidth: 0.75)
-        }
+        let enabled = attendanceGameID != nil && appModel.isAttendanceSyncAvailable && appModel.isAttendanceSyncPending(for: game) == false
+        print("[AttendanceDetail] button enabled=\(enabled) reason=\(reason) rawGameID=\(attendanceGameID?.uuidString ?? "nil") canonicalGameID=\(attendanceGameID.map(GameIdentifier.attendanceCanonicalKey) ?? "nil")")
+        #endif
     }
 }
 
+// LiveSituationState 구조체는 live 주자상황/카운트를 단일 snapshot 단위로 교체하기 위한 값입니다.
+struct LiveSituationState: Equatable, Sendable {
+    let balls: Int?
+    let strikes: Int?
+    let outs: Int?
+    let runnerOnFirst: Bool
+    let runnerOnSecond: Bool
+    let runnerOnThird: Bool
+    let firstRunnerName: String?
+    let secondRunnerName: String?
+    let thirdRunnerName: String?
+    let currentBatterName: String?
+    let currentPitcherName: String?
+
+    var bases: RunnerState {
+        RunnerState(first: runnerOnFirst, second: runnerOnSecond, third: runnerOnThird)
+    }
+
+    var runnerNames: GameBaseRunners {
+        GameBaseRunners(
+            first: runnerOnFirst ? firstRunnerName?.nilIfBlank : nil,
+            second: runnerOnSecond ? secondRunnerName?.nilIfBlank : nil,
+            third: runnerOnThird ? thirdRunnerName?.nilIfBlank : nil
+        )
+    }
+
+    var optionalRunnerNames: GameBaseRunners? {
+        let names = runnerNames
+        guard names.first != nil || names.second != nil || names.third != nil else {
+            return nil
+        }
+        return names
+    }
+
+    var displayBaseRunners: [BaseRunnerDisplayItem] {
+        [
+            ("1B", runnerOnFirst, firstRunnerName),
+            ("2B", runnerOnSecond, secondRunnerName),
+            ("3B", runnerOnThird, thirdRunnerName)
+        ]
+        .compactMap { item in
+            guard item.1 else { return nil }
+            return BaseRunnerDisplayItem(base: item.0, name: renderedBaseRunnerName(item.2))
+        }
+    }
+
+    static func fromLatestSnapshot(
+        game: GameDetail,
+        currentBatterName: String?,
+        currentPitcherName: String?
+    ) -> LiveSituationState {
+        let bases = game.bases ?? .empty
+        let firstRunnerName = bases.first ? game.baseRunners?.first?.nilIfBlank : nil
+        let secondRunnerName = bases.second ? game.baseRunners?.second?.nilIfBlank : nil
+        let thirdRunnerName = bases.third ? game.baseRunners?.third?.nilIfBlank : nil
+        return LiveSituationState(
+            balls: game.balls,
+            strikes: game.strikes,
+            outs: game.outs,
+            runnerOnFirst: bases.first,
+            runnerOnSecond: bases.second,
+            runnerOnThird: bases.third,
+            firstRunnerName: firstRunnerName,
+            secondRunnerName: secondRunnerName,
+            thirdRunnerName: thirdRunnerName,
+            currentBatterName: currentBatterName?.nilIfBlank,
+            currentPitcherName: currentPitcherName?.nilIfBlank
+        )
+    }
+
+    static func mergedFallback(
+        game: GameDetail,
+        summary: GameCenterSummary?,
+        currentBatterName: String?,
+        currentPitcherName: String?
+    ) -> LiveSituationState {
+        let bases = game.bases ?? summary?.bases ?? .empty
+        let officialBaseRunners = summary?.baseRunners
+        return LiveSituationState(
+            balls: game.balls ?? summary?.balls,
+            strikes: game.strikes ?? summary?.strikes,
+            outs: game.outs ?? summary?.outs,
+            runnerOnFirst: bases.first,
+            runnerOnSecond: bases.second,
+            runnerOnThird: bases.third,
+            firstRunnerName: bases.first ? (game.baseRunners?.first?.nilIfBlank ?? officialBaseRunners?.first?.nilIfBlank) : nil,
+            secondRunnerName: bases.second ? (game.baseRunners?.second?.nilIfBlank ?? officialBaseRunners?.second?.nilIfBlank) : nil,
+            thirdRunnerName: bases.third ? (game.baseRunners?.third?.nilIfBlank ?? officialBaseRunners?.third?.nilIfBlank) : nil,
+            currentBatterName: currentBatterName?.nilIfBlank,
+            currentPitcherName: currentPitcherName?.nilIfBlank
+        )
+    }
+
+    private func renderedBaseRunnerName(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, trimmed.isEmpty == false, trimmed != "주자" else {
+            return "점유"
+        }
+        return trimmed
+    }
+}
+
+// GameDetailPresentation 구조체는 GameDetailPresentation 타입의 역할과 값을 정의합니다.
 struct GameDetailPresentation {
     let game: GameDetail
     let status: GameStatus
@@ -395,6 +528,7 @@ struct GameDetailPresentation {
     let bases: RunnerState?
     let baseRunners: GameBaseRunners?
     let baseRunnerDisplay: BaseRunnerDisplayResolution
+    let liveSituation: LiveSituationState
     let currentBatterName: String?
     let currentPitcherName: String?
     let winningPitcher: String?
@@ -408,48 +542,353 @@ struct GameDetailPresentation {
     let review: GameCenterReview?
     let preview: GameCenterPreview?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         game: GameDetail,
         payload: GameCenterDetailPayload?,
         cachedLineScore: GameCenterLineScore? = nil,
         boxscore: GameBoxscoreResponse?,
+        databaseRecordReview: GameCenterReview? = nil,
         officialFallbackReview: GameCenterReview? = nil,
         baseRunnerDisplay: BaseRunnerDisplayResolution = .empty
     ) {
         let summary = payload?.summary
         self.game = game
-        status = summary?.status ?? game.status
+//        let resolvedStatus = summary?.status ?? game.status
+        let resolvedStatus: GameStatus = {
+            if game.status == .cancelled {
+                return .cancelled
+            }
+
+            if game.status == .rainDelay {
+                return .rainDelay
+            }
+
+            if game.status == .final {
+                return .final
+            }
+
+            return summary?.status ?? game.status
+        }()
+        status = resolvedStatus
         stadium = summary?.stadium?.nilIfBlank ?? game.venue
         startTimeText = summary?.startTime?.nilIfBlank ?? game.scheduledStart.formatted(date: .omitted, time: .shortened)
-        if status.isLiveLike || status == .final {
+        if resolvedStatus.isLiveLike {
+            inningText = KBOInningFormatter.korean(game.inningText?.nilIfBlank)
+        } else if resolvedStatus == .final {
             inningText = KBOInningFormatter.korean(summary?.inningText?.nilIfBlank ?? game.inningText?.nilIfBlank)
         } else {
             inningText = nil
         }
-        awayScore = summary?.awayScore ?? game.awayScore
-        homeScore = summary?.homeScore ?? game.homeScore
-        balls = summary?.balls ?? game.balls
-        strikes = summary?.strikes ?? game.strikes
-        outs = summary?.outs ?? game.outs
-        bases = summary?.bases ?? game.bases
-        baseRunners = summary?.baseRunners.map {
+        awayScore = resolvedStatus.isLiveLike ? game.awayScore : (summary?.awayScore ?? game.awayScore)
+        homeScore = resolvedStatus.isLiveLike ? game.homeScore : (summary?.homeScore ?? game.homeScore)
+        let officialBaseRunners = summary?.baseRunners.map {
             GameBaseRunners(first: $0.first, second: $0.second, third: $0.third)
-        } ?? game.baseRunners
-        self.baseRunnerDisplay = baseRunnerDisplay
-        currentBatterName = game.currentBatterName?.nilIfBlank
-        currentPitcherName = game.currentPitcherName?.nilIfBlank
+        }
+        let resolvedCurrentBatterName = game.currentBatterName?.nilIfBlank
+        let resolvedCurrentPitcherName = resolvedStatus.isLiveLike
+            ? game.currentPitcherName?.nilIfBlank
+            : game.currentPitcherName?.nilIfBlank
+        let liveSnapshotAuthoritative = resolvedStatus.isLiveLike
+        let rawLiveSituation = liveSnapshotAuthoritative
+            ? LiveSituationState.fromLatestSnapshot(
+                game: game,
+                currentBatterName: resolvedCurrentBatterName,
+                currentPitcherName: resolvedCurrentPitcherName
+            )
+            : LiveSituationState.mergedFallback(
+                game: game,
+                summary: summary,
+                currentBatterName: resolvedCurrentBatterName,
+                currentPitcherName: resolvedCurrentPitcherName
+            )
+        let officialOverride = liveSnapshotAuthoritative
+            ? Self.liveSituationApplyingOfficialOverrides(
+                rawLiveSituation,
+                snapshot: game.baseRunners,
+                official: officialBaseRunners
+            )
+            : nil
+        let resolvedLiveSituation = officialOverride?.state ?? rawLiveSituation
+        liveSituation = resolvedLiveSituation
+        balls = resolvedLiveSituation.balls
+        strikes = resolvedLiveSituation.strikes
+        outs = resolvedLiveSituation.outs
+        bases = resolvedLiveSituation.bases
+        baseRunners = resolvedLiveSituation.optionalRunnerNames
+        let resolvedBaseRunnerDisplay: BaseRunnerDisplayResolution
+        if liveSnapshotAuthoritative {
+            Self.logLatestSnapshotRawLiveSituation(game: game)
+            Self.logLiveSituationAtomicReplaced(resolvedLiveSituation)
+            resolvedBaseRunnerDisplay = officialOverride?.display ?? BaseRunnerDisplayResolution(
+                runners: resolvedLiveSituation.runnerNames,
+                source: "latestSnapshotOnly"
+            )
+        } else {
+            resolvedBaseRunnerDisplay = Self.resolvedBaseRunnerDisplay(
+                snapshot: game.baseRunners,
+                official: officialBaseRunners,
+                cached: baseRunnerDisplay,
+                bases: resolvedLiveSituation.bases
+            ).mergingOfficialNames(
+                snapshot: game.baseRunners,
+                official: officialBaseRunners,
+                bases: resolvedLiveSituation.bases
+            )
+        }
+        self.baseRunnerDisplay = resolvedBaseRunnerDisplay
+        Self.logCountBaseRunnerApplication(
+            game: game,
+            summary: summary,
+            balls: balls,
+            strikes: strikes,
+            outs: outs,
+            bases: bases,
+            baseRunners: baseRunners,
+            baseRunnerSource: resolvedBaseRunnerDisplay.source
+        )
+        currentBatterName = resolvedLiveSituation.currentBatterName
+        currentPitcherName = resolvedLiveSituation.currentPitcherName
         winningPitcher = summary?.winningPitcher?.nilIfBlank
         losingPitcher = summary?.losingPitcher?.nilIfBlank
         savePitcher = summary?.savePitcher?.nilIfBlank
         endTimeText = summary?.endTime?.nilIfBlank
         durationText = summary?.durationText?.nilIfBlank
         crowdText = summary?.crowdText?.nilIfBlank
-        probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters
+        let gameStarterMetadata: GameCenterProbableStarters? = {
+            let away = game.awayStartingPitcherName?.nilIfBlank
+            let home = game.homeStartingPitcherName?.nilIfBlank
+            guard away != nil || home != nil else { return nil }
+            return GameCenterProbableStarters(away: away, home: home)
+        }()
+        probableStarters = payload?.preview?.probableStarters ?? summary?.probableStarters ?? gameStarterMetadata
         lineScore = payload?.lineScore ?? cachedLineScore
-        review = boxscore?.gameCenterReview?.enrichingBatterPositions(from: payload?.review) ??
-            officialFallbackReview ??
-            payload?.review
+        review = Self.preferredRecordReview(
+            status: resolvedStatus,
+            payloadReview: payload?.review,
+            boxscoreReview: boxscore?.gameCenterReview,
+            databaseRecordReview: databaseRecordReview,
+            officialFallbackReview: officialFallbackReview
+        )
         preview = payload?.preview
+    }
+
+    private static func preferredRecordReview(
+        status: GameStatus,
+        payloadReview: GameCenterReview?,
+        boxscoreReview: GameCenterReview?,
+        databaseRecordReview: GameCenterReview?,
+        officialFallbackReview: GameCenterReview?
+    ) -> GameCenterReview? {
+        if status == .upcoming {
+            return nil
+        }
+        if status.isLiveLike {
+            if let databaseRecordReview,
+               databaseRecordReview.recordSource == .dbLiveRecordsFresh {
+                return databaseRecordReview
+            }
+            return [
+                boxscoreReview,
+                officialFallbackReview,
+                payloadReview
+            ]
+                .compactMap { $0 }
+                .first { $0.recordSource == .fullBoxscore }
+        }
+        if status == .final, let databaseRecordReview {
+            return databaseRecordReview.enrichingBatterPositions(from: payloadReview ?? officialFallbackReview)
+        }
+        let positionSource = payloadReview ?? officialFallbackReview
+        let officialBoxscoreReview = [
+            boxscoreReview,
+            officialFallbackReview,
+            payloadReview
+        ]
+            .compactMap { $0 }
+            .first { $0.recordSource.isOfficialBoxscore }
+
+        return officialBoxscoreReview?.enrichingBatterPositions(from: positionSource) ??
+            databaseRecordReview?.enrichingBatterPositions(from: positionSource) ??
+            officialFallbackReview?.enrichingBatterPositions(from: payloadReview) ??
+            payloadReview
+    }
+
+    private static func logCountBaseRunnerApplication(
+        game: GameDetail,
+        summary: GameCenterSummary?,
+        balls: Int?,
+        strikes: Int?,
+        outs: Int?,
+        bases: RunnerState?,
+        baseRunners: GameBaseRunners?,
+        baseRunnerSource: String
+    ) {
+        #if DEBUG
+        if balls != nil || strikes != nil || outs != nil {
+            print("[GameDetailPresentation] GameDetailPresentation count applied source=\(game.balls != nil || game.strikes != nil || game.outs != nil ? "latestSnapshot" : "official") count=\(balls.map(String.init) ?? "-")/\(strikes.map(String.init) ?? "-")/\(outs.map(String.init) ?? "-")")
+        } else {
+            print("[GameDetailPresentation] count/base update skipped reason=missingCountFields")
+        }
+        if let bases {
+            print("[GameDetailPresentation] GameDetailPresentation bases applied source=\(game.bases == nil ? "official" : "latestSnapshot") first=\(bases.first) second=\(bases.second) third=\(bases.third)")
+        } else {
+            print("[GameDetailPresentation] count/base update skipped reason=missingBases")
+        }
+        if let baseRunners {
+            print("[GameDetailPresentation] GameDetailPresentation runners applied source=\(baseRunnerSource) first=\(baseRunners.first ?? "<nil>") second=\(baseRunners.second ?? "<nil>") third=\(baseRunners.third ?? "<nil>")")
+        } else if bases?.first == true || bases?.second == true || bases?.third == true {
+            print("[GameDetailPresentation] runner names skipped reason=missingRunnerNames bases first=\(bases?.first == true) second=\(bases?.second == true) third=\(bases?.third == true)")
+        }
+        print("[GameDetailPresentation] merged bases first=\(boolDebugText(bases?.first)) second=\(boolDebugText(bases?.second)) third=\(boolDebugText(bases?.third))")
+        #endif
+    }
+
+    private static func boolDebugText(_ value: Bool?) -> String {
+        value.map(String.init) ?? "nil"
+    }
+
+    private static func logLatestSnapshotRawLiveSituation(game: GameDetail) {
+        #if DEBUG
+        print(
+            "[GameDetailPresentation] latestSnapshot raw liveSituation " +
+                "balls=\(game.balls.map(String.init) ?? "-") " +
+                "strikes=\(game.strikes.map(String.init) ?? "-") " +
+                "outs=\(game.outs.map(String.init) ?? "-") " +
+                "runner_on_first=\(boolDebugText(game.bases?.first)) " +
+                "runner_on_second=\(boolDebugText(game.bases?.second)) " +
+                "runner_on_third=\(boolDebugText(game.bases?.third)) " +
+                "firstRunner=\(game.baseRunners?.first ?? "<nil>") " +
+                "secondRunner=\(game.baseRunners?.second ?? "<nil>") " +
+                "thirdRunner=\(game.baseRunners?.third ?? "<nil>") " +
+                "batter=\(game.currentBatterName ?? "<nil>") " +
+                "pitcher=\(game.currentPitcherName ?? "<nil>")"
+        )
+        #endif
+    }
+
+    private static func logLiveSituationAtomicReplaced(_ state: LiveSituationState) {
+        #if DEBUG
+        print(
+            "[GameDetailPresentation] liveSituation atomic replaced " +
+                "balls=\(state.balls.map(String.init) ?? "-") " +
+                "strikes=\(state.strikes.map(String.init) ?? "-") " +
+                "outs=\(state.outs.map(String.init) ?? "-") " +
+                "runner_on_first=\(state.runnerOnFirst) " +
+                "runner_on_second=\(state.runnerOnSecond) " +
+                "runner_on_third=\(state.runnerOnThird) " +
+                "firstRunner=\(state.firstRunnerName ?? "<nil>") " +
+                "secondRunner=\(state.secondRunnerName ?? "<nil>") " +
+                "thirdRunner=\(state.thirdRunnerName ?? "<nil>")"
+        )
+        #endif
+    }
+
+    private static func liveSituationApplyingOfficialOverrides(
+        _ state: LiveSituationState,
+        snapshot: GameBaseRunners?,
+        official: GameBaseRunners?
+    ) -> (state: LiveSituationState, display: BaseRunnerDisplayResolution)? {
+        guard let official else { return nil }
+        let first = resolvedOfficialRunnerName(occupied: state.runnerOnFirst, snapshot: snapshot?.first, official: official.first)
+        let second = resolvedOfficialRunnerName(occupied: state.runnerOnSecond, snapshot: snapshot?.second, official: official.second)
+        let third = resolvedOfficialRunnerName(occupied: state.runnerOnThird, snapshot: snapshot?.third, official: official.third)
+        guard first.usedOfficial || second.usedOfficial || third.usedOfficial else {
+            return nil
+        }
+        if first.conflict || second.conflict || third.conflict {
+            #if DEBUG
+            print(
+                "[BaseRunners] official runner names override snapshot reason=conflict " +
+                    "firstSnapshot=\(displayName(snapshot?.first)) firstOfficial=\(displayName(official.first)) " +
+                    "secondSnapshot=\(displayName(snapshot?.second)) secondOfficial=\(displayName(official.second)) " +
+                    "thirdSnapshot=\(displayName(snapshot?.third)) thirdOfficial=\(displayName(official.third))"
+            )
+            #endif
+        }
+        let runners = GameBaseRunners(first: first.name, second: second.name, third: third.name)
+        return (
+            LiveSituationState(
+                balls: state.balls,
+                strikes: state.strikes,
+                outs: state.outs,
+                runnerOnFirst: state.runnerOnFirst,
+                runnerOnSecond: state.runnerOnSecond,
+                runnerOnThird: state.runnerOnThird,
+                firstRunnerName: first.name,
+                secondRunnerName: second.name,
+                thirdRunnerName: third.name,
+                currentBatterName: state.currentBatterName,
+                currentPitcherName: state.currentPitcherName
+            ),
+            BaseRunnerDisplayResolution(
+                runners: runners,
+                source: first.conflict || second.conflict || third.conflict ? "officialOverride" : "latestSnapshotWithOfficialNames"
+            )
+        )
+    }
+
+    private static func resolvedOfficialRunnerName(
+        occupied: Bool,
+        snapshot: String?,
+        official: String?
+    ) -> (name: String?, usedOfficial: Bool, conflict: Bool) {
+        guard occupied else { return (nil, false, false) }
+        let snapshotName = snapshot?.nilIfBlank
+        let officialName = official?.nilIfBlank
+        if let snapshotName {
+            return (snapshotName, false, false)
+        }
+        if let officialName {
+            return (officialName, true, false)
+        }
+        return (nil, false, false)
+    }
+
+    private static func displayName(_ value: String?) -> String {
+        value?.nilIfBlank ?? "<nil>"
+    }
+
+    private static func resolvedBaseRunnerDisplay(
+        snapshot: GameBaseRunners?,
+        official: GameBaseRunners?,
+        cached: BaseRunnerDisplayResolution,
+        bases: RunnerState?
+    ) -> BaseRunnerDisplayResolution {
+        guard let bases else {
+            return cached
+        }
+        let runners = GameBaseRunners(
+            first: resolvedRunnerName(
+                occupied: bases.first,
+                snapshot: snapshot?.first,
+                official: official?.first,
+                cached: cached.runners.first
+            ),
+            second: resolvedRunnerName(
+                occupied: bases.second,
+                snapshot: snapshot?.second,
+                official: official?.second,
+                cached: cached.runners.second
+            ),
+            third: resolvedRunnerName(
+                occupied: bases.third,
+                snapshot: snapshot?.third,
+                official: official?.third,
+                cached: cached.runners.third
+            )
+        )
+        return BaseRunnerDisplayResolution(runners: runners, source: "presentation")
+    }
+
+    private static func resolvedRunnerName(
+        occupied: Bool,
+        snapshot: String?,
+        official: String?,
+        cached: String?
+    ) -> String? {
+        guard occupied else { return nil }
+        return snapshot?.nilIfBlank ?? official?.nilIfBlank ?? cached?.nilIfBlank ?? "주자"
     }
 
     var scoreStatusText: String {
@@ -511,15 +950,7 @@ struct GameDetailPresentation {
     }
 
     var visibleBaseRunners: [BaseRunnerDisplayItem] {
-        [
-            ("1B", bases?.first == true),
-            ("2B", bases?.second == true),
-            ("3B", bases?.third == true)
-        ]
-        .compactMap { item in
-            guard item.1 else { return nil }
-            return BaseRunnerDisplayItem(base: item.0)
-        }
+        liveSituation.displayBaseRunners
     }
 
     var displayBaseRunners: [BaseRunnerDisplayItem] {
@@ -538,23 +969,37 @@ struct GameDetailPresentation {
         status.isLiveLike || status.isFinishedLike
     }
 
+    // logRenderedBaseRunnersIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     func logRenderedBaseRunnersIfNeeded() {
         #if DEBUG
-        print("[BaseRunners] snapshot names first=\(baseRunners?.first ?? "<nil>") second=\(baseRunners?.second ?? "<nil>") third=\(baseRunners?.third ?? "<nil>")")
+        print("[BaseRunners] snapshot names first=\(liveSituation.firstRunnerName ?? "<nil>") second=\(liveSituation.secondRunnerName ?? "<nil>") third=\(liveSituation.thirdRunnerName ?? "<nil>")")
         let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
-            result[item.base] = "occupied(no-name)"
+            result[item.base] = item.name
         }
         print("[BaseRunners] rendered first=\(rendered["1B"] ?? "unknown") second=\(rendered["2B"] ?? "unknown") third=\(rendered["3B"] ?? "unknown") source=\(baseRunnerDisplay.source)")
         #endif
     }
+
+    // logBaseRunnersBeforeRendering 메서드는 SwiftUI 렌더 직전 점유/표시 상태를 남깁니다.
+    func logBaseRunnersBeforeRendering() {
+        #if DEBUG
+        let rendered = displayBaseRunners.reduce(into: ["1B": "empty", "2B": "empty", "3B": "empty"]) { result, item in
+            result[item.base] = item.name
+        }
+        print("[BaseRunners] renderWillUse firstOccupied=\(liveSituation.runnerOnFirst) first=\(rendered["1B"] ?? "empty") secondOccupied=\(liveSituation.runnerOnSecond) second=\(rendered["2B"] ?? "empty") thirdOccupied=\(liveSituation.runnerOnThird) third=\(rendered["3B"] ?? "empty")")
+        #endif
+    }
 }
 
+// BaseRunnerDisplayItem 구조체는 BaseRunnerDisplayItem 타입의 역할과 값을 정의합니다.
 struct BaseRunnerDisplayItem: Identifiable, Equatable {
     let base: String
+    let name: String
 
     var id: String { base }
 }
 
+// GameStatusSummaryCard 구조체는 GameStatusSummaryCard 타입의 역할과 값을 정의합니다.
 private struct GameStatusSummaryCard: View {
     @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
@@ -638,6 +1083,7 @@ private struct GameStatusSummaryCard: View {
     }
 }
 
+// ScoreColumn 구조체는 ScoreColumn 타입의 역할과 값을 정의합니다.
 private struct ScoreColumn: View {
     let title: String
     let team: Team
@@ -649,9 +1095,8 @@ private struct ScoreColumn: View {
             Text(title)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(tint)
-            TeamMarkView(team: team, size: 54)
             Text(team.displayName)
-                .font(.subheadline.weight(.bold))
+                .font(.title3.weight(.heavy))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -661,93 +1106,202 @@ private struct ScoreColumn: View {
     }
 }
 
+// LiveSituationRow 구조체는 LiveSituationRow 타입의 역할과 값을 정의합니다.
 private struct LiveSituationRow: View {
     let presentation: GameDetailPresentation
 
     var body: some View {
-        HStack(spacing: 8) {
-            StatusTile(title: "카운트") {
-                HStack(spacing: 8) {
-                    CountMetric(label: "B", value: KBOCountDisplay.balls(presentation.balls))
-                    CountMetric(label: "S", value: KBOCountDisplay.strikes(presentation.strikes))
-                    CountMetric(label: "O", value: KBOCountDisplay.outs(presentation.outs))
-                }
-            }
-
-            StatusTile(title: "주자 상황") {
-                HStack(alignment: .center, spacing: 12) {
-                    BasesDiamondView(bases: presentation.bases ?? .empty)
-
-                    if presentation.displayBaseRunners.isEmpty == false {
-                        BaseRunnerList(runners: presentation.displayBaseRunners)
+        VStack(spacing: 8) {
+            StatusTile(title: "주자 상황 · 카운트") {
+                LiveSituationSummaryContent(presentation: presentation)
+                    .onAppear {
+                        presentation.logRenderedBaseRunnersIfNeeded()
                     }
-                }
-                .onAppear {
-                    presentation.logRenderedBaseRunnersIfNeeded()
-                }
             }
-        }
-        if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
-            HStack(spacing: 8) {
-                StatusTile(title: "타자") {
-                    Text(presentation.currentBatterName ?? "-")
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                StatusTile(title: "투수") {
-                    Text(presentation.currentPitcherName ?? "-")
-                        .font(.subheadline.weight(.bold))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+
+            if presentation.status.isLiveLike || presentation.currentBatterName != nil || presentation.currentPitcherName != nil {
+                HStack(spacing: 8) {
+                    StatusTile(title: "타자") {
+                        Text(presentation.currentBatterName ?? "-")
+                            .font(.subheadline.weight(.bold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    StatusTile(title: "투수") {
+                        Text(presentation.currentPitcherName ?? "-")
+                            .font(.subheadline.weight(.bold))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
         }
     }
 }
 
-private struct BaseRunnerList: View {
+// LiveSituationSummaryContent 구조체는 주자 상황과 카운트를 하나의 카드 안에 표시합니다.
+private struct LiveSituationSummaryContent: View {
     @Environment(AppModel.self) private var appModel
+    let presentation: GameDetailPresentation
+
+    var body: some View {
+        let _ = presentation.logBaseRunnersBeforeRendering()
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 0) {
+                GameDetailBasesDiamondView(
+                    bases: presentation.liveSituation.bases,
+                    tint: appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent,
+                    borderTint: baseBorderTint
+                )
+
+                Spacer(minLength: 36)
+
+                CountDotsStack(
+                    balls: KBOCountDisplay.balls(presentation.liveSituation.balls),
+                    strikes: KBOCountDisplay.strikes(presentation.liveSituation.strikes),
+                    outs: KBOCountDisplay.outs(presentation.liveSituation.outs)
+                )
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+
+            BaseRunnerGrid(runners: presentation.displayBaseRunners)
+        }
+    }
+
+    private var baseBorderTint: Color {
+        switch appModel.settings.favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "kt", "lg":
+            .white
+        default:
+            appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent
+        }
+    }
+}
+
+// GameDetailBasesDiamondView 구조체는 경기상세 통합 카드에서 1루, 2루, 3루만 크게 표시합니다.
+private struct GameDetailBasesDiamondView: View {
+    let bases: RunnerState
+    let tint: Color
+    let borderTint: Color
+
+    var body: some View {
+        ZStack {
+            GameDetailBaseMarker(isFilled: bases.second, tint: tint, borderTint: borderTint)
+                .offset(y: -22)
+            GameDetailBaseMarker(isFilled: bases.first, tint: tint, borderTint: borderTint)
+                .offset(x: 25, y: 4)
+            GameDetailBaseMarker(isFilled: bases.third, tint: tint, borderTint: borderTint)
+                .offset(x: -25, y: 4)
+        }
+        .frame(width: 96, height: 74)
+    }
+}
+
+// GameDetailBaseMarker 구조체는 점유 여부에 따라 베이스 채움과 테두리 강조를 표시합니다.
+private struct GameDetailBaseMarker: View {
+    let isFilled: Bool
+    let tint: Color
+    let borderTint: Color
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(fillColor)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(borderColor, lineWidth: isFilled ? 2.5 : 1.6)
+            )
+            .frame(width: 22, height: 22)
+            .rotationEffect(.degrees(45))
+            .shadow(color: borderColor.opacity(isFilled ? 0.25 : 0.12), radius: 2, x: 0, y: 1)
+    }
+
+    private var fillColor: Color {
+        isFilled ? tint : Color(.systemBackground).opacity(0.82)
+    }
+
+    private var borderColor: Color {
+        isFilled ? borderTint : borderTint.opacity(0.78)
+    }
+}
+
+// BaseRunnerGrid 구조체는 1루, 2루, 3루 주자 이름을 같은 폭의 3열로 표시합니다.
+private struct BaseRunnerGrid: View {
     let runners: [BaseRunnerDisplayItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            ForEach(runners) { runner in
-                HStack(spacing: 6) {
-//                    Text(runner.base)
-//                        .font(.caption.weight(.heavy))
-//                        .foregroundStyle(appModel.favoriteStadiumPalette?.primary ?? KBOLivePalette.primary)
-//                        .frame(width: 24, alignment: .leading)
-//                    Text("점유")
-//                        .font(.subheadline.weight(.semibold))
-//                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
-//                        .lineLimit(1)
-//                        .minimumScaleFactor(0.8)
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(baseColumns, id: \.id) { column in
+                VStack(spacing: 4) {
+                    Text(column.title)
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                    Text(runnerName(for: column.id))
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var baseColumns: [(id: String, title: String)] {
+        [("1B", "1루"), ("2B", "2루"), ("3B", "3루")]
+    }
+
+    private func runnerName(for base: String) -> String {
+        runners.first { $0.base == base }?.name ?? "-"
     }
 }
 
-private struct CountMetric: View {
-    @Environment(AppModel.self) private var appModel
-    let label: String
-    let value: Int?
+// CountDotsStack 구조체는 B/S/O 카운트를 점 형태로 세로 표시합니다.
+private struct CountDotsStack: View {
+    var balls: Int?
+    var strikes: Int?
+    var outs: Int?
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(label)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
-            Text(value.map(String.init) ?? "-")
-                .font(.headline.weight(.bold))
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 6) {
+            CountDotsRow(label: "B", tint: .green, value: balls, maxValue: 3)
+            CountDotsRow(label: "S", tint: .orange, value: strikes, maxValue: 2)
+            CountDotsRow(label: "O", tint: .red, value: outs, maxValue: 2)
         }
-        .frame(maxWidth: .infinity)
     }
 }
 
+// CountDotsRow 구조체는 한 종류의 카운트를 채워진 점과 비어 있는 점으로 표시합니다.
+private struct CountDotsRow: View {
+    @Environment(AppModel.self) private var appModel
+    let label: String
+    let tint: Color
+    let value: Int?
+    let maxValue: Int
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(label)
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+                .frame(width: 12, alignment: .leading)
+
+            ForEach(0..<maxValue, id: \.self) { index in
+                Circle()
+                    .fill(index < normalizedValue ? tint : tint.opacity(0.18))
+                    .frame(width: 8, height: 8)
+            }
+        }
+    }
+
+    private var normalizedValue: Int {
+        min(max(value ?? 0, 0), maxValue)
+    }
+}
+
+// FinalDecisionRow 구조체는 FinalDecisionRow 타입의 역할과 값을 정의합니다.
 private struct FinalDecisionRow: View {
     let presentation: GameDetailPresentation
 
@@ -766,6 +1320,7 @@ private struct FinalDecisionRow: View {
     }
 }
 
+// DecisionTag 구조체는 DecisionTag 타입의 역할과 값을 정의합니다.
 private struct DecisionTag: View {
     let title: String
     let value: String
@@ -787,6 +1342,7 @@ private struct DecisionTag: View {
     }
 }
 
+// ScheduledInfoRow 구조체는 ScheduledInfoRow 타입의 역할과 값을 정의합니다.
 private struct ScheduledInfoRow: View {
     let presentation: GameDetailPresentation
 
@@ -807,11 +1363,13 @@ private struct ScheduledInfoRow: View {
     }
 }
 
+// StatusTile 구조체는 StatusTile 타입의 역할과 값을 정의합니다.
 private struct StatusTile<Content: View>: View {
     @Environment(AppModel.self) private var appModel
     let title: String
     let content: Content
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(title: String, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()
@@ -833,9 +1391,9 @@ private struct StatusTile<Content: View>: View {
     }
 }
 
+// OverviewMetadataCard 구조체는 OverviewMetadataCard 타입의 역할과 값을 정의합니다.
 private struct OverviewMetadataCard: View {
     let presentation: GameDetailPresentation
-    @Binding var selectedSection: GameDetailSection
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -850,26 +1408,12 @@ private struct OverviewMetadataCard: View {
                 MetaValueTile(title: "종료", value: presentation.endTimeText ?? "진행 중")
                 MetaValueTile(title: "경기시간", value: presentation.durationText ?? "집계 중")
             }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if presentation.status == .upcoming {
-                        OverviewJumpButton(title: "프리뷰", isSelected: selectedSection == .preview) {
-                            selectedSection = .preview
-                        }
-                    } else {
-                        OverviewJumpButton(title: "리뷰", isSelected: selectedSection == .review) {
-                            selectedSection = .review
-                        }
-                    }
-                }
-                .padding(.horizontal, 1)
-            }
         }
         .cardSurface()
     }
 }
 
+// MetaValueTile 구조체는 MetaValueTile 타입의 역할과 값을 정의합니다.
 private struct MetaValueTile: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -894,29 +1438,7 @@ private struct MetaValueTile: View {
     }
 }
 
-private struct OverviewJumpButton: View {
-    @Environment(AppModel.self) private var appModel
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        let palette = appModel.favoriteStadiumPalette
-        Button(action: action) {
-            Text(title)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : (palette?.textPrimary ?? Color.primary))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? (palette?.primary ?? KBOLivePalette.primary) : (palette?.recessedSurface ?? Color(.secondarySystemBackground)))
-                )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
+// GameLineScoreCard 구조체는 GameLineScoreCard 타입의 역할과 값을 정의합니다.
 private struct GameLineScoreCard: View {
     @Environment(AppModel.self) private var appModel
     let presentation: GameDetailPresentation
@@ -952,6 +1474,10 @@ private struct GameLineScoreCard: View {
             Text("이닝별 점수 데이터 준비 중")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
+        case .cancelled:
+            Text("취소된 경기입니다.")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
         default:
             VStack(spacing: 8) {
                 FallbackLineScoreRow(team: presentation.game.awayTeam, runs: presentation.awayScore)
@@ -964,6 +1490,7 @@ private struct GameLineScoreCard: View {
     }
 }
 
+// LineScoreHeaderRow 구조체는 LineScoreHeaderRow 타입의 역할과 값을 정의합니다.
 private struct LineScoreHeaderRow: View {
     @Environment(AppModel.self) private var appModel
     let inningLabels: [String]
@@ -992,6 +1519,7 @@ private struct LineScoreHeaderRow: View {
     }
 }
 
+// LineScoreValueRow 구조체는 LineScoreValueRow 타입의 역할과 값을 정의합니다.
 private struct LineScoreValueRow: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1002,7 +1530,6 @@ private struct LineScoreValueRow: View {
     var body: some View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
-                TeamMarkView(team: team, size: 24)
                 Text(team.displayName)
                     .font(.caption.weight(.bold))
                     .lineLimit(1)
@@ -1034,6 +1561,7 @@ private struct LineScoreValueRow: View {
     }
 }
 
+// FallbackLineScoreRow 구조체는 FallbackLineScoreRow 타입의 역할과 값을 정의합니다.
 private struct FallbackLineScoreRow: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1043,7 +1571,6 @@ private struct FallbackLineScoreRow: View {
     var body: some View {
         HStack {
             HStack(spacing: 8) {
-                TeamMarkView(team: team, size: 26)
                 Text(team.displayName)
                     .font(.subheadline.weight(.bold))
                     .lineLimit(1)
@@ -1068,6 +1595,7 @@ private struct FallbackLineScoreRow: View {
     }
 }
 
+// SummaryItemsCard 구조체는 SummaryItemsCard 타입의 역할과 값을 정의합니다.
 private struct SummaryItemsCard: View {
     let items: [GameCenterSummaryItem]
 
@@ -1094,6 +1622,7 @@ private struct SummaryItemsCard: View {
     }
 }
 
+// GameDetailRecordTab 열거형는 GameDetailRecordTab 타입의 역할과 값을 정의합니다.
 private enum GameDetailRecordTab: String, CaseIterable, Identifiable {
     case batting = "실시간 라인업 / 타자 기록"
     case pitching = "투수 기록"
@@ -1113,6 +1642,7 @@ private enum GameDetailRecordTab: String, CaseIterable, Identifiable {
     }
 }
 
+// GameDetailRecordTeam 열거형는 GameDetailRecordTeam 타입의 역할과 값을 정의합니다.
 private enum GameDetailRecordTeam: String, CaseIterable, Identifiable {
     case away = "원정"
     case home = "홈"
@@ -1120,6 +1650,7 @@ private enum GameDetailRecordTeam: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+// GameDetailRecordsPanel 구조체는 GameDetailRecordsPanel 타입의 역할과 값을 정의합니다.
 private struct GameDetailRecordsPanel: View {
     @State private var selectedTab: GameDetailRecordTab = .batting
     @State private var selectedTeam: GameDetailRecordTeam = .away
@@ -1193,6 +1724,7 @@ private struct GameDetailRecordsPanel: View {
     }
 }
 
+// TeamRecordSwitcher 구조체는 TeamRecordSwitcher 타입의 역할과 값을 정의합니다.
 private struct TeamRecordSwitcher: View {
     @Binding var selection: GameDetailRecordTeam
     let awayTeam: Team
@@ -1218,6 +1750,7 @@ private struct TeamRecordSwitcher: View {
     }
 }
 
+// TeamRecordButton 구조체는 TeamRecordButton 타입의 역할과 값을 정의합니다.
 private struct TeamRecordButton: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -1228,7 +1761,6 @@ private struct TeamRecordButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                TeamMarkView(team: team, size: 22)
                 Text(title)
                     .font(.caption.weight(.bold))
                     .lineLimit(1)
@@ -1249,6 +1781,7 @@ private struct TeamRecordButton: View {
     }
 }
 
+// LimitedRecordSourceNote 구조체는 LimitedRecordSourceNote 타입의 역할과 값을 정의합니다.
 private struct LimitedRecordSourceNote: View {
     @Environment(AppModel.self) private var appModel
 
@@ -1263,6 +1796,7 @@ private struct LimitedRecordSourceNote: View {
     }
 }
 
+// BattingSectionTable 구조체는 BattingSectionTable 타입의 역할과 값을 정의합니다.
 private struct BattingSectionTable: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1291,9 +1825,7 @@ private struct BattingSectionTable: View {
                         ForEach(section.lines) { line in
                             BattingValueRow(line: line, isLiveLike: isLiveLike)
                         }
-                        if let totals = section.totals {
-                            BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
-                        } else if let totals = GameCenterBattingTotals.derived(from: section.lines) {
+                        if let totals = section.displayedRecordTotals {
                             BattingTotalsRow(totals: totals, isLiveLike: isLiveLike)
                         }
                     }
@@ -1303,7 +1835,9 @@ private struct BattingSectionTable: View {
     }
 }
 
+// GameDetailBattingTableColumns 열거형는 GameDetailBattingTableColumns 타입의 역할과 값을 정의합니다.
 enum GameDetailBattingTableColumns {
+    // headers 메서드는 이 타입의 주요 동작을 수행합니다.
     static func headers(isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return ["타수", "득점", "안타", "타점", "홈런", "삼진", "볼넷"]
@@ -1311,6 +1845,7 @@ enum GameDetailBattingTableColumns {
         return ["타수", "득점", "안타", "타점", "홈런", "볼넷", "삼진", "도루", "타율"]
     }
 
+    // values 메서드는 이 타입의 주요 동작을 수행합니다.
     static func values(for line: GameCenterBattingLine, isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return [
@@ -1336,6 +1871,7 @@ enum GameDetailBattingTableColumns {
         ]
     }
 
+    // values 메서드는 이 타입의 주요 동작을 수행합니다.
     static func values(for totals: GameCenterBattingTotals, isLiveLike: Bool) -> [String] {
         if isLiveLike {
             return [
@@ -1362,6 +1898,7 @@ enum GameDetailBattingTableColumns {
     }
 }
 
+// BattingHeaderRow 구조체는 BattingHeaderRow 타입의 역할과 값을 정의합니다.
 private struct BattingHeaderRow: View {
     let isLiveLike: Bool
 
@@ -1375,6 +1912,7 @@ private struct BattingHeaderRow: View {
     }
 }
 
+// BattingValueRow 구조체는 BattingValueRow 타입의 역할과 값을 정의합니다.
 private struct BattingValueRow: View {
     let line: GameCenterBattingLine
     let isLiveLike: Bool
@@ -1389,6 +1927,7 @@ private struct BattingValueRow: View {
     }
 }
 
+// BattingTotalsRow 구조체는 BattingTotalsRow 타입의 역할과 값을 정의합니다.
 private struct BattingTotalsRow: View {
     let totals: GameCenterBattingTotals
     let isLiveLike: Bool
@@ -1403,6 +1942,7 @@ private struct BattingTotalsRow: View {
     }
 }
 
+// PitchingSectionTable 구조체는 PitchingSectionTable 타입의 역할과 값을 정의합니다.
 private struct PitchingSectionTable: View {
     let team: Team
     let section: GameCenterPitchingSection
@@ -1447,6 +1987,7 @@ private struct PitchingSectionTable: View {
     }
 }
 
+// PitchingHeaderRow 구조체는 PitchingHeaderRow 타입의 역할과 값을 정의합니다.
 private struct PitchingHeaderRow: View {
     var body: some View {
         StatsTableRow(
@@ -1459,6 +2000,7 @@ private struct PitchingHeaderRow: View {
     }
 }
 
+// PitchingValueRow 구조체는 PitchingValueRow 타입의 역할과 값을 정의합니다.
 private struct PitchingValueRow: View {
     let line: GameCenterPitchingLine
 
@@ -1487,6 +2029,7 @@ private struct PitchingValueRow: View {
     }
 }
 
+// PitchingTotalsRow 구조체는 PitchingTotalsRow 타입의 역할과 값을 정의합니다.
 private struct PitchingTotalsRow: View {
     let totals: GameCenterPitchingTotals
 
@@ -1516,6 +2059,7 @@ private struct PitchingTotalsRow: View {
     }
 }
 
+// StatsTableRow 구조체는 StatsTableRow 타입의 역할과 값을 정의합니다.
 private struct StatsTableRow: View {
     @Environment(AppModel.self) private var appModel
     var order: String? = nil
@@ -1586,6 +2130,7 @@ private struct StatsTableRow: View {
     }
 }
 
+// KeyRecordsComparisonView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct KeyRecordsComparisonView: View {
     let presentation: GameDetailPresentation
     let review: GameCenterReview
@@ -1633,6 +2178,7 @@ private struct KeyRecordsComparisonView: View {
     }
 }
 
+// KeyRecordMetric 구조체는 KeyRecordMetric 타입의 역할과 값을 정의합니다.
 private struct KeyRecordMetric: Identifiable {
     let title: String
     let away: Int?
@@ -1641,6 +2187,7 @@ private struct KeyRecordMetric: Identifiable {
     var id: String { title }
 }
 
+// KeyRecordComparisonRow 구조체는 KeyRecordComparisonRow 타입의 역할과 값을 정의합니다.
 private struct KeyRecordComparisonRow: View {
     let title: String
     let awayValue: Int?
@@ -1668,6 +2215,7 @@ private struct KeyRecordComparisonRow: View {
     }
 }
 
+// ComparisonBar 구조체는 ComparisonBar 타입의 역할과 값을 정의합니다.
 private struct ComparisonBar: View {
     let value: Int?
     let maxValue: Int
@@ -1690,6 +2238,7 @@ private struct ComparisonBar: View {
     }
 }
 
+// RecordsEmptyState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 private struct RecordsEmptyState: View {
     let status: GameStatus
 
@@ -1720,6 +2269,7 @@ private struct RecordsEmptyState: View {
     }
 }
 
+// DetailInlineLoadingView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DetailInlineLoadingView: View {
     @Environment(AppModel.self) private var appModel
     let message: String
@@ -1737,6 +2287,7 @@ private struct DetailInlineLoadingView: View {
     }
 }
 
+// ProbableStartersCard 구조체는 ProbableStartersCard 타입의 역할과 값을 정의합니다.
 private struct ProbableStartersCard: View {
     let awayTeam: Team
     let homeTeam: Team
@@ -1756,6 +2307,7 @@ private struct ProbableStartersCard: View {
     }
 }
 
+// StarterColumn 구조체는 StarterColumn 타입의 역할과 값을 정의합니다.
 private struct StarterColumn: View {
     @Environment(AppModel.self) private var appModel
     let team: Team
@@ -1765,7 +2317,6 @@ private struct StarterColumn: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                TeamMarkView(team: team, size: 32)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(role)
                         .font(.caption2.weight(.bold))
@@ -1790,6 +2341,7 @@ private struct StarterColumn: View {
     }
 }
 
+// MatchupComparisonCard 구조체는 MatchupComparisonCard 타입의 역할과 값을 정의합니다.
 private struct MatchupComparisonCard: View {
     let awayMatchup: GameCenterMatchupSnapshot
     let homeMatchup: GameCenterMatchupSnapshot
@@ -1808,6 +2360,7 @@ private struct MatchupComparisonCard: View {
     }
 }
 
+// MatchupColumn 구조체는 MatchupColumn 타입의 역할과 값을 정의합니다.
 private struct MatchupColumn: View {
     @Environment(AppModel.self) private var appModel
     let snapshot: GameCenterMatchupSnapshot
@@ -1833,6 +2386,7 @@ private struct MatchupColumn: View {
     }
 }
 
+// MatchupMetric 구조체는 MatchupMetric 타입의 역할과 값을 정의합니다.
 private struct MatchupMetric: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -1851,6 +2405,7 @@ private struct MatchupMetric: View {
     }
 }
 
+// DetailMessageCard 구조체는 DetailMessageCard 타입의 역할과 값을 정의합니다.
 private struct DetailMessageCard: View {
     @Environment(AppModel.self) private var appModel
     let icon: String
@@ -1878,6 +2433,7 @@ private struct DetailMessageCard: View {
     }
 }
 
+// DetailLoadingCard 구조체는 DetailLoadingCard 타입의 역할과 값을 정의합니다.
 private struct DetailLoadingCard: View {
     @Environment(AppModel.self) private var appModel
     let message: String
@@ -1895,12 +2451,14 @@ private struct DetailLoadingCard: View {
 }
 
 private extension Text {
+    // lineScoreTotalStyle 메서드는 이 타입의 주요 동작을 수행합니다.
     func lineScoreTotalStyle(emphasis: Bool = false) -> some View {
         font(.caption.weight(emphasis ? .bold : .semibold))
             .monospacedDigit()
             .frame(width: 34)
     }
 
+    // comparisonValueStyle 메서드는 이 타입의 주요 동작을 수행합니다.
     func comparisonValueStyle() -> some View {
         font(.title3.weight(.semibold))
             .monospacedDigit()
@@ -1967,7 +2525,14 @@ private extension GameCenterBattingSection {
     }
 }
 
+extension GameCenterBattingSection {
+    var displayedRecordTotals: GameCenterBattingTotals? {
+        GameCenterBattingTotals.derived(from: lines) ?? totals
+    }
+}
+
 private extension GameCenterBattingTotals {
+    // derived 메서드는 이 타입의 주요 동작을 수행합니다.
     static func derived(from lines: [GameCenterBattingLine]) -> GameCenterBattingTotals? {
         let atBats = lines.sum(\.atBats)
         let runs = lines.sum(\.runs)
@@ -2000,6 +2565,7 @@ private extension GameCenterBattingTotals {
     }
 }
 
+// GameCenterPitchingTotals 구조체는 GameCenterPitchingTotals 타입의 역할과 값을 정의합니다.
 private struct GameCenterPitchingTotals {
     let innings: String?
     let battersFaced: String?
@@ -2014,6 +2580,7 @@ private struct GameCenterPitchingTotals {
     let homeRunsAllowed: String?
     let pitches: String?
 
+    // derived 메서드는 이 타입의 주요 동작을 수행합니다.
     static func derived(from lines: [GameCenterPitchingLine]) -> GameCenterPitchingTotals? {
         let outs = lines.compactMap { $0.innings.outsValue }.reduce(0, +)
         let battersFaced = lines.sum(\.battersFaced)
@@ -2046,11 +2613,13 @@ private struct GameCenterPitchingTotals {
         )
     }
 
+    // combinedWalksOrHitByPitch 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func combinedWalksOrHitByPitch(walks: Int?, hitBatters: Int?) -> Int? {
         guard walks != nil || hitBatters != nil else { return nil }
         return (walks ?? 0) + (hitBatters ?? 0)
     }
 
+    // inningsText 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func inningsText(fromOuts outs: Int) -> String {
         let innings = outs / 3
         let remainder = outs % 3
@@ -2067,6 +2636,7 @@ private extension GameCenterPitchingLine {
 }
 
 private extension GameCenterReview {
+    // teamSummaryValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func teamSummaryValue(titleContains keyword: String, team: Team) -> Int? {
         summaryItems
             .first { $0.title.contains(keyword) }?
@@ -2092,6 +2662,7 @@ private extension String {
         return Int(cleaned).map { $0 * 3 }
     }
 
+    // teamValue 메서드는 이 타입의 주요 동작을 수행합니다.
     func teamValue(for team: Team) -> Int? {
         let names = [team.displayName, team.shortName, team.name]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -2105,6 +2676,7 @@ private extension String {
         return nil
     }
 
+    // firstRegexCapture 메서드는 이 타입의 주요 동작을 수행합니다.
     func firstRegexCapture(pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(startIndex..<endIndex, in: self)
@@ -2118,6 +2690,7 @@ private extension String {
 }
 
 private extension Array where Element == GameCenterBattingLine {
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -2125,6 +2698,7 @@ private extension Array where Element == GameCenterBattingLine {
 }
 
 private extension Array where Element == GameCenterPitchingLine {
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterPitchingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)

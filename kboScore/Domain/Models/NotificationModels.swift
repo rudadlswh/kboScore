@@ -1,12 +1,17 @@
 //
 //  NotificationModels.swift
 //  kboScore
+//  기능 설명: 앱에서 표시하고 저장하는 알림 도메인 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import Foundation
 
+// NotificationType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum NotificationType: String, Codable, Hashable, Sendable {
     case scoreChange
     case onBase
@@ -45,6 +50,7 @@ nonisolated enum NotificationType: String, Codable, Hashable, Sendable {
     }
 }
 
+// NotificationItem 구조체는 NotificationItem 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let type: NotificationType
@@ -61,6 +67,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
     let gameStableIdentity: String?
     let relatedTeamIDs: [String]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         id: UUID,
         type: NotificationType,
@@ -93,6 +100,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         self.relatedTeamIDs = relatedTeamIDs
     }
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case id
         case type
@@ -110,6 +118,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         case relatedTeamIDs
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
@@ -151,6 +160,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         return nil
     }
 
+    // databaseIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func databaseIdentity(from value: String?) -> String? {
         guard let value = nonBlank(value) else { return nil }
         if value.hasPrefix("id:") {
@@ -161,6 +171,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         return UUID(uuidString: value).map { GameIdentifier.idKey($0) }
     }
 
+    // realStableIdentity 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func realStableIdentity(_ value: String?) -> String? {
         guard let value = nonBlank(value) else { return nil }
         if value.hasPrefix("public:") || value.hasPrefix("provider:") {
@@ -172,6 +183,7 @@ nonisolated struct NotificationItem: Identifiable, Hashable, Codable, Sendable {
         return nil
     }
 
+    // nonBlank 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func nonBlank(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               value.isEmpty == false else { return nil }

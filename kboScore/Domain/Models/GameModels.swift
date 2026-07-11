@@ -1,12 +1,17 @@
 //
 //  GameModels.swift
 //  kboScore
+//  기능 설명: 경기, 요약, 이닝, 주자 등 핵심 경기 도메인 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import Foundation
 
+// GameSeasonClassification 열거형는 GameSeasonClassification 타입의 역할과 값을 정의합니다.
 nonisolated enum GameSeasonClassification: String, CaseIterable, Codable, Hashable, Sendable {
     case unknown
     case regularSeason = "regular_season"
@@ -17,6 +22,7 @@ nonisolated enum GameSeasonClassification: String, CaseIterable, Codable, Hashab
         self == .regularSeason
     }
 
+    // inferred 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func inferred(from note: String?) -> GameSeasonClassification {
         guard let normalizedNote = note?.lowercased() else { return .unknown }
         if normalizedNote.contains("provider_game_id=kbo_pre_") ||
@@ -29,6 +35,7 @@ nonisolated enum GameSeasonClassification: String, CaseIterable, Codable, Hashab
     }
 }
 
+// GameStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 nonisolated enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
     case upcoming
     case live
@@ -70,6 +77,7 @@ nonisolated enum GameStatus: String, CaseIterable, Codable, Hashable, Sendable {
     }
 }
 
+// RunnerState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 nonisolated struct RunnerState: Hashable, Codable, Sendable {
     var first: Bool
     var second: Bool
@@ -78,6 +86,7 @@ nonisolated struct RunnerState: Hashable, Codable, Sendable {
     nonisolated static let empty = RunnerState(first: false, second: false, third: false)
 }
 
+// GameEventType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum GameEventType: String, Codable, Hashable, Sendable {
     case score
     case pitching
@@ -86,6 +95,7 @@ nonisolated enum GameEventType: String, Codable, Hashable, Sendable {
     case note
 }
 
+// GameEvent 구조체는 GameEvent 타입의 역할과 값을 정의합니다.
 nonisolated struct GameEvent: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let type: GameEventType
@@ -94,12 +104,14 @@ nonisolated struct GameEvent: Identifiable, Hashable, Codable, Sendable {
     let timestamp: Date
 }
 
+// TeamGameResult 열거형는 TeamGameResult 타입의 역할과 값을 정의합니다.
 nonisolated enum TeamGameResult: Hashable, Sendable {
     case win
     case loss
     case tie
 }
 
+// GameDetail 구조체는 GameDetail 타입의 역할과 값을 정의합니다.
 nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     let id: UUID
     let scheduledStart: Date
@@ -129,11 +141,13 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         seasonClassification.isRegularSeason
     }
 
+    // involves 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated func involves(teamID: String?) -> Bool {
         guard let teamID else { return false }
         return awayTeam.id == teamID || homeTeam.id == teamID
     }
 
+    // summary 메서드는 이 타입의 주요 동작을 수행합니다.
     func summary(isMyTeamGame: Bool) -> GameSummary {
         GameSummary(
             id: id,
@@ -168,7 +182,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         }
 
         let stateText = inningText ?? status.title
-        return "KBO LIVE\n\(scoreText)\n\(stateText)\n\(venue)"
+        return "\(scoreText)\n\(stateText)\n\(venue)"
     }
 
     nonisolated var hasCompleteFinalScore: Bool {
@@ -187,6 +201,14 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
 
     nonisolated var publicGameID: String? {
         Self.noteValue("public_game_id", from: note)
+    }
+
+    nonisolated var supabaseGameID: UUID? {
+        Self.noteValue("supabase_game_id", from: note).flatMap(UUID.init(uuidString:))
+    }
+
+    nonisolated var attendanceCanonicalKey: String {
+        GameIdentifier.attendanceCanonicalKey(supabaseGameID ?? id)
     }
 
     nonisolated var canonicalGameIdentityValue: String {
@@ -234,6 +256,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         var tokens: [GameIdentifier.IdentityMatchToken] = []
         var seen: Set<String> = []
 
+        // append 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
         func append(_ value: String?, priority: Int, reason: String) {
             guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
                   value.isEmpty == false,
@@ -261,18 +284,14 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 
     nonisolated var attendanceStorageKey: String {
-        if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
-           providerGameID.isEmpty == false {
-            return GameIdentifier.providerKey(providerGameID)
-        }
-        if let officialGameCenterID = Self.providerGameID(from: note) {
-            return GameIdentifier.providerKey(officialGameCenterID)
-        }
-        return GameIdentifier.idKey(id)
+        attendanceCanonicalKey
     }
 
     nonisolated var attendanceStorageAliases: Set<String> {
-        var aliases: Set<String> = [GameIdentifier.idKey(id)]
+        var aliases: Set<String> = [
+            GameIdentifier.idKey(id),
+            attendanceCanonicalKey
+        ]
         if let providerGameID = providerGameID?.trimmingCharacters(in: .whitespacesAndNewlines),
            providerGameID.isEmpty == false {
             aliases.insert(GameIdentifier.providerKey(providerGameID))
@@ -295,6 +314,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         return "\(awayTeam.displayName) \(awayScore) : \(homeScore) \(homeTeam.displayName)"
     }
 
+    // finalResult 메서드는 이 타입의 주요 동작을 수행합니다.
     func finalResult(for teamID: String?) -> TeamGameResult? {
         guard hasCompleteFinalScore,
               let teamID,
@@ -310,10 +330,12 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         return winningTeam.id == teamID ? .win : .loss
     }
 
+    // providerGameID 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func providerGameID(from note: String?) -> String? {
         noteValue("provider_game_id", from: note)
     }
 
+    // officialProviderFallback 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func officialProviderFallback(from value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               value.count >= 9,
@@ -324,6 +346,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         return value
     }
 
+    // noteValue 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func noteValue(_ key: String, from note: String?) -> String? {
         guard let note,
               let range = note.range(of: "\(key)=") else {
@@ -367,6 +390,7 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
         ].joined(separator: ":")
     }
 
+    // kstDayKey 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func kstDayKey(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -377,12 +401,55 @@ nonisolated struct GameDetail: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+extension GameDetail {
+    nonisolated func shouldPollGameDetail(now: Date) -> Bool {
+        if status.isFinishedLike {
+            return false
+        }
+        if status.isLiveLike {
+            return true
+        }
+        if status == .upcoming, scheduledStart <= now {
+            return true
+        }
+        return hasStartedInningState
+    }
+
+    nonisolated func gameDetailPollingSkipReason(now: Date) -> String? {
+        if shouldPollGameDetail(now: now) {
+            return nil
+        }
+        if status == .upcoming {
+            return "scheduledFuture"
+        }
+        if status.isFinishedLike {
+            return "terminalStatus"
+        }
+        return "notLiveLike"
+    }
+
+    private nonisolated var hasStartedInningState: Bool {
+        guard let normalized = inningText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              normalized.isEmpty == false else {
+            return false
+        }
+        if normalized.contains("top") || normalized.contains("bottom") || normalized.contains("초") || normalized.contains("말") {
+            return normalized.range(of: #"\d+"#, options: .regularExpression) != nil
+        }
+        return false
+    }
+}
+
+// GameBaseRunners 구조체는 GameBaseRunners 타입의 역할과 값을 정의합니다.
 nonisolated struct GameBaseRunners: Hashable, Codable, Sendable {
     let first: String?
     let second: String?
     let third: String?
 }
 
+// GameSummary 구조체는 GameSummary 타입의 역할과 값을 정의합니다.
 nonisolated struct GameSummary: Identifiable, Hashable, Sendable {
     let id: UUID
     let scheduledStart: Date

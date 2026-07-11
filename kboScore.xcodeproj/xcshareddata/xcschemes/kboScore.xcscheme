@@ -113,12 +113,12 @@
          <EnvironmentVariable
             key = "KBO_BACKEND_BASE_URL"
             value = "http://192.168.45.140:8088"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
          <EnvironmentVariable
             key = "KBO_NOTIFICATION_REGISTRATION_URL"
             value = "http://192.168.45.140:8088/devices/register"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>

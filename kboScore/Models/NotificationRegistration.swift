@@ -1,12 +1,18 @@
 //
 //  NotificationRegistration.swift
 //  kboScore
+//  기능 설명: 알림 등록 요청에 필요한 사용자 설정과 기기 상태 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
 import Foundation
+import Security
 
+// NotificationAlertType 열거형는 도메인 값을 종류별로 구분합니다.
 nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable {
     case gameStart
     case scoreChange
@@ -15,16 +21,19 @@ nonisolated enum NotificationAlertType: String, Codable, CaseIterable, Sendable 
     case rainDelay
 }
 
+// NotificationRegistrationQuietHours 구조체는 NotificationRegistrationQuietHours 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationQuietHours: Codable, Equatable, Sendable {
     let startHour: Int
     let endHour: Int
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(startHour: Int, endHour: Int) {
         self.startHour = startHour
         self.endHour = endHour
     }
 }
 
+// NotificationRegistrationPayload 구조체는 NotificationRegistrationPayload 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable {
     let platform: String
     let environment: String
@@ -42,7 +51,10 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
     let inningChangeEnabled: Bool
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
 
+// CodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
     private enum CodingKeys: String, CodingKey {
         case platform
         case environment
@@ -58,10 +70,18 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         case gameEndEnabled
         case onBaseEnabled
         case inningChangeEnabled
-        case favoriteTeamOnlyEnabled
+        case favoriteTeamOnlyEnabled = "favorite_team_only_enabled"
         case muteWhenLosingEnabled
+        case liveActivitiesEnabled
+        case liveActivityAutoStartEnabled
     }
 
+// LegacyCodingKeys 열거형는 Codable 변환에 사용하는 키를 정의합니다.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case favoriteTeamOnlyEnabled
+    }
+
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         platform: String = "ios",
         environment: String = NotificationRegistrationEnvironment.current,
@@ -78,12 +98,15 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         onBaseEnabled: Bool = false,
         inningChangeEnabled: Bool = false,
         favoriteTeamOnlyEnabled: Bool = false,
-        muteWhenLosingEnabled: Bool = false
+        muteWhenLosingEnabled: Bool = false,
+        liveActivitiesEnabled: Bool = true,
+        liveActivityAutoStartEnabled: Bool = true
     ) {
         self.platform = platform
         self.environment = environment
         self.deviceToken = deviceToken
         self.installationId = installationId
+        let hasFavoriteTeamID = favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         self.favoriteTeamID = favoriteTeamID
         self.notificationsAuthorized = notificationsAuthorized
         self.alertTypes = alertTypes
@@ -94,10 +117,13 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         self.gameEndEnabled = gameEndEnabled
         self.onBaseEnabled = onBaseEnabled
         self.inningChangeEnabled = inningChangeEnabled
-        self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
+        self.favoriteTeamOnlyEnabled = hasFavoriteTeamID || favoriteTeamOnlyEnabled
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
+        self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init?(
         deviceToken: String?,
         settings: AppSettings,
@@ -123,10 +149,13 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
             onBaseEnabled: settings.notificationPreferences.onBaseEnabled,
             inningChangeEnabled: settings.notificationPreferences.inningChangeEnabled,
             favoriteTeamOnlyEnabled: settings.notificationPreferences.favoriteTeamOnlyEnabled,
-            muteWhenLosingEnabled: settings.notificationPreferences.muteWhenLosingEnabled
+            muteWhenLosingEnabled: settings.notificationPreferences.muteWhenLosingEnabled,
+            liveActivitiesEnabled: settings.liveActivitiesEnabled,
+            liveActivityAutoStartEnabled: settings.liveActivityAutoStartEnabled
         )
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         platform = try container.decodeIfPresent(String.self, forKey: .platform) ?? "ios"
@@ -143,10 +172,16 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         gameEndEnabled = try container.decodeIfPresent(Bool.self, forKey: .gameEndEnabled) ?? true
         onBaseEnabled = try container.decodeIfPresent(Bool.self, forKey: .onBaseEnabled) ?? false
         inningChangeEnabled = try container.decodeIfPresent(Bool.self, forKey: .inningChangeEnabled) ?? false
-        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled) ?? false
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        favoriteTeamOnlyEnabled = try container.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled)
+            ?? (try legacyContainer.decodeIfPresent(Bool.self, forKey: .favoriteTeamOnlyEnabled))
+            ?? false
         muteWhenLosingEnabled = try container.decodeIfPresent(Bool.self, forKey: .muteWhenLosingEnabled) ?? false
+        liveActivitiesEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivitiesEnabled) ?? true
+        liveActivityAutoStartEnabled = try container.decodeIfPresent(Bool.self, forKey: .liveActivityAutoStartEnabled) ?? liveActivitiesEnabled
     }
 
+    // encode 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(platform, forKey: .platform)
@@ -165,12 +200,15 @@ nonisolated struct NotificationRegistrationPayload: Codable, Equatable, Sendable
         try container.encode(inningChangeEnabled, forKey: .inningChangeEnabled)
         try container.encode(favoriteTeamOnlyEnabled, forKey: .favoriteTeamOnlyEnabled)
         try container.encode(muteWhenLosingEnabled, forKey: .muteWhenLosingEnabled)
+        try container.encode(liveActivitiesEnabled, forKey: .liveActivitiesEnabled)
+        try container.encode(liveActivityAutoStartEnabled, forKey: .liveActivityAutoStartEnabled)
     }
 }
 
 extension NotificationRegistrationPayload {
     nonisolated var debugBooleanDescription: String {
         [
+            "notificationsEnabled=\(notificationsAuthorized)",
             "gameStartEnabled=\(gameStartEnabled)",
             "scoreChangeEnabled=\(scoreChangeEnabled)",
             "leadChangeEnabled=\(leadChangeEnabled)",
@@ -178,11 +216,18 @@ extension NotificationRegistrationPayload {
             "onBaseEnabled=\(onBaseEnabled)",
             "inningChangeEnabled=\(inningChangeEnabled)",
             "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
-            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)",
+            "liveActivitiesEnabled=\(liveActivitiesEnabled)",
+            "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)"
         ].joined(separator: " ")
+    }
+
+    nonisolated var debugRegistrationDescription: String {
+        "environment=\(environment) favoriteTeamID=\(favoriteTeamID ?? "none") \(debugBooleanDescription)"
     }
 }
 
+// NotificationRegistrationKey 구조체는 NotificationRegistrationKey 타입의 역할과 값을 정의합니다.
 nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomStringConvertible {
     let deviceToken: String
     let environment: String
@@ -197,7 +242,10 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
     let inningChangeEnabled: Bool
     let favoriteTeamOnlyEnabled: Bool
     let muteWhenLosingEnabled: Bool
+    let liveActivitiesEnabled: Bool
+    let liveActivityAutoStartEnabled: Bool
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         deviceToken: String,
         environment: String,
@@ -211,7 +259,9 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
         onBaseEnabled: Bool = false,
         inningChangeEnabled: Bool = false,
         favoriteTeamOnlyEnabled: Bool = false,
-        muteWhenLosingEnabled: Bool = false
+        muteWhenLosingEnabled: Bool = false,
+        liveActivitiesEnabled: Bool = true,
+        liveActivityAutoStartEnabled: Bool = true
     ) {
         self.deviceToken = deviceToken
         self.environment = environment
@@ -226,8 +276,11 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
         self.inningChangeEnabled = inningChangeEnabled
         self.favoriteTeamOnlyEnabled = favoriteTeamOnlyEnabled
         self.muteWhenLosingEnabled = muteWhenLosingEnabled
+        self.liveActivitiesEnabled = liveActivitiesEnabled
+        self.liveActivityAutoStartEnabled = liveActivityAutoStartEnabled
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         payload: NotificationRegistrationPayload,
         endpointDescription: String?
@@ -245,13 +298,14 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
             onBaseEnabled: payload.onBaseEnabled,
             inningChangeEnabled: payload.inningChangeEnabled,
             favoriteTeamOnlyEnabled: payload.favoriteTeamOnlyEnabled,
-            muteWhenLosingEnabled: payload.muteWhenLosingEnabled
+            muteWhenLosingEnabled: payload.muteWhenLosingEnabled,
+            liveActivitiesEnabled: payload.liveActivitiesEnabled,
+            liveActivityAutoStartEnabled: payload.liveActivityAutoStartEnabled
         )
     }
 
     nonisolated var description: String {
         [
-            "tokenPrefix=\(deviceToken.prefix(12))",
             "environment=\(environment)",
             "favoriteTeamID=\(favoriteTeamID ?? "none")",
             "notificationsEnabled=\(notificationsEnabled)",
@@ -263,21 +317,26 @@ nonisolated struct NotificationRegistrationKey: Hashable, Sendable, CustomString
             "onBaseEnabled=\(onBaseEnabled)",
             "inningChangeEnabled=\(inningChangeEnabled)",
             "favoriteTeamOnlyEnabled=\(favoriteTeamOnlyEnabled)",
-            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)"
+            "muteWhenLosingEnabled=\(muteWhenLosingEnabled)",
+            "liveActivitiesEnabled=\(liveActivitiesEnabled)",
+            "liveActivityAutoStartEnabled=\(liveActivityAutoStartEnabled)"
         ].joined(separator: " ")
     }
 }
 
+// NotificationRegistrationStartDecision 열거형는 NotificationRegistrationStartDecision 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationRegistrationStartDecision: Equatable, Sendable {
     case start(keyChanged: Bool)
     case skipInFlight
     case skipAlreadyRegistered
 }
 
+// NotificationRegistrationDeduplicationState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
     private(set) var inFlightRegistrationKeys: Set<NotificationRegistrationKey> = []
     private(set) var lastSuccessfulRegistrationKey: NotificationRegistrationKey?
 
+    // start 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     mutating func start(_ key: NotificationRegistrationKey, force: Bool = false) -> NotificationRegistrationStartDecision {
         if inFlightRegistrationKeys.contains(key) {
             return .skipInFlight
@@ -292,6 +351,7 @@ nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
         return .start(keyChanged: keyChanged)
     }
 
+    // complete 메서드는 이 타입의 주요 동작을 수행합니다.
     mutating func complete(_ key: NotificationRegistrationKey, status: NotificationRegistrationSyncStatus) {
         inFlightRegistrationKeys.remove(key)
         if status == .synced {
@@ -299,36 +359,162 @@ nonisolated struct NotificationRegistrationDeduplicationState: Sendable {
         }
     }
 
+    // fail 메서드는 이 타입의 주요 동작을 수행합니다.
     mutating func fail(_ key: NotificationRegistrationKey) {
         inFlightRegistrationKeys.remove(key)
     }
 }
 
+// NotificationInstallationID 열거형는 NotificationInstallationID 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationInstallationID {
+    nonisolated static let legacyStorageKey = "notificationInstallationID"
+    private static let keychainService = "com.chogm.kboScore.notification-installation-id"
+    private static let keychainAccount = "notification-installation-id"
+
     nonisolated static var current: String {
-        let storageKey = "notificationInstallationID"
-        if let persisted = UserDefaults.standard.string(forKey: storageKey),
-           persisted.isEmpty == false {
+        loadOrCreate()
+    }
+
+    nonisolated static func loadOrCreate(
+        legacyDefaults: UserDefaults = .standard,
+        legacyKey: String = legacyStorageKey,
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> String {
+        if let persisted = load(service: service, account: account) {
+            legacyDefaults.removeObject(forKey: legacyKey)
             return persisted
         }
 
+        if let legacyValue = legacyDefaults.string(forKey: legacyKey),
+           legacyValue.isEmpty == false {
+            if save(legacyValue, service: service, account: account) {
+                legacyDefaults.removeObject(forKey: legacyKey)
+            }
+            return legacyValue
+        }
+
         let generated = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(generated, forKey: storageKey)
+        _ = save(generated, service: service, account: account)
         return generated
+    }
+
+    nonisolated static func loadSavedValue(
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> String? {
+        load(service: service, account: account)
+    }
+
+    @discardableResult
+    nonisolated static func deleteSavedValue(
+        service: String = keychainService,
+        account: String = keychainAccount
+    ) -> Bool {
+        let status = SecItemDelete(baseQuery(service: service, account: account) as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
+
+    private nonisolated static func load(service: String, account: String) -> String? {
+        var query = baseQuery(service: service, account: account)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecReturnData as String] = true
+
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8),
+              value.isEmpty == false else {
+            return nil
+        }
+        return value
+    }
+
+    @discardableResult
+    private nonisolated static func save(_ value: String, service: String, account: String) -> Bool {
+        guard let data = value.data(using: .utf8), value.isEmpty == false else {
+            return false
+        }
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let status = SecItemUpdate(
+            baseQuery(service: service, account: account) as CFDictionary,
+            updateAttributes as CFDictionary
+        )
+        if status == errSecSuccess {
+            return true
+        }
+        if status != errSecItemNotFound {
+            return false
+        }
+
+        var insertQuery = baseQuery(service: service, account: account)
+        insertQuery[kSecValueData as String] = data
+        insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(insertQuery as CFDictionary, nil) == errSecSuccess
+    }
+
+    private nonisolated static func baseQuery(service: String, account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }
 
+// NotificationRegistrationEnvironment 열거형는 NotificationRegistrationEnvironment 타입의 역할과 값을 정의합니다.
 nonisolated enum NotificationRegistrationEnvironment {
+    private static let infoPlistKey = "KBO_APNS_ENVIRONMENT"
+
+    nonisolated static var current: String {
+        let configuredValue = (Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return resolved(from: configuredValue)
+    }
+
+    nonisolated static func resolved(from configuredValue: String?) -> String {
+        normalize(configuredValue) ?? fallbackEnvironment
+    }
+
+    nonisolated static func normalize(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch value {
+        case "sandbox", "development", "dev":
+            return "sandbox"
+        case "production", "prod":
+            return "production"
+        default:
+            return nil
+        }
+    }
+
+    private static var fallbackEnvironment: String {
+        #if DEBUG
+        return "sandbox"
+        #else
+        return "production"
+        #endif
+    }
+}
+
+nonisolated enum AppBuildConfiguration {
     nonisolated static var current: String {
         #if DEBUG
-        "sandbox"
+        return "Debug"
         #else
-        "production"
+        return "Release"
         #endif
     }
 }
 
 extension NotificationAlertType {
+    // enabled 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func enabled(from preferences: NotificationPreferences) -> [NotificationAlertType] {
         var alertTypes: [NotificationAlertType] = []
         if preferences.gameStartEnabled { alertTypes.append(.gameStart) }
@@ -340,6 +526,7 @@ extension NotificationAlertType {
     }
 }
 
+// NotificationRegistrationSyncStatus 열거형는 처리 단계나 경기 상태를 구분합니다.
 nonisolated enum NotificationRegistrationSyncStatus: String, Sendable {
     case idle = "대기"
     case waitingForToken = "토큰 대기"

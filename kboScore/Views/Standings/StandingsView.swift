@@ -1,12 +1,17 @@
 //
 //  StandingsView.swift
 //  kboScore
+//  기능 설명: KBO 순위표 화면과 순위 상태 표시를 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 4/2/26.
 //
 
 import SwiftUI
 
+// StandingsView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct StandingsView: View {
     @Environment(AppModel.self) private var appModel
 
@@ -49,25 +54,45 @@ struct StandingsView: View {
                 DataStatusBannerView(message: debugMessage)
             }
 #endif
-            if appModel.standingsSnapshots.isEmpty {
+            switch standingsContentState {
+            case .loading:
+                ProgressView("순위 데이터를 불러오는 중")
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            case .empty:
                 EmptyStateView(
                     systemImage: "list.number",
                     title: "정규시즌 순위 데이터 없음",
                     message: "현재 데이터에서 시범경기를 제외한 정규시즌 종료 경기를 찾지 못했습니다."
                 )
-            } else {
-                standingsTable
+            case let .table(rows, revision, favoriteTeamID):
+                standingsTable(
+                    rows: rows,
+                    revision: revision,
+                    favoriteTeamID: favoriteTeamID
+                )
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
 
-    private var standingsTable: some View {
-        let rows = appModel.standingsSnapshots
-        let rowsRevision = appModel.standingsRowsRevision
+    private var standingsContentState: StandingsContentState {
+        StandingsContentState.make(
+            rows: appModel.standingsSnapshots,
+            isLoading: appModel.isLoading && appModel.games.isEmpty,
+            revision: appModel.standingsRowsRevision,
+            favoriteTeamID: appModel.settings.favoriteTeamID
+        )
+    }
+
+    // standingsTable 메서드는 이 타입의 주요 동작을 수행합니다.
+    private func standingsTable(
+        rows: [TeamStandingsSnapshot],
+        revision: Int,
+        favoriteTeamID: String?
+    ) -> some View {
 #if DEBUG
-        let _ = Self.logVisibleRows(rows, revision: rowsRevision)
+        let _ = Self.logVisibleRows(rows, revision: revision)
 #endif
 
         return GeometryReader { proxy in
@@ -82,19 +107,20 @@ struct StandingsView: View {
                         StandingsRowView(
                             snapshot: snapshot,
                             leaderSnapshot: leaderSnapshot,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
+                            favoriteTeamID: favoriteTeamID,
                             metrics: metrics
                         )
                         .id(StandingsRowRenderIdentity(snapshot: snapshot))
                     }
                 }
             }
-            .id(rowsRevision)
+            .id(revision)
         }
         .frame(height: CGFloat(rows.count) * 57 + 18)
     }
 
 #if DEBUG
+    // logVisibleRows 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func logVisibleRows(_ rows: [TeamStandingsSnapshot], revision: Int) {
         let movementCount = rows.filter { $0.rankMovement != .unchanged }.count
         print("[StandingsRankMovement] visible rows source count=\(rows.count) movementCount=\(movementCount) revision=\(revision)")
@@ -102,50 +128,7 @@ struct StandingsView: View {
 #endif
 }
 
-private struct StandingsTableMetrics {
-    let width: CGFloat
-    let isCompact: Bool
-    let isNarrow: Bool
-
-    init(width: CGFloat) {
-        self.width = width
-        isCompact = width < 370
-        isNarrow = width < 350
-    }
-
-    var rowHeight: CGFloat { isCompact ? 48 : 52 }
-    var horizontalPadding: CGFloat { isNarrow ? 4 : (isCompact ? 5 : 6) }
-    var spacing: CGFloat { isNarrow ? 2 : (isCompact ? 3 : 4) }
-    var rankMovementWidth: CGFloat { isNarrow ? 36 : (isCompact ? 40 : 42) }
-    var rankWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
-    var movementWidth: CGFloat { isNarrow ? 18 : (isCompact ? 19 : 20) }
-    var logoSize: CGFloat { isNarrow ? 18 : (isCompact ? 20 : 22) }
-    var gamesWidth: CGFloat { isNarrow ? 21 : (isCompact ? 22 : 24) }
-    var countWidth: CGFloat { isNarrow ? 17 : (isCompact ? 18 : 19) }
-    var percentageWidth: CGFloat { isNarrow ? 35 : (isCompact ? 37 : 39) }
-    var gamesBehindWidth: CGFloat { isNarrow ? 29 : (isCompact ? 31 : 33) }
-    var streakWidth: CGFloat { isNarrow ? 56 : 58 }
-    var accentWidth: CGFloat { isCompact ? 78 : 120 }
-
-    var teamColumnWidth: CGFloat {
-        let maximumTeamWidth: CGFloat = isNarrow ? 64 : (isCompact ? 72 : 82)
-        let minimumTeamWidth: CGFloat = isNarrow ? 50 : (isCompact ? 58 : 64)
-        let remainingWidth = width - nonTeamColumnsWidth
-        return min(max(remainingWidth, minimumTeamWidth), maximumTeamWidth)
-    }
-
-    private var nonTeamColumnsWidth: CGFloat {
-        rankMovementWidth +
-            gamesWidth +
-            countWidth * 3 +
-            percentageWidth +
-            gamesBehindWidth +
-            streakWidth +
-            spacing * 8 +
-            horizontalPadding * 2
-    }
-}
-
+// StandingsTableHeader 구조체는 StandingsTableHeader 타입의 역할과 값을 정의합니다.
 private struct StandingsTableHeader: View {
     @Environment(AppModel.self) private var appModel
 
@@ -171,6 +154,7 @@ private struct StandingsTableHeader: View {
         .frame(height: 18)
     }
 
+    // headerLabel 메서드는 이 타입의 주요 동작을 수행합니다.
     private func headerLabel(_ title: String, width: CGFloat) -> some View {
         Text(title)
             .lineLimit(1)
@@ -179,6 +163,7 @@ private struct StandingsTableHeader: View {
     }
 }
 
+// StandingsRowView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct StandingsRowView: View {
     let snapshot: TeamStandingsSnapshot
     let leaderSnapshot: TeamStandingsSnapshot?
@@ -192,7 +177,7 @@ private struct StandingsRowView: View {
         ZStack(alignment: .leading) {
             rowBackground
 
-            TeamLogoAccentView(
+            TeamAccentView(
                 identity: identity,
                 isFavorite: isFavorite,
                 width: metrics.accentWidth
@@ -227,6 +212,9 @@ private struct StandingsRowView: View {
                 .font(isFavorite ? Font.subheadline.weight(.black) : Font.subheadline.weight(.heavy))
                 .monospacedDigit()
                 .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.94))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
                 .frame(width: metrics.rankWidth, alignment: .trailing)
 
             Text(rankMovement.displayText)
@@ -235,16 +223,14 @@ private struct StandingsRowView: View {
                 .foregroundStyle(rankMovementColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
+                .allowsTightening(true)
                 .frame(width: metrics.movementWidth, alignment: .trailing)
         }
         .frame(width: metrics.rankMovementWidth, alignment: .trailing)
     }
 
     private var teamCell: some View {
-        HStack(spacing: metrics.isCompact ? 4 : 6) {
-            TeamMarkView(team: snapshot.team, size: metrics.logoSize)
-                .shadow(color: Color.black.opacity(0.16), radius: 4, y: 2)
-
+        HStack(spacing: 0) {
             Text(teamName)
                 .font(.system(size: 15, weight: isFavorite ? .black : .bold, design: .default))
                 .foregroundStyle(Color.white.opacity(isFavorite ? 1 : 0.96))
@@ -317,6 +303,7 @@ private struct StandingsRowView: View {
     }
 
 #if DEBUG
+    // logRender 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logRender() {
         let preGameRankText = snapshot.preGameRank.map(String.init) ?? "<nil>"
         print("[StandingsRankMovement] row render teamId=\(snapshot.team.id) rank=\(snapshot.rank) preGameRank=\(preGameRankText) movement displayText=\(rankMovement.displayText)")
@@ -324,6 +311,7 @@ private struct StandingsRowView: View {
 #endif
 }
 
+// StandingsColumnValue 구조체는 StandingsColumnValue 타입의 역할과 값을 정의합니다.
 private struct StandingsColumnValue: View {
     let value: String
     let width: CGFloat
@@ -341,97 +329,24 @@ private struct StandingsColumnValue: View {
     }
 }
 
-private struct TeamLogoAccentView: View {
+// TeamAccentView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
+private struct TeamAccentView: View {
     let identity: TeamIdentity
     let isFavorite: Bool
     let width: CGFloat
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            LinearGradient(
-                colors: [
-                    identity.theme.accent.opacity(isFavorite ? 0.12 : 0.86),
-                    identity.theme.accent.opacity(isFavorite ? 0.08 : 0.36),
-                    Color.clear
-                ],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-
-            if identity.hasLogoAsset {
-                Image(identity.logoAssetName)
-                    .resizable()
-                    .scaledToFit()
-                    .opacity(isFavorite ? 0.18 : 0.14)
-                    .frame(width: width * 0.78, height: 58)
-                    .offset(x: -14)
-            } else {
-                Text(identity.monogram)
-                    .font(.system(size: 28, weight: .black, design: .rounded))
-                    .foregroundStyle(Color.white.opacity(isFavorite ? 0.14 : 0.10))
-                    .offset(x: 8)
-            }
-        }
+        LinearGradient(
+            colors: [
+                identity.theme.accent.opacity(isFavorite ? 0.12 : 0.86),
+                identity.theme.accent.opacity(isFavorite ? 0.08 : 0.36),
+                Color.clear
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
         .frame(width: width)
         .clipped()
-    }
-}
-
-private extension TeamIdentity {
-    var standingsDisplayName: String {
-        switch id {
-        case "lg":
-            "LG"
-        case "kt":
-            "KT"
-        case "ssg":
-            "SSG"
-        case "samsung":
-            "삼성"
-        case "kia":
-            "KIA"
-        case "hanwha":
-            "한화"
-        case "nc":
-            "NC"
-        case "doosan":
-            "두산"
-        case "lotte":
-            "롯데"
-        case "kiwoom":
-            "키움"
-        default:
-            shortLabel
-        }
-    }
-}
-
-private extension TeamStandingsSnapshot {
-    var broadcastWinPercentageText: String {
-        if winPercentageText.hasPrefix("0.") {
-            return String(winPercentageText.dropFirst())
-        }
-        return winPercentageText
-    }
-
-    func gamesBehindText(leader: TeamStandingsSnapshot?) -> String {
-        if let precomputedGamesBehind {
-            guard precomputedGamesBehind > 0 else { return "-" }
-            if precomputedGamesBehind.rounded(.towardZero) == precomputedGamesBehind {
-                return String(format: "%.0f", precomputedGamesBehind)
-            }
-            return String(format: "%.1f", precomputedGamesBehind)
-        }
-        guard let leader else { return "-" }
-        guard rank != leader.rank else { return "-" }
-
-        let gamesBehind = Double((leader.wins - wins) + (losses - leader.losses)) / 2
-        guard gamesBehind > 0 else { return "-" }
-
-        if gamesBehind.rounded(.towardZero) == gamesBehind {
-            return String(format: "%.0f", gamesBehind)
-        }
-        return String(format: "%.1f", gamesBehind)
     }
 }
 

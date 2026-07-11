@@ -1,20 +1,28 @@
 //
 //  MockKBORepository.swift
 //  kboScore
+//  기능 설명: 개발과 테스트에서 사용할 목 KBO 데이터 저장소를 제공합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import Foundation
 
+// MockKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct MockKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Sendable {
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init() {}
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         try await Task.sleep(for: .milliseconds(120))
         return KBODataMapper.mapBootstrap(MockKBOData.makeBootstrapDTO())
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         try await Task.sleep(for: .milliseconds(120))
         let payload = MockKBOData.makeBootstrapDTO()
@@ -24,11 +32,13 @@ struct MockKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Send
         return KBODataMapper.mapGames(payload.games, teams: teams)
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         try await Task.sleep(for: .milliseconds(120))
         return KBODataMapper.mapNotifications(MockKBOData.makeBootstrapDTO().notifications)
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         try await Task.sleep(for: .milliseconds(120))
         let calendar = Calendar(identifier: .gregorian)
@@ -40,6 +50,7 @@ struct MockKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Send
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchFavoriteTeamSchedule(
         date: Date,
         favoriteTeamId: Team.ID,
@@ -58,6 +69,7 @@ struct MockKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Send
     }
 }
 
+// BundledJSONKBORepository 구조체는 KBO 데이터 조회와 저장소 접근 흐름을 담당합니다.
 struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSource, Sendable {
     private let bundle: Bundle
     private let resourceName: String
@@ -67,6 +79,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
     private let runtimeSource: RepositoryDataSourceKind
     private let runtimeDelivery: RepositoryDeliverySourceKind
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
         bundle: Bundle = .main,
         resourceName: String = "LocalBootstrapData",
@@ -85,6 +98,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         self.runtimeDelivery = runtimeDelivery
     }
 
+    // fetchBootstrapData 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchBootstrapData() async throws -> KBOBootstrapData {
         let bootstrap = try await loadBootstrap()
 #if DEBUG
@@ -96,14 +110,17 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         return bootstrap
     }
 
+    // fetchGames 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchGames() async throws -> [GameDetail] {
         (try await loadBootstrap()).games
     }
 
+    // fetchNotifications 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchNotifications() async throws -> [NotificationItem] {
         (try await loadBootstrap()).notifications
     }
 
+    // fetchMonthlySchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchMonthlySchedule(for month: KBOMonthScheduleKey) async throws -> [GameDetail] {
         let calendar = Calendar(identifier: .gregorian)
         return (try await loadBootstrap()).games
@@ -114,6 +131,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
             .sorted { $0.scheduledStart < $1.scheduledStart }
     }
 
+    // fetchFavoriteTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated func fetchFavoriteTeamSchedule(
         date: Date,
         favoriteTeamId: Team.ID,
@@ -131,6 +149,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
             }
     }
 
+    // loadBootstrap 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func loadBootstrap() async throws -> KBOBootstrapData {
         if let documentsURL = documentsFileURL, FileManager.default.fileExists(atPath: documentsURL.path) {
             do {
@@ -193,6 +212,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
 #endif
     }
 
+    // bundledFileURL 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private func bundledFileURL() throws -> URL {
 #if DEBUG
         print("[BundledJSONKBORepository] Looking up \(resourceName).json in bundle: \(bundle.bundlePath)")
@@ -209,6 +229,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         return url
     }
 
+    // loadBootstrap 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     nonisolated private func loadBootstrap(
         from url: URL,
         source: LocalBootstrapSourceKind
@@ -251,6 +272,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         }
     }
 
+    // localBootstrapFileURL 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func localBootstrapFileURL(
         resourceName: String = "LocalBootstrapData",
         documentsDirectoryURL: URL? = nil,
@@ -260,6 +282,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         return baseDirectory?.appendingPathComponent("\(resourceName).json", isDirectory: false)
     }
 
+    // decodeBootstrapData 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func decodeBootstrapData(from data: Data) throws -> KBOBootstrapData {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -273,7 +296,9 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         return normalizeBundledSeasonClassification(in: KBODataMapper.mapBootstrap(payload))
     }
 
+    // describe 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated private static func describe(decodingError: DecodingError) -> String {
+        // codingPathText 메서드는 이 타입의 주요 동작을 수행합니다.
         func codingPathText(_ path: [CodingKey]) -> String {
             let joined = path.map(\.stringValue).joined(separator: ".")
             return joined.isEmpty ? "<root>" : joined
@@ -293,6 +318,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         }
     }
 
+    // normalizeBundledSeasonClassification 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func normalizeBundledSeasonClassification(
         in bootstrap: KBOBootstrapData
     ) -> KBOBootstrapData {
@@ -304,6 +330,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         )
     }
 
+    // normalizeBundledGame 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     nonisolated static func normalizeBundledGame(_ game: GameDetail) -> GameDetail {
         guard game.seasonClassification == .unknown else {
             return game
@@ -338,6 +365,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
         )
     }
 
+    // bundledSeasonClassification 메서드는 이 타입의 주요 동작을 수행합니다.
     nonisolated static func bundledSeasonClassification(from note: String?) -> GameSeasonClassification? {
         guard let normalizedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               normalizedNote.isEmpty == false else {
@@ -379,6 +407,7 @@ struct BundledJSONKBORepository: KBORepository, KBOFavoriteTeamScheduleDataSourc
     }
 }
 
+// BundledJSONRepositoryError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 enum BundledJSONRepositoryError: LocalizedError {
     case missingResource(name: String)
 
@@ -390,9 +419,11 @@ enum BundledJSONRepositoryError: LocalizedError {
     }
 }
 
+// MockKBOData 열거형는 MockKBOData 타입의 역할과 값을 정의합니다.
 enum MockKBOData: Sendable {
     private nonisolated static let sampleTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
 
+    // makeBootstrap 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated static func makeBootstrap(now: Date = .now) -> KBOBootstrapData {
         KBODataMapper.mapBootstrap(makeBootstrapDTO(now: now))
     }
@@ -400,6 +431,7 @@ enum MockKBOData: Sendable {
     // Real fixture baseline:
     // 2026 KBO preseason schedule/results from the official KBO daily schedule on 2026-03-22 to 2026-03-24.
     // Synthetic edge fixtures remain only for live and rain-delay states because no captured preseason payload exists in-project.
+    // makeBootstrapDTO 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     nonisolated static func makeBootstrapDTO(now: Date = .now) -> KBOBootstrapDTO {
         let teams = [
             KBOTeamDTO(id: "lg", name: "LG 트윈스", shortName: "LG", englishName: "LG Twins", markText: "LG"),
@@ -418,11 +450,13 @@ enum MockKBOData: Sendable {
         calendar.timeZone = sampleTimeZone
         let today = calendar.startOfDay(for: now)
 
+        // date 메서드는 이 타입의 주요 동작을 수행합니다.
         func date(dayOffset: Int, hour: Int, minute: Int) -> Date {
             let baseDay = calendar.date(byAdding: .day, value: dayOffset, to: today) ?? today
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: baseDay) ?? baseDay
         }
 
+        // relative 메서드는 이 타입의 주요 동작을 수행합니다.
         func relative(minutesAgo: Int) -> Date {
             calendar.date(byAdding: .minute, value: -minutesAgo, to: now) ?? now
         }

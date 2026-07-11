@@ -1,13 +1,17 @@
 //
 //  TeamBrand.swift
 //  kboScore
+//  기능 설명: 팀별 색상, 이미지, 경기장 팔레트 등 브랜드 정보를 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
 import SwiftUI
-import UIKit
 
+// TeamThemeMode 열거형는 TeamThemeMode 타입의 역할과 값을 정의합니다.
 enum TeamThemeMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case systemDefault = "시스템 기본"
     case favoriteTeam = "마이팀 테마 사용"
@@ -15,6 +19,7 @@ enum TeamThemeMode: String, CaseIterable, Identifiable, Codable, Sendable {
     var id: String { rawValue }
 }
 
+// TeamThemeID 열거형는 TeamThemeID 타입의 역할과 값을 정의합니다.
 enum TeamThemeID: String, Codable, Sendable {
     case doosan
     case hanwha
@@ -29,11 +34,7 @@ enum TeamThemeID: String, Codable, Sendable {
     case neutral
 }
 
-enum TeamImageAssetStyle: Equatable, Sendable {
-    case officialLogoPreferred
-    case mascotPreferred
-}
-
+// TeamTheme 구조체는 TeamTheme 타입의 역할과 값을 정의합니다.
 struct TeamTheme: Sendable {
     let id: TeamThemeID
     let accent: Color
@@ -59,67 +60,62 @@ struct TeamTheme: Sendable {
         shadowTint: Color(hex: 0x1C47AB).opacity(0.12)
     )
 
+    // resolve 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     nonisolated static func resolve(for teamID: String?) -> TeamTheme {
         guard let identity = TeamIdentity.catalog[teamID ?? ""] else { return .neutral }
         return identity.theme
     }
 }
 
+// TeamIdentity 구조체는 TeamIdentity 타입의 역할과 값을 정의합니다.
 struct TeamIdentity: Sendable {
     let id: String
     let displayName: String
     let shortLabel: String
     let monogram: String
-    let logoAssetName: String
-    let mascotAssetName: String?
+    let homeHeroWatermarkLabel: String
     let themeID: TeamThemeID
     let theme: TeamTheme
-
-    var hasLogoAsset: Bool {
-        UIImage(named: logoAssetName) != nil
-    }
 
     nonisolated static let catalog: [String: TeamIdentity] = [
         "doosan": TeamIdentity(
             id: "doosan",
             displayName: "두산 베어스",
             shortLabel: "두산",
-            monogram: "DOO",
-            logoAssetName: "team-doosan",
-            mascotAssetName: "doosan_mascot_bear",
+            monogram: "두산",
+            homeHeroWatermarkLabel: "Bears",
             themeID: .doosan,
             theme: TeamTheme(
                 id: .doosan,
-                accent: Color(hex: 0xF7262A),
-                accentSecondary: Color(hex: 0xFFB4AB),
-                heroStart: Color(hex: 0x11102E),
-                heroEnd: Color(hex: 0xF7262A),
-                chipBackground: Color(hex: 0xF7262A).opacity(0.12),
-                badgeBackground: Color(hex: 0x191836),
-                badgeForeground: Color(hex: 0xFFB4AB),
-                scoreboardBackground: Color(hex: 0x1D1C3A),
-                shadowTint: Color(hex: 0x11102E).opacity(0.24)
+                accent: Color(hex: 0x1A1D29),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0x12305C),
+                heroEnd: Color(hex: 0x1A1D29),
+                chipBackground: Color(hex: 0x1A1D29).opacity(0.12),
+                badgeBackground: Color(hex: 0x12305C),
+                badgeForeground: Color(hex: 0xFDFCF8),
+                scoreboardBackground: Color(hex: 0x263247),
+                shadowTint: Color(hex: 0x1A1D29).opacity(0.22)
             )
         ),
         "hanwha": TeamIdentity(
             id: "hanwha",
             displayName: "한화 이글스",
             shortLabel: "한화",
-            monogram: "HAN",
-            logoAssetName: "team-hanwha",
-            mascotAssetName: "hanwha_mascot_eagle",
+            monogram: "한화",
+            homeHeroWatermarkLabel: "Eagles",
             themeID: .hanwha,
             theme: TeamTheme(
                 id: .hanwha,
-                accent: Color(hex: 0xFF7936),
-                accentSecondary: Color(hex: 0xFF915D),
+                accent: Color(hex: 0xEF5F18),
+                accentSecondary: Color(hex: 0xFDFCF8),
                 heroStart: Color(hex: 0x0E0E0E),
-                heroEnd: Color(hex: 0xFF7936),
-                chipBackground: Color(hex: 0xFF7936).opacity(0.14),
+                heroEnd: Color(hex: 0xEF5F18),
+                chipBackground: Color(hex: 0xEF5F18).opacity(0.14),
                 badgeBackground: Color(hex: 0x191919),
-                badgeForeground: Color(hex: 0xFFF3EB),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color(hex: 0x1F1F1F),
-                shadowTint: Color(hex: 0xFF7936).opacity(0.14)
+                shadowTint: Color(hex: 0xEF5F18).opacity(0.14)
             )
         ),
         "kia": TeamIdentity(
@@ -127,41 +123,39 @@ struct TeamIdentity: Sendable {
             displayName: "KIA 타이거즈",
             shortLabel: "기아",
             monogram: "KIA",
-            logoAssetName: "team-kia",
-            mascotAssetName: "kia_mascot_tiger",
+            homeHeroWatermarkLabel: "Tigers",
             themeID: .kia,
             theme: TeamTheme(
                 id: .kia,
-                accent: Color(hex: 0xE51937),
-                accentSecondary: Color(hex: 0x76D4E4),
+                accent: Color(hex: 0xD81F25),
+                accentSecondary: Color(hex: 0xD81F25),
                 heroStart: Color(hex: 0x061520),
-                heroEnd: Color(hex: 0xE51937),
-                chipBackground: Color(hex: 0xE51937).opacity(0.12),
+                heroEnd: Color(hex: 0xD81F25),
+                chipBackground: Color(hex: 0xD81F25).opacity(0.12),
                 badgeBackground: Color(hex: 0x10202D),
-                badgeForeground: Color(hex: 0xD5E4F4),
+                badgeForeground: Color(hex: 0xD81F25),
                 scoreboardBackground: Color(hex: 0x132633),
-                shadowTint: Color(hex: 0xD5E4F4).opacity(0.10)
+                shadowTint: Color(hex: 0xD81F25).opacity(0.10)
             )
         ),
         "kiwoom": TeamIdentity(
             id: "kiwoom",
             displayName: "키움 히어로즈",
             shortLabel: "키움",
-            monogram: "KIW",
-            logoAssetName: "team-kiwoom",
-            mascotAssetName: "kiwoom_mascot_hero",
+            monogram: "키움",
+            homeHeroWatermarkLabel: "Heroes",
             themeID: .kiwoom,
             theme: TeamTheme(
                 id: .kiwoom,
-                accent: Color(hex: 0xE3007E),
-                accentSecondary: Color(hex: 0x570514),
+                accent: Color(hex: 0x8E0320),
+                accentSecondary: Color(hex: 0x5C3A21),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0x570514),
-                chipBackground: Color(hex: 0xE3007E).opacity(0.12),
+                heroEnd: Color(hex: 0x8E0320),
+                chipBackground: Color(hex: 0x8E0320).opacity(0.12),
                 badgeBackground: Color(hex: 0x1C1B1B),
-                badgeForeground: Color(hex: 0xF6D0E7),
+                badgeForeground: Color(hex: 0x5C3A21),
                 scoreboardBackground: Color(hex: 0x2A2A2A),
-                shadowTint: Color(hex: 0x570514).opacity(0.20)
+                shadowTint: Color(hex: 0x8E0320).opacity(0.20)
             )
         ),
         "kt": TeamIdentity(
@@ -169,18 +163,17 @@ struct TeamIdentity: Sendable {
             displayName: "KT 위즈",
             shortLabel: "KT",
             monogram: "KT",
-            logoAssetName: "team-kt",
-            mascotAssetName: "kt_mascot_wizard",
+            homeHeroWatermarkLabel: "Wiz",
             themeID: .kt,
             theme: TeamTheme(
                 id: .kt,
-                accent: Color(hex: 0xEC1C24),
-                accentSecondary: Color(hex: 0xBEC8CE),
+                accent: Color(hex: 0x0A0A0A),
+                accentSecondary: Color(hex: 0xFDFCF8),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0xEC1C24),
-                chipBackground: Color(hex: 0xEC1C24).opacity(0.12),
+                heroEnd: Color(hex: 0x0A0A0A),
+                chipBackground: Color(hex: 0x0A0A0A).opacity(0.12),
                 badgeBackground: Color(hex: 0x201F1F),
-                badgeForeground: Color(hex: 0xE5E2E1),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color(hex: 0x353534),
                 shadowTint: Color.black.opacity(0.18)
             )
@@ -190,18 +183,17 @@ struct TeamIdentity: Sendable {
             displayName: "LG 트윈스",
             shortLabel: "LG",
             monogram: "LG",
-            logoAssetName: "team-lg",
-            mascotAssetName: "lg_mascot_twins",
+            homeHeroWatermarkLabel: "Twins",
             themeID: .lg,
             theme: TeamTheme(
                 id: .lg,
-                accent: Color(hex: 0xA50034),
-                accentSecondary: Color(hex: 0xC6C6C6),
+                accent: Color(hex: 0xC3042F),
+                accentSecondary: Color(hex: 0x161616),
                 heroStart: Color(hex: 0x131313),
-                heroEnd: Color(hex: 0xA50034),
-                chipBackground: Color(hex: 0xA50034).opacity(0.12),
+                heroEnd: Color(hex: 0x161616),
+                chipBackground: Color(hex: 0x161616).opacity(0.12),
                 badgeBackground: Color(hex: 0x1C1B1B),
-                badgeForeground: Color(hex: 0xF4ECEE),
+                badgeForeground: Color(hex: 0xC3042F),
                 scoreboardBackground: Color(hex: 0x2A2A2A),
                 shadowTint: Color.black.opacity(0.18)
             )
@@ -210,21 +202,20 @@ struct TeamIdentity: Sendable {
             id: "lotte",
             displayName: "롯데 자이언츠",
             shortLabel: "롯데",
-            monogram: "LOT",
-            logoAssetName: "team-lotte",
-            mascotAssetName: "lotte_mascot_seagull",
+            monogram: "롯데",
+            homeHeroWatermarkLabel: "Giants",
             themeID: .lotte,
             theme: TeamTheme(
                 id: .lotte,
-                accent: Color(hex: 0xD11B2E),
-                accentSecondary: Color(hex: 0x001B3C),
-                heroStart: Color(hex: 0x001B3C),
-                heroEnd: Color(hex: 0xD11B2E),
-                chipBackground: Color(hex: 0xD11B2E).opacity(0.12),
+                accent: Color(hex: 0x002F6C),
+                accentSecondary: Color(hex: 0xE60033),
+                heroStart: Color(hex: 0xE60033),
+                heroEnd: Color(hex: 0x002F6C),
+                chipBackground: Color(hex: 0x002F6C).opacity(0.12),
                 badgeBackground: Color(hex: 0xF7F9FC),
-                badgeForeground: Color(hex: 0x001B3C),
+                badgeForeground: Color(hex: 0xE60033),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x001B3C).opacity(0.12)
+                shadowTint: Color(hex: 0x002F6C).opacity(0.12)
             )
         ),
         "nc": TeamIdentity(
@@ -232,41 +223,39 @@ struct TeamIdentity: Sendable {
             displayName: "NC 다이노스",
             shortLabel: "NC",
             monogram: "NC",
-            logoAssetName: "team-nc",
-            mascotAssetName: "nc_mascot_dino",
+            homeHeroWatermarkLabel: "Dinos",
             themeID: .nc,
             theme: TeamTheme(
                 id: .nc,
-                accent: Color(hex: 0x00275D),
-                accentSecondary: Color(hex: 0xE3C191),
+                accent: Color(hex: 0x191970),
+                accentSecondary: Color(hex: 0xC7A079),
                 heroStart: Color(hex: 0x0F141B),
-                heroEnd: Color(hex: 0x00275D),
-                chipBackground: Color(hex: 0xE3C191).opacity(0.16),
+                heroEnd: Color(hex: 0x191970),
+                chipBackground: Color(hex: 0x191970).opacity(0.16),
                 badgeBackground: Color(hex: 0x1B2027),
-                badgeForeground: Color(hex: 0xF4E7D5),
+                badgeForeground: Color(hex: 0xC7A079),
                 scoreboardBackground: Color(hex: 0x30353D),
-                shadowTint: Color(hex: 0x00275D).opacity(0.20)
+                shadowTint: Color(hex: 0x191970).opacity(0.20)
             )
         ),
         "samsung": TeamIdentity(
             id: "samsung",
             displayName: "삼성 라이온즈",
             shortLabel: "삼성",
-            monogram: "SAM",
-            logoAssetName: "team-samsung",
-            mascotAssetName: "samsung_mascot_lion",
+            monogram: "삼성",
+            homeHeroWatermarkLabel: "Lions",
             themeID: .samsung,
             theme: TeamTheme(
                 id: .samsung,
-                accent: Color(hex: 0x0066B3),
-                accentSecondary: Color(hex: 0xC6C6C6),
-                heroStart: Color(hex: 0xF7F9FF),
-                heroEnd: Color(hex: 0x0066B3),
-                chipBackground: Color(hex: 0x0066B3).opacity(0.12),
+                accent: Color(hex: 0x0047AB),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0xFDFCF8),
+                heroEnd: Color(hex: 0x0047AB),
+                chipBackground: Color(hex: 0x0047AB).opacity(0.12),
                 badgeBackground: Color(hex: 0xECEEF3),
-                badgeForeground: Color(hex: 0x004E8B),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x004E8B).opacity(0.12)
+                shadowTint: Color(hex: 0x0047AB).opacity(0.12)
             )
         ),
         "ssg": TeamIdentity(
@@ -274,61 +263,22 @@ struct TeamIdentity: Sendable {
             displayName: "SSG 랜더스",
             shortLabel: "SSG",
             monogram: "SSG",
-            logoAssetName: "team-ssg",
-            mascotAssetName: "ssg_mascot_dog",
+            homeHeroWatermarkLabel: "Landers",
             themeID: .ssg,
             theme: TeamTheme(
                 id: .ssg,
-                accent: Color(hex: 0xCE0E2D),
-                accentSecondary: Color(hex: 0xA0A0A0),
-                heroStart: Color(hex: 0xF9F9F9),
-                heroEnd: Color(hex: 0xCE0E2D),
-                chipBackground: Color(hex: 0xCE0E2D).opacity(0.12),
+                accent: Color(hex: 0xB80F0A),
+                accentSecondary: Color(hex: 0xFDFCF8),
+                heroStart: Color(hex: 0xFDFCF8),
+                heroEnd: Color(hex: 0xB80F0A),
+                chipBackground: Color(hex: 0xB80F0A).opacity(0.12),
                 badgeBackground: Color(hex: 0xF3F3F3),
-                badgeForeground: Color(hex: 0xA3001F),
+                badgeForeground: Color(hex: 0xFDFCF8),
                 scoreboardBackground: Color.white,
-                shadowTint: Color(hex: 0x410006).opacity(0.12)
+                shadowTint: Color(hex: 0xB80F0A).opacity(0.12)
             )
         )
     ]
-}
-
-enum TeamLogoAssetResolver {
-    static func mascotAssetName(for teamIdentifier: String?) -> String? {
-        guard let canonicalTeamID = Team.canonicalID(for: teamIdentifier) else { return nil }
-        return TeamIdentity.catalog[canonicalTeamID]?.mascotAssetName
-    }
-
-    static func preferredAssetName(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
-        switch style {
-        case .officialLogoPreferred:
-            return identity.logoAssetName
-        case .mascotPreferred:
-            if let mascotAssetName = identity.mascotAssetName,
-               UIImage(named: mascotAssetName) != nil {
-                return mascotAssetName
-            }
-            return identity.logoAssetName
-        }
-    }
-
-    static func hasPreferredAsset(for identity: TeamIdentity, style: TeamImageAssetStyle) -> Bool {
-        UIImage(named: preferredAssetName(for: identity, style: style)) != nil
-    }
-
-    static func accessibilityLabel(for identity: TeamIdentity, style: TeamImageAssetStyle) -> String {
-        if style == .mascotPreferred,
-           let mascotAssetName = identity.mascotAssetName,
-           UIImage(named: mascotAssetName) != nil {
-            return "\(identity.displayName) mascot"
-        }
-
-        if UIImage(named: identity.logoAssetName) != nil {
-            return "\(identity.displayName) logo"
-        }
-
-        return identity.displayName
-    }
 }
 
 extension Team {
@@ -338,8 +288,7 @@ extension Team {
             displayName: name,
             shortLabel: shortName,
             monogram: markText,
-            logoAssetName: "team-\(id)",
-            mascotAssetName: nil,
+            homeHeroWatermarkLabel: shortName,
             themeID: .neutral,
             theme: .neutral
         )
@@ -347,6 +296,7 @@ extension Team {
 }
 
 private extension Color {
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(hex: UInt32, alpha: Double = 1) {
         self.init(
             .sRGB,

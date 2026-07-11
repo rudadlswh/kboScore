@@ -1,23 +1,31 @@
 //
 //  OfficialGameEntryBaseRunnerMapper.swift
 //  kboScore
+//  기능 설명: KBO 공식 경기 항목에서 주자 상태를 앱 모델로 변환합니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 5/14/26.
 //
 
 import Foundation
 
+// BattingLineGroup 구조체는 BattingLineGroup 타입의 역할과 값을 정의합니다.
 private struct BattingLineGroup {
     let label: String
     let lines: [GameCenterBattingLine]
 }
 
+// OfficialBaseRunnerOffenseSide 열거형는 OfficialBaseRunnerOffenseSide 타입의 역할과 값을 정의합니다.
 enum OfficialBaseRunnerOffenseSide: Equatable, Sendable {
     case away
     case home
 }
 
+// OfficialBaseRunnerLineupResolver 열거형는 입력 상태를 해석해 필요한 결과 값을 결정합니다.
 enum OfficialBaseRunnerLineupResolver {
+    // normalizedBattingOrderNumber 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     static func normalizedBattingOrderNumber(_ value: String?) -> Int? {
         guard let value else { return nil }
         let digits = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -26,6 +34,7 @@ enum OfficialBaseRunnerLineupResolver {
         return Int(String(digits))
     }
 
+    // offenseSide 메서드는 이 타입의 주요 동작을 수행합니다.
     static func offenseSide(inningHalfText: String?) -> OfficialBaseRunnerOffenseSide? {
         let normalizedHalf = inningHalfText?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedHalf?.contains("초") == true || normalizedHalf?.contains("top") == true {
@@ -37,6 +46,7 @@ enum OfficialBaseRunnerLineupResolver {
         return nil
     }
 
+    // baseRunners 메서드는 이 타입의 주요 동작을 수행합니다.
     static func baseRunners(
         firstOrder: Int?,
         secondOrder: Int?,
@@ -70,6 +80,7 @@ enum OfficialBaseRunnerLineupResolver {
         return GameCenterBaseRunners(first: first, second: second, third: third)
     }
 
+    // battingLineGroups 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func battingLineGroups(
         for inningHalfText: String?,
         battingSections: [GameCenterBattingSection]
@@ -87,6 +98,7 @@ enum OfficialBaseRunnerLineupResolver {
         }
     }
 
+    // runnerName 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func runnerName(order: Int?, in lineGroups: [BattingLineGroup]) -> String? {
         guard let order, order > 0 else {
             return nil
@@ -110,6 +122,7 @@ enum OfficialBaseRunnerLineupResolver {
 }
 
 extension OfficialGameEntry {
+    // baseRunners 메서드는 이 타입의 주요 동작을 수행합니다.
     func baseRunners(from battingSections: [GameCenterBattingSection]?) -> GameCenterBaseRunners? {
         let occupiedOrders = [firstBaseOccupancy, secondBaseOccupancy, thirdBaseOccupancy]
             .compactMap { $0 }
@@ -155,6 +168,7 @@ extension OfficialGameEntry {
         return GameCenterBaseRunners(first: first, second: second, third: third)
     }
 
+    // battingLineGroupsForCurrentHalf 메서드는 이 타입의 주요 동작을 수행합니다.
     private func battingLineGroupsForCurrentHalf(from battingSections: [GameCenterBattingSection]) -> [BattingLineGroup] {
         if OfficialBaseRunnerLineupResolver.offenseSide(inningHalfText: inningHalfText) == .away {
             return [BattingLineGroup(label: "away", lines: battingSections[0].lines)]
@@ -169,6 +183,7 @@ extension OfficialGameEntry {
         ]
     }
 
+    // runnerName 메서드는 이 타입의 주요 동작을 수행합니다.
     private func runnerName(order: Int?, in lineGroups: [BattingLineGroup], baseLabel: String) -> String? {
         guard let order, order > 0 else {
             return nil

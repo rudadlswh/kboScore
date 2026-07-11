@@ -1,13 +1,19 @@
 //
 //  StandingsRowBuilder.swift
 //  kboScore
+//  기능 설명: 원격 순위 행 데이터를 앱 순위 스냅샷으로 변환합니다.
+//  KBO 순위 산정 규칙과 홈 화면 대체 요약에 필요한 계산을 화면 코드에서 분리합니다.
+//  완료되지 않은 경기, 취소 경기, 동률, 원정/홈 득실 계산이 순위에 잘못 반영되지 않도록 제한합니다.
+//  TODO : 실제 KBO 동률 규정 변경이나 포스트시즌 확률 로직 개선 시 계산 기준을 갱신합니다.
 //
 //  Created by Codex on 5/18/26.
 //
 
 import Foundation
 
+// StandingsRowBuilder 열거형는 화면이나 도메인 모델에 필요한 값을 조립합니다.
 enum StandingsRowBuilder {
+    // makeSnapshots 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func makeSnapshots(
         from rows: [TeamRankRow],
         teams: [Team]
@@ -27,6 +33,7 @@ enum StandingsRowBuilder {
         }
     }
 
+    // team 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func team(for row: TeamRankRow, teams: [Team]) -> Team {
         if let canonicalID = canonicalTeamIdentifier(row.teamCode),
            let team = teams.first(where: { canonicalTeamIdentifier($0.id) == canonicalID }) {
@@ -55,6 +62,7 @@ enum StandingsRowBuilder {
         )
     }
 
+    // recentResults 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func recentResults(for row: TeamRankRow) -> [TeamGameResult] {
         let result: TeamGameResult?
         switch row.streakType.uppercased() {
@@ -71,25 +79,13 @@ enum StandingsRowBuilder {
         return Array(repeating: result, count: max(0, min(row.streakCount, 5)))
     }
 
+    // canonicalTeamIdentifier 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func canonicalTeamIdentifier(_ value: String?) -> String? {
         guard let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               raw.isEmpty == false else {
             return nil
         }
 
-        let lowered = raw.lowercased()
-        if TeamIdentity.catalog[lowered] != nil {
-            return lowered
-        }
-
-        if let matched = TeamIdentity.catalog.first(where: { _, identity in
-            identity.shortLabel.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.monogram.caseInsensitiveCompare(raw) == .orderedSame ||
-            identity.displayName == raw
-        })?.key {
-            return matched
-        }
-
-        return lowered
+        return Team.canonicalID(for: raw) ?? raw.lowercased()
     }
 }

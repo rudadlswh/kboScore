@@ -221,8 +221,6 @@ private struct MyTeamHeaderView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            TeamMarkView(team: team, size: 48)
-
             VStack(alignment: .leading, spacing: 4) {
                 Text("마이팀")
                     .font(.caption.weight(.bold))

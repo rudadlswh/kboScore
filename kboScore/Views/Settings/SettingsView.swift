@@ -6,9 +6,22 @@
 //
 
 import SwiftUI
+import SafariServices
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
+
+    private static let notificationPreferenceRows: [(title: String, keyPath: WritableKeyPath<NotificationPreferences, Bool>)] = [
+        ("경기 시작 알림", \.gameStartEnabled),
+        ("점수 변경 알림", \.scoreChangeEnabled),
+        ("리드 변경 알림", \.leadChangeEnabled),
+        ("경기 종료 알림", \.gameEndEnabled),
+        ("출루 알림", \.onBaseEnabled),
+        ("이닝 교체 알림", \.inningChangeEnabled),
+        ("상대팀 알림 끄기", \.favoriteTeamOnlyEnabled),
+        ("지고 있을 때 알림 끄기", \.muteWhenLosingEnabled),
+        ("우천/취소", \.rainDelay)
+    ]
 
     var body: some View {
         @Bindable var bindableAppModel = appModel
@@ -55,15 +68,7 @@ struct SettingsView: View {
         }
 
         Section("알림 설정") {
-            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
-            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
-            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
-            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
-            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
-            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
-            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
-            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
-            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
+            notificationPreferenceToggles(appModel: appModel)
 
             LabeledContent("권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
 //            LabeledContent("기기 토큰", value: appModel.apnsDeviceToken == nil ? "없음" : "등록됨")
@@ -77,11 +82,12 @@ struct SettingsView: View {
             LabeledContent("조용한 시간", value: bindableAppModel.settings.quietHours.wrappedValue.description)
 
             Toggle("라이브 액티비티", isOn: bindableAppModel.settings.liveActivitiesEnabled)
+            Toggle("경기 시작 시 자동 시작", isOn: bindableAppModel.settings.liveActivityAutoStartEnabled)
         }
 
         Section("정보") {
             InfoRow(title: "데이터 출처", value: "목 데이터 (실 API 연동 예정)")
-            InfoRow(title: "개인정보 처리방침", value: "준비 중")
+            PrivacyPolicyRow(url: privacyPolicyURL)
             InfoRow(title: "앱 버전", value: appVersion)
         }
 
@@ -109,24 +115,7 @@ struct SettingsView: View {
         }
 
         Section {
-            Toggle("경기 시작 알림", isOn: notificationPreferenceBinding(\.gameStartEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("점수 변경 알림", isOn: notificationPreferenceBinding(\.scoreChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("리드 변경 알림", isOn: notificationPreferenceBinding(\.leadChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("경기 종료 알림", isOn: notificationPreferenceBinding(\.gameEndEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("출루 알림", isOn: notificationPreferenceBinding(\.onBaseEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("이닝 교체 알림", isOn: notificationPreferenceBinding(\.inningChangeEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("상대팀 알림 끄기", isOn: notificationPreferenceBinding(\.favoriteTeamOnlyEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("지고 있을 때 알림 끄기", isOn: notificationPreferenceBinding(\.muteWhenLosingEnabled, appModel: appModel))
-                .settingsRowStyle(palette)
-            Toggle("우천/취소", isOn: notificationPreferenceBinding(\.rainDelay, appModel: appModel))
-                .settingsRowStyle(palette)
+            notificationPreferenceToggles(appModel: appModel, palette: palette)
 
             InfoRow(title: "권한 상태", value: appModel.notificationAuthorizationStatus.rawValue)
                 .settingsRowStyle(palette)
@@ -145,6 +134,8 @@ struct SettingsView: View {
 
             Toggle("라이브 액티비티", isOn: bindableAppModel.settings.liveActivitiesEnabled)
                 .settingsRowStyle(palette)
+            Toggle("경기 시작 시 자동 시작", isOn: bindableAppModel.settings.liveActivityAutoStartEnabled)
+                .settingsRowStyle(palette)
         } header: {
             SettingsSectionHeader(
                 title: "알림 설정",
@@ -155,7 +146,7 @@ struct SettingsView: View {
         Section {
             InfoRow(title: "데이터 출처", value: "https://www.koreabaseball.com/")
                 .settingsRowStyle(palette)
-            InfoRow(title: "개인정보 처리방침", value: "준비 중")
+            PrivacyPolicyRow(url: privacyPolicyURL)
                 .settingsRowStyle(palette)
             InfoRow(title: "앱 버전", value: appVersion)
                 .settingsRowStyle(palette)
@@ -172,6 +163,54 @@ struct SettingsView: View {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "\(shortVersion) (\(build))"
+    }
+
+    private var privacyPolicyURL: URL {
+        let candidates = [
+            ProcessInfo.processInfo.environment["KBO_BACKEND_BASE_URL"],
+            Bundle.main.object(forInfoDictionaryKey: "KBOBackendBaseURL") as? String
+        ]
+
+        for candidate in candidates {
+            guard let baseURL = normalizedBackendBaseURL(from: candidate),
+                  let url = URL(string: "privacy", relativeTo: baseURL)?.absoluteURL else {
+                continue
+            }
+            return url
+        }
+
+        return URL(string: "https://kboscore-back.onrender.com/privacy")!
+    }
+
+    private func normalizedBackendBaseURL(from rawValue: String?) -> URL? {
+        guard let rawValue = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              rawValue.isEmpty == false,
+              rawValue.contains("$(") == false,
+              var components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host?.isEmpty == false else {
+            return nil
+        }
+
+        let trimmedPath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = trimmedPath.isEmpty ? "/" : "/\(trimmedPath)/"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    @ViewBuilder
+    private func notificationPreferenceToggles(appModel: AppModel, palette: StadiumPalette? = nil) -> some View {
+        ForEach(Self.notificationPreferenceRows.indices, id: \.self) { index in
+            let row = Self.notificationPreferenceRows[index]
+            if let palette {
+                Toggle(row.title, isOn: notificationPreferenceBinding(row.keyPath, appModel: appModel))
+                    .settingsRowStyle(palette)
+            } else {
+                Toggle(row.title, isOn: notificationPreferenceBinding(row.keyPath, appModel: appModel))
+            }
+        }
     }
 
     private func currentFavoriteTeamDisplayName(appModel: AppModel) -> String {
@@ -270,9 +309,7 @@ private struct DoosanFavoriteTeamSelectionView: View {
             selection = value
         } label: {
             HStack(spacing: 12) {
-                if let team {
-                    TeamMarkView(team: team, size: 36)
-                } else {
+                if team == nil {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(isSelected ? palette.primary : palette.textSecondary)
@@ -347,63 +384,36 @@ private struct InfoRow: View {
     }
 }
 
-private struct DebugRowsView: View {
+private struct PrivacyPolicyRow: View {
     @Environment(AppModel.self) private var appModel
+    let url: URL
 
     var body: some View {
-        Group {
-            InfoRow(title: "활성 데이터", value: appModel.debugActiveDataSource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "표시 데이터", value: appModel.debugDeliverySource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 API", value: appModel.debugBootstrapAPIEnabled)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 ETag", value: appModel.debugBootstrapETag)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 조회", value: appModel.debugBootstrapLastFetchText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 저장", value: appModel.debugBootstrapLastWriteText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "부트스트랩 결과", value: appModel.debugBootstrapLastResult)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "로컬 JSON 소스", value: appModel.debugLocalBootstrapSource)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "문서 JSON 경로", value: appModel.debugLocalBootstrapPath)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "활성 로드 경로", value: appModel.debugLocalBootstrapResolvedPath ?? "아직 읽지 않음")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "로컬 JSON 읽기", value: appModel.debugLocalBootstrapLoadedText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            if let debugLocalBootstrapMessage = appModel.debugLocalBootstrapMessage {
-                InfoRow(title: "로컬 JSON 상태", value: debugLocalBootstrapMessage)
-                    .applyDoosanDebugRowStyleIfNeeded()
+        NavigationLink {
+            PrivacyPolicySafariView(url: url)
+                .ignoresSafeArea()
+                .navigationTitle("개인정보 처리방침")
+                .navigationBarTitleDisplayMode(.inline)
+        } label: {
+            HStack {
+                Text("개인정보 처리방침")
+                    .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                Spacer()
             }
-            InfoRow(title: "기준 URL", value: appModel.debugBaseURL ?? "설정 안 됨")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "마지막 갱신", value: appModel.debugLastRefreshText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "지연 상태", value: appModel.isShowingStaleData ? "지연됨" : "정상")
-                .applyDoosanDebugRowStyleIfNeeded()
-            if let apnsDeviceToken = appModel.apnsDeviceToken {
-                InfoRow(title: "APNs 토큰", value: String(apnsDeviceToken.prefix(16)) + "…")
-                    .applyDoosanDebugRowStyleIfNeeded()
-            }
-            InfoRow(title: "등록 엔드포인트", value: appModel.notificationRegistrationEndpointDescription ?? "설정 안 됨")
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 상태", value: appModel.notificationRegistrationSyncStatus.rawValue)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 시도", value: appModel.notificationRegistrationLastAttemptText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            InfoRow(title: "등록 payload", value: appModel.notificationRegistrationPayloadPreviewText)
-                .applyDoosanDebugRowStyleIfNeeded()
-            Button("테스트 알림 예약") {
-                Task {
-                    await appModel.scheduleDebugNotification()
-                }
-            }
-            .applyDoosanDebugRowStyleIfNeeded()
         }
+        .accessibilityLabel("개인정보 처리방침")
+        .accessibilityHint("개인정보 처리방침 페이지를 엽니다")
     }
+}
+
+private struct PrivacyPolicySafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }
 
 private struct SettingsSectionHeader: View {
@@ -431,22 +441,6 @@ private extension View {
         listRowBackground(palette.sectionBackground)
             .listRowSeparator(.hidden)
             .foregroundStyle(palette.textPrimary)
-    }
-
-    func applyDoosanDebugRowStyleIfNeeded() -> some View {
-        modifier(DoosanDebugRowStyleModifier())
-    }
-}
-
-private struct DoosanDebugRowStyleModifier: ViewModifier {
-    @Environment(AppModel.self) private var appModel
-
-    func body(content: Content) -> some View {
-        if let palette = appModel.favoriteStadiumPalette {
-            content.settingsRowStyle(palette)
-        } else {
-            content
-        }
     }
 }
 

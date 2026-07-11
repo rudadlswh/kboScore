@@ -1,12 +1,17 @@
 //
 //  BrandStyles.swift
 //  kboScore
+//  기능 설명: 팀 브랜드 색상과 경기장 테마 스타일을 SwiftUI에서 사용하도록 정의합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/25/26.
 //
 
 import SwiftUI
 
+// KBOLivePalette 열거형는 KBOLivePalette 타입의 역할과 값을 정의합니다.
 enum KBOLivePalette {
     static let primary = Color(red: 0.11, green: 0.28, blue: 0.67)
     static let secondary = Color(red: 0.29, green: 0.48, blue: 0.91)
@@ -18,10 +23,11 @@ enum KBOLivePalette {
     static let cancellation = Color(red: 0.44, green: 0.48, blue: 0.56)
 }
 
+// DoosanPalette 열거형는 DoosanPalette 타입의 역할과 값을 정의합니다.
 enum DoosanPalette {
-    static let primary = Color(red: 0.9686, green: 0.1490, blue: 0.1647) // #f7262a
-    static let secondary = Color(red: 1.0, green: 0.7059, blue: 0.6706) // #ffb4ab
-    static let statusRed = Color(red: 0.7529, green: 0.0, blue: 0.0784) // #c00014
+    static let primary = Color(hex: 0x1A1D29)
+    static let secondary = Color(hex: 0xFDFCF8)
+    static let statusRed = Color(hex: 0x1A1D29)
 
     static let background = Color(red: 0.0667, green: 0.0627, blue: 0.1804) // #11102e
     static let sectionBackground = Color(red: 0.1137, green: 0.1098, blue: 0.2275) // #1d1c3a
@@ -37,10 +43,11 @@ enum DoosanPalette {
     static let textPrimary = Color.white.opacity(0.96)
     static let textSecondary = Color(red: 0.7843, green: 0.7725, blue: 0.8078) // #c8c5ce
     static let ghostBorder = Color(red: 0.2784, green: 0.2745, blue: 0.3020).opacity(0.15) // #47464d @ 15%
-    static let ambientShadow = Color(red: 0.0431, green: 0.0392, blue: 0.1569).opacity(0.40)
+    static let ambientShadow = Color(hex: 0x1A1D29).opacity(0.40)
     static let weather = Color(red: 0.95, green: 0.72, blue: 0.28)
 }
 
+// StadiumPalette 구조체는 StadiumPalette 타입의 역할과 값을 정의합니다.
 struct StadiumPalette: Sendable {
     let id: String
     let primary: Color
@@ -71,6 +78,7 @@ struct StadiumPalette: Sendable {
         usesLightForegroundStyle ? textPrimary : Color.white.opacity(0.94)
     }
 
+    // tabBarForeground 메서드는 이 타입의 주요 동작을 수행합니다.
     func tabBarForeground(isSelected: Bool) -> Color {
         isSelected ? primary : tabBarForeground
     }
@@ -95,14 +103,14 @@ struct StadiumPalette: Sendable {
         ghostBorder: DoosanPalette.ghostBorder,
         ambientShadow: DoosanPalette.ambientShadow,
         weather: DoosanPalette.weather,
-        winDayFill: Color(red: 0.38, green: 0.78, blue: 1.0).opacity(0.30)
+        winDayFill: Color(hex: 0x1A1D29).opacity(0.30)
     )
 
     static let hanwha = StadiumPalette(
         id: "hanwha",
-        primary: Color(red: 1.0, green: 0.5686, blue: 0.3647), // #ff915d
-        secondary: Color(red: 1.0, green: 0.4745, blue: 0.2118), // #ff7936
-        statusRed: Color(red: 0.9765, green: 0.3922, blue: 0.0), // #f96400
+        primary: Color(hex: 0xEF5F18),
+        secondary: Color(hex: 0xFDFCF8),
+        statusRed: Color(hex: 0xEF5F18),
         background: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0e0e0e
         sectionBackground: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
         elevatedCard: Color(red: 0.0980, green: 0.0980, blue: 0.0980), // #191919
@@ -116,16 +124,16 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.9765, green: 0.9765, blue: 0.9765), // #f9f9f9
         textSecondary: Color(red: 0.7608, green: 0.7373, blue: 0.7176),
         ghostBorder: Color(red: 0.2824, green: 0.2824, blue: 0.2824).opacity(0.18),
-        ambientShadow: Color(red: 1.0, green: 0.4745, blue: 0.2118).opacity(0.22),
+        ambientShadow: Color(hex: 0xEF5F18).opacity(0.22),
         weather: Color(red: 1.0, green: 0.7333, blue: 0.3412),
-        winDayFill: Color(red: 1.0, green: 0.5686, blue: 0.3647).opacity(0.30)
+        winDayFill: Color(hex: 0xEF5F18).opacity(0.30)
     )
 
     static let kia = StadiumPalette(
         id: "kia",
-        primary: Color(red: 0.8980, green: 0.0980, blue: 0.2157), // #E51937
-        secondary: Color(red: 0.4627, green: 0.8314, blue: 0.8941), // #76d4e4
-        statusRed: Color(red: 0.8980, green: 0.0980, blue: 0.2157), // #E51937
+        primary: Color(hex: 0xD81F25),
+        secondary: Color(hex: 0xD81F25),
+        statusRed: Color(hex: 0xD81F25),
         background: Color(red: 0.0235, green: 0.0824, blue: 0.1255), // #061520
         sectionBackground: Color(red: 0.0314, green: 0.1176, blue: 0.1765), // #081e2d
         elevatedCard: Color(red: 0.0471, green: 0.1569, blue: 0.2196), // #0c2838
@@ -139,16 +147,16 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.8353, green: 0.8941, blue: 0.9569), // #d5e4f4
         textSecondary: Color(red: 0.6588, green: 0.7412, blue: 0.8118),
         ghostBorder: Color(red: 0.8353, green: 0.8941, blue: 0.9569).opacity(0.12),
-        ambientShadow: Color(red: 0.4627, green: 0.8314, blue: 0.8941).opacity(0.18),
+        ambientShadow: Color(hex: 0xD81F25).opacity(0.18),
         weather: Color(red: 0.4627, green: 0.8314, blue: 0.8941),
-        winDayFill: Color(red: 0.4627, green: 0.8314, blue: 0.8941).opacity(0.30)
+        winDayFill: Color(hex: 0xD81F25).opacity(0.30)
     )
 
     static let kt = StadiumPalette(
         id: "kt",
-        primary: Color(red: 0.9255, green: 0.1098, blue: 0.1412), // #EC1C24
-        secondary: Color(red: 1.0, green: 0.7059, blue: 0.6706), // #ffb4ab
-        statusRed: Color(red: 0.9255, green: 0.1098, blue: 0.1412), // #EC1C24
+        primary: Color(hex: 0x0A0A0A),
+        secondary: Color(hex: 0xFDFCF8),
+        statusRed: Color(hex: 0x0A0A0A),
         background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
         sectionBackground: Color(red: 0.0549, green: 0.0549, blue: 0.0549), // #0e0e0e
         elevatedCard: Color(red: 0.1255, green: 0.1216, blue: 0.1216), // #201f1f
@@ -164,14 +172,14 @@ struct StadiumPalette: Sendable {
         ghostBorder: Color(red: 0.3686, green: 0.2471, blue: 0.2353).opacity(0.15), // #5e3f3c
         ambientShadow: Color.black.opacity(0.08),
         weather: Color(red: 0.7451, green: 0.7843, blue: 0.8078), // #bec8ce
-        winDayFill: Color(red: 1.0, green: 0.7059, blue: 0.6706).opacity(0.30)
+        winDayFill: Color(hex: 0x0A0A0A).opacity(0.30)
     )
 
     static let lg = StadiumPalette(
         id: "lg",
-        primary: Color(red: 0.6471, green: 0.0, blue: 0.2039), // #A50034
-        secondary: Color(red: 1.0, green: 0.6980, blue: 0.7216), // #FFB2B8
-        statusRed: Color(red: 0.6471, green: 0.0, blue: 0.2039), // #A50034
+        primary: Color(hex: 0x161616),
+        secondary: Color(hex: 0xC3042F),
+        statusRed: Color(hex: 0x161616),
         background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
         sectionBackground: Color(red: 0.1098, green: 0.1059, blue: 0.1059), // #1C1B1B
         elevatedCard: Color(red: 0.1255, green: 0.1216, blue: 0.1216), // #201F1F
@@ -187,14 +195,14 @@ struct StadiumPalette: Sendable {
         ghostBorder: Color(red: 0.7765, green: 0.7765, blue: 0.7765).opacity(0.12),
         ambientShadow: Color.black.opacity(0.18),
         weather: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // silver technical accent
-        winDayFill: Color(red: 0.6471, green: 0.0, blue: 0.2039).opacity(0.30)
+        winDayFill: Color(hex: 0x161616).opacity(0.30)
     )
 
     static let lotte = StadiumPalette(
         id: "lotte",
-        primary: Color(red: 0.6627, green: 0.0, blue: 0.1137), // #a9001d
-        secondary: Color(red: 0.8196, green: 0.1059, blue: 0.1804), // #d11b2e
-        statusRed: Color(red: 0.8196, green: 0.1059, blue: 0.1804), // #d11b2e
+        primary: Color(hex: 0x002F6C),
+        secondary: Color(hex: 0xE60033),
+        statusRed: Color(hex: 0x002F6C),
         background: Color(red: 0.0, green: 0.1059, blue: 0.2353), // #001b3c
         sectionBackground: Color(red: 0.0235, green: 0.1412, blue: 0.2902), // #06244a
         elevatedCard: Color(red: 0.0431, green: 0.1922, blue: 0.3647), // #0b315d
@@ -208,16 +216,16 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.9686, green: 0.9765, blue: 0.9882),
         textSecondary: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // #c6c6c6
         ghostBorder: Color(red: 0.5843, green: 0.8078, blue: 0.9333).opacity(0.14), // #95ceee @ 14%
-        ambientShadow: Color(red: 0.0, green: 0.1059, blue: 0.2353).opacity(0.24),
+        ambientShadow: Color(hex: 0x002F6C).opacity(0.24),
         weather: Color(red: 0.5843, green: 0.8078, blue: 0.9333), // #95ceee
-        winDayFill: Color(red: 0.8196, green: 0.1059, blue: 0.1804).opacity(0.30)
+        winDayFill: Color(hex: 0x002F6C).opacity(0.30)
     )
 
     static let nc = StadiumPalette(
         id: "nc",
-        primary: Color(red: 0.6824, green: 0.7765, blue: 1.0), // #aec6ff
-        secondary: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // #e3c191
-        statusRed: Color(red: 0.0, green: 0.1529, blue: 0.3647), // #00275d
+        primary: Color(hex: 0x191970),
+        secondary: Color(hex: 0xC7A079),
+        statusRed: Color(hex: 0x191970),
         background: Color(red: 0.0588, green: 0.0784, blue: 0.1059), // #0f141b
         sectionBackground: Color(red: 0.0353, green: 0.0549, blue: 0.0824), // #090e15
         elevatedCard: Color(red: 0.1059, green: 0.1255, blue: 0.1529), // #1b2027
@@ -231,16 +239,16 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.9569, green: 0.9686, blue: 0.9804),
         textSecondary: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // gold label accent
         ghostBorder: Color(red: 0.6824, green: 0.7765, blue: 1.0).opacity(0.14),
-        ambientShadow: Color(red: 0.0, green: 0.1529, blue: 0.3647).opacity(0.22),
+        ambientShadow: Color(hex: 0x191970).opacity(0.22),
         weather: Color(red: 0.8902, green: 0.7569, blue: 0.5686), // restrained gold technical accent
-        winDayFill: Color(red: 0.0, green: 0.1529, blue: 0.3647).opacity(0.32)
+        winDayFill: Color(hex: 0x191970).opacity(0.32)
     )
 
     static let kiwoom = StadiumPalette(
         id: "kiwoom",
-        primary: Color(red: 0.3412, green: 0.0196, blue: 0.0784), // #570514
-        secondary: Color(red: 0.8902, green: 0.0, blue: 0.4941), // #E3007E
-        statusRed: Color(red: 0.8902, green: 0.0, blue: 0.4941), // #E3007E
+        primary: Color(hex: 0x8E0320),
+        secondary: Color(hex: 0x5C3A21),
+        statusRed: Color(hex: 0x8E0320),
         background: Color(red: 0.0745, green: 0.0745, blue: 0.0745), // #131313
         sectionBackground: Color(red: 0.1098, green: 0.1059, blue: 0.1059), // #1c1b1b
         elevatedCard: Color(red: 0.1647, green: 0.1647, blue: 0.1647), // #2a2a2a
@@ -253,17 +261,17 @@ struct StadiumPalette: Sendable {
         bellControlSurface: Color(red: 0.1098, green: 0.1059, blue: 0.1059),
         textPrimary: Color(red: 0.9569, green: 0.9412, blue: 0.9529), // bright editorial foreground
         textSecondary: Color(red: 0.7216, green: 0.6706, blue: 0.7059), // muted on-surface-variant
-        ghostBorder: Color(red: 0.8902, green: 0.0, blue: 0.4941).opacity(0.14),
-        ambientShadow: Color(red: 0.3412, green: 0.0196, blue: 0.0784).opacity(0.20),
+        ghostBorder: Color(hex: 0x8E0320).opacity(0.14),
+        ambientShadow: Color(hex: 0x8E0320).opacity(0.20),
         weather: Color(red: 0.8902, green: 0.0, blue: 0.4941), // neon signal accent for technical emphasis
-        winDayFill: Color(red: 0.3412, green: 0.0196, blue: 0.0784).opacity(0.34)
+        winDayFill: Color(hex: 0x8E0320).opacity(0.34)
     )
 
     static let samsung = StadiumPalette(
         id: "samsung",
-        primary: Color(red: 0.0, green: 0.3059, blue: 0.5451), // #004e8b
-        secondary: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // #c6c6c6
-        statusRed: Color(red: 0.0, green: 0.4, blue: 0.7020), // #0066b3
+        primary: Color(hex: 0x0047AB),
+        secondary: Color(hex: 0xFDFCF8),
+        statusRed: Color(hex: 0x0047AB),
         background: Color(red: 0.9686, green: 0.9765, blue: 1.0), // #f7f9ff
         sectionBackground: Color(red: 0.9255, green: 0.9333, blue: 0.9529), // #eceef3
         elevatedCard: Color.white, // #ffffff
@@ -277,16 +285,16 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.0941, green: 0.1098, blue: 0.1255), // #181c20
         textSecondary: Color(red: 0.3725, green: 0.4, blue: 0.4510), // readable steel metadata
         ghostBorder: Color(red: 0.7569, green: 0.7804, blue: 0.8275).opacity(0.15), // #c1c7d3 @ 15%
-        ambientShadow: Color(red: 0.0, green: 0.3059, blue: 0.5451).opacity(0.08),
+        ambientShadow: Color(hex: 0x0047AB).opacity(0.08),
         weather: Color(red: 0.7765, green: 0.7765, blue: 0.7765), // silver accent
-        winDayFill: Color(red: 0.0, green: 0.4, blue: 0.7020).opacity(0.24)
+        winDayFill: Color(hex: 0x0047AB).opacity(0.24)
     )
 
     static let ssg = StadiumPalette(
         id: "ssg",
-        primary: Color(red: 0.8078, green: 0.0549, blue: 0.1765), // #CE0E2D
-        secondary: Color(red: 0.6275, green: 0.6275, blue: 0.6275), // #A0A0A0
-        statusRed: Color(red: 0.6392, green: 0.0, blue: 0.1216), // #a3001f
+        primary: Color(hex: 0xB80F0A),
+        secondary: Color(hex: 0xFDFCF8),
+        statusRed: Color(hex: 0xB80F0A),
         background: Color(red: 0.9765, green: 0.9765, blue: 0.9765), // #f9f9f9
         sectionBackground: Color(red: 0.9529, green: 0.9529, blue: 0.9529), // #f3f3f3
         elevatedCard: Color.white, // #ffffff
@@ -300,10 +308,22 @@ struct StadiumPalette: Sendable {
         textPrimary: Color(red: 0.1294, green: 0.1098, blue: 0.1137), // deep editorial near-black
         textSecondary: Color(red: 0.3922, green: 0.3882, blue: 0.3961), // silver-weighted metadata
         ghostBorder: Color(red: 0.9020, green: 0.7412, blue: 0.7333).opacity(0.15), // outline fallback @ 15%
-        ambientShadow: Color(red: 0.2549, green: 0.0, blue: 0.0235).opacity(0.08), // #410006 tinted shadow
+        ambientShadow: Color(hex: 0xB80F0A).opacity(0.08),
         weather: Color(red: 0.7412, green: 0.9137, blue: 1.0), // #bde9ff
-        winDayFill: Color(red: 0.8078, green: 0.0549, blue: 0.1765).opacity(0.24)
+        winDayFill: Color(hex: 0xB80F0A).opacity(0.24)
     )
+}
+
+private extension Color {
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255,
+            opacity: alpha
+        )
+    }
 }
 
 extension AppModel {
@@ -400,6 +420,7 @@ extension GameStatus {
         }
     }
 
+    // stadiumTintColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .live:
@@ -415,6 +436,7 @@ extension GameStatus {
         }
     }
 
+    // stadiumCardBackgroundColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumCardBackgroundColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .live:
@@ -458,6 +480,7 @@ extension NotificationType {
         }
     }
 
+    // stadiumTintColor 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumTintColor(_ palette: StadiumPalette) -> Color {
         switch self {
         case .scoreChange, .leadChange, .onBase, .inningChange:
@@ -491,6 +514,7 @@ extension NotificationType {
     }
 }
 
+// CardSurface 구조체는 CardSurface 타입의 역할과 값을 정의합니다.
 struct CardSurface: ViewModifier {
     @Environment(AppModel.self) private var appModel
     let padding: CGFloat
@@ -498,6 +522,7 @@ struct CardSurface: ViewModifier {
     let fillColor: Color?
     let showsGhostBorder: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         let stadiumPalette = appModel.favoriteStadiumPalette
         let resolvedFillColor = fillColor ?? (stadiumPalette?.elevatedCard ?? Color(.secondarySystemBackground))
@@ -524,6 +549,7 @@ struct CardSurface: ViewModifier {
 }
 
 extension View {
+    // cardSurface 메서드는 이 타입의 주요 동작을 수행합니다.
     func cardSurface(
         padding: CGFloat = 16,
         cornerRadius: CGFloat = 20,
@@ -540,22 +566,27 @@ extension View {
         )
     }
 
+    // doosanNavigationChrome 메서드는 이 타입의 주요 동작을 수행합니다.
     func doosanNavigationChrome(isEnabled: Bool) -> some View {
         modifier(DoosanNavigationChromeModifier(isEnabled: isEnabled))
     }
 
+    // doosanInlineNavigationTitle 메서드는 이 타입의 주요 동작을 수행합니다.
     func doosanInlineNavigationTitle(isEnabled: Bool) -> some View {
         modifier(DoosanInlineNavigationTitleModifier(isEnabled: isEnabled))
     }
 
+    // stadiumNavigationChrome 메서드는 이 타입의 주요 동작을 수행합니다.
     func stadiumNavigationChrome(_ palette: StadiumPalette?) -> some View {
         modifier(StadiumNavigationChromeModifier(palette: palette))
     }
 }
 
+// StadiumNavigationChromeModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct StadiumNavigationChromeModifier: ViewModifier {
     let palette: StadiumPalette?
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if let palette {
             content
@@ -568,9 +599,11 @@ private struct StadiumNavigationChromeModifier: ViewModifier {
     }
 }
 
+// DoosanNavigationChromeModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct DoosanNavigationChromeModifier: ViewModifier {
     let isEnabled: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if isEnabled {
             content
@@ -583,9 +616,11 @@ private struct DoosanNavigationChromeModifier: ViewModifier {
     }
 }
 
+// DoosanInlineNavigationTitleModifier 구조체는 SwiftUI 뷰 스타일과 동작을 재사용 가능한 형태로 적용합니다.
 private struct DoosanInlineNavigationTitleModifier: ViewModifier {
     let isEnabled: Bool
 
+    // body 메서드는 SwiftUI 화면의 본문 구성을 반환합니다.
     func body(content: Content) -> some View {
         if isEnabled {
             content.navigationBarTitleDisplayMode(.inline)
@@ -595,49 +630,7 @@ private struct DoosanInlineNavigationTitleModifier: ViewModifier {
     }
 }
 
-struct TeamMarkView: View {
-    @Environment(AppModel.self) private var appModel
-    let team: Team
-    var size: CGFloat = 38
-    var assetStyle: TeamImageAssetStyle = .officialLogoPreferred
-
-    var body: some View {
-        let identity = team.identity
-        let stadiumPalette = appModel.favoriteStadiumPalette
-
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(stadiumPalette?.recessedSurface ?? identity.theme.badgeBackground)
-
-            if TeamLogoAssetResolver.hasPreferredAsset(for: identity, style: assetStyle) {
-                Image(TeamLogoAssetResolver.preferredAssetName(for: identity, style: assetStyle))
-                    .resizable()
-                    .scaledToFit()
-                    .padding(assetStyle == .mascotPreferred ? size * 0.08 : size * 0.16)
-            } else {
-                Text(identity.monogram)
-                    .font(.system(size: size * 0.28, weight: .bold, design: .rounded))
-                    .foregroundStyle(stadiumPalette?.textSecondary ?? identity.theme.badgeForeground)
-            }
-        }
-        .frame(width: size, height: size)
-        .overlay(
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .stroke(
-                    stadiumPalette?.ghostBorder ?? Color.primary.opacity(0.06),
-                    lineWidth: stadiumPalette == nil ? 1 : 0.7
-                )
-        )
-        .shadow(
-            color: stadiumPalette?.ambientShadow.opacity(0.28) ?? identity.theme.shadowTint,
-            radius: stadiumPalette == nil ? size * 0.12 : size * 0.14,
-            y: stadiumPalette == nil ? size * 0.06 : size * 0.08
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(TeamLogoAssetResolver.accessibilityLabel(for: identity, style: assetStyle))
-    }
-}
-
+// BasesDiamondView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct BasesDiamondView: View {
     let bases: RunnerState
 
@@ -656,29 +649,7 @@ struct BasesDiamondView: View {
     }
 }
 
-struct OutCountView: View {
-    @Environment(AppModel.self) private var appModel
-    let outs: Int
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(index < outs ? activeColor : inactiveColor)
-                    .frame(width: 10, height: 10)
-            }
-        }
-    }
-
-    private var activeColor: Color {
-        appModel.favoriteStadiumPalette?.statusRed ?? KBOLivePalette.live
-    }
-
-    private var inactiveColor: Color {
-        appModel.favoriteStadiumPalette?.elevatedCardStrong ?? Color(.systemGray5)
-    }
-}
-
+// DiamondBase 구조체는 DiamondBase 타입의 역할과 값을 정의합니다.
 private struct DiamondBase: View {
     @Environment(AppModel.self) private var appModel
     let isFilled: Bool

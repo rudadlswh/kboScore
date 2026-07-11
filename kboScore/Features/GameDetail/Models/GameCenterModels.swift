@@ -1,12 +1,17 @@
 //
 //  GameCenterModels.swift
 //  kboScore
+//  기능 설명: 게임센터 상세 화면에서 사용하는 기록, 라인스코어, 리뷰 모델을 정의합니다.
+//  KBO 경기와 팀 규칙을 화면·저장소와 분리된 값 모델로 표현해 계산과 비교 기준을 일관되게 유지합니다.
+//  동명이인, 보류 경기, 취소 경기, 누락 점수처럼 원천 데이터가 불완전한 상황을 고려합니다.
+//  TODO : 새 시즌 규칙이나 추가 지표가 생기면 모델 확장 지점을 명확히 분리합니다.
 //
 //  Created by Codex on 5/13/26.
 //
 
 import Foundation
 
+// GameCenterDetailPayload 구조체는 GameCenterDetailPayload 타입의 역할과 값을 정의합니다.
 struct GameCenterDetailPayload: Sendable {
     let summary: GameCenterSummary
     let lineScore: GameCenterLineScore?
@@ -14,6 +19,7 @@ struct GameCenterDetailPayload: Sendable {
     let preview: GameCenterPreview?
 }
 
+// GameCenterSummary 구조체는 GameCenterSummary 타입의 역할과 값을 정의합니다.
 struct GameCenterSummary: Sendable {
     let officialGameID: String
     let dateText: String
@@ -37,17 +43,20 @@ struct GameCenterSummary: Sendable {
     let savePitcher: String?
 }
 
+// GameCenterBaseRunners 구조체는 GameCenterBaseRunners 타입의 역할과 값을 정의합니다.
 struct GameCenterBaseRunners: Hashable, Sendable {
     let first: String?
     let second: String?
     let third: String?
 }
 
+// GameCenterProbableStarters 구조체는 GameCenterProbableStarters 타입의 역할과 값을 정의합니다.
 struct GameCenterProbableStarters: Sendable {
     let away: String?
     let home: String?
 }
 
+// GameCenterLineScore 구조체는 GameCenterLineScore 타입의 역할과 값을 정의합니다.
 struct GameCenterLineScore: Sendable {
     let inningLabels: [String]
     let awayInnings: [String]
@@ -56,6 +65,7 @@ struct GameCenterLineScore: Sendable {
     let homeTotals: GameCenterTeamLineTotals
 }
 
+// GameCenterTeamLineTotals 구조체는 GameCenterTeamLineTotals 타입의 역할과 값을 정의합니다.
 struct GameCenterTeamLineTotals: Sendable {
     let runs: String?
     let hits: String?
@@ -63,18 +73,32 @@ struct GameCenterTeamLineTotals: Sendable {
     let walks: String?
 }
 
+// GameCenterRecordSource 열거형는 GameCenterRecordSource 타입의 역할과 값을 정의합니다.
 enum GameCenterRecordSource: String, Sendable {
     case unknown
+    case dbLiveRecordsFresh
     case fullBoxscore
     case scoreboardHTMLBoxscore
     case keyplayerPartialLimited
     case lineupLimited
+    case staleDbRecordsIgnored
+    case limitedOfficialRecordsIgnored
+    case noLiveRecordsAvailable
 
     var isLimited: Bool {
         self == .keyplayerPartialLimited || self == .lineupLimited
     }
+
+    var isOfficialBoxscore: Bool {
+        self == .fullBoxscore || self == .scoreboardHTMLBoxscore
+    }
+
+    var isLiveRecordTabSource: Bool {
+        self == .dbLiveRecordsFresh || self == .fullBoxscore
+    }
 }
 
+// GameCenterReview 구조체는 GameCenterReview 타입의 역할과 값을 정의합니다.
 struct GameCenterReview: Sendable {
     let summaryItems: [GameCenterSummaryItem]
     let awayBatting: GameCenterBattingSection
@@ -83,7 +107,8 @@ struct GameCenterReview: Sendable {
     let homePitching: GameCenterPitchingSection
     let recordSource: GameCenterRecordSource
 
-    init(
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
+    nonisolated init(
         summaryItems: [GameCenterSummaryItem],
         awayBatting: GameCenterBattingSection,
         homeBatting: GameCenterBattingSection,
@@ -106,13 +131,26 @@ struct GameCenterReview: Sendable {
             homePitching.lines.isEmpty == false ||
             summaryItems.isEmpty == false
     }
+
+    nonisolated func withRecordSource(_ source: GameCenterRecordSource) -> GameCenterReview {
+        GameCenterReview(
+            summaryItems: summaryItems,
+            awayBatting: awayBatting,
+            homeBatting: homeBatting,
+            awayPitching: awayPitching,
+            homePitching: homePitching,
+            recordSource: source
+        )
+    }
 }
 
+// GameCenterKeyStatsComparison 구조체는 GameCenterKeyStatsComparison 타입의 역할과 값을 정의합니다.
 struct GameCenterKeyStatsComparison: Sendable, Equatable {
     let away: GameCenterTeamKeyStats
     let home: GameCenterTeamKeyStats
 }
 
+// GameCenterTeamKeyStats 구조체는 GameCenterTeamKeyStats 타입의 역할과 값을 정의합니다.
 struct GameCenterTeamKeyStats: Sendable, Equatable {
     let hits: Int
     let homeRuns: Int
@@ -122,12 +160,14 @@ struct GameCenterTeamKeyStats: Sendable, Equatable {
     let errors: Int
 }
 
+// GameCenterSummaryItem 구조체는 GameCenterSummaryItem 타입의 역할과 값을 정의합니다.
 struct GameCenterSummaryItem: Identifiable, Hashable, Sendable {
     let id = UUID()
     let title: String
     let value: String
     let values: [String]
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(title: String, value: String, values: [String]? = nil) {
         self.title = title
         self.value = value
@@ -135,11 +175,13 @@ struct GameCenterSummaryItem: Identifiable, Hashable, Sendable {
     }
 }
 
+// GameCenterBattingSection 구조체는 GameCenterBattingSection 타입의 역할과 값을 정의합니다.
 struct GameCenterBattingSection: Sendable {
     let lines: [GameCenterBattingLine]
     let totals: GameCenterBattingTotals?
 }
 
+// GameCenterBattingLine 구조체는 GameCenterBattingLine 타입의 역할과 값을 정의합니다.
 struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
     let id = UUID()
     let battingOrder: String
@@ -153,11 +195,14 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
     let walks: String?
     let strikeouts: String?
     let stolenBases: String?
+    let groundedIntoDoublePlay: String?
+    let errors: String?
     let average: String?
     let plateAppearanceHomeRuns: String?
     let plateAppearanceWalks: String?
     let plateAppearanceStrikeouts: String?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         battingOrder: String,
         position: String,
@@ -170,6 +215,8 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
         walks: String?,
         strikeouts: String?,
         stolenBases: String? = nil,
+        groundedIntoDoublePlay: String? = nil,
+        errors: String? = nil,
         average: String?,
         plateAppearanceHomeRuns: String? = nil,
         plateAppearanceWalks: String? = nil,
@@ -186,6 +233,8 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
         self.walks = walks
         self.strikeouts = strikeouts
         self.stolenBases = stolenBases
+        self.groundedIntoDoublePlay = groundedIntoDoublePlay
+        self.errors = errors
         self.average = average
         self.plateAppearanceHomeRuns = plateAppearanceHomeRuns
         self.plateAppearanceWalks = plateAppearanceWalks
@@ -197,6 +246,7 @@ struct GameCenterBattingLine: Identifiable, Hashable, Sendable {
     }
 }
 
+// GameCenterBattingTotals 구조체는 GameCenterBattingTotals 타입의 역할과 값을 정의합니다.
 struct GameCenterBattingTotals: Sendable {
     let atBats: String?
     let runs: String?
@@ -211,6 +261,7 @@ struct GameCenterBattingTotals: Sendable {
     let plateAppearanceWalks: String?
     let plateAppearanceStrikeouts: String?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         atBats: String?,
         runs: String?,
@@ -240,10 +291,12 @@ struct GameCenterBattingTotals: Sendable {
     }
 }
 
+// GameCenterPitchingSection 구조체는 GameCenterPitchingSection 타입의 역할과 값을 정의합니다.
 struct GameCenterPitchingSection: Sendable {
     let lines: [GameCenterPitchingLine]
 }
 
+// GameCenterPitchingLine 구조체는 GameCenterPitchingLine 타입의 역할과 값을 정의합니다.
 struct GameCenterPitchingLine: Identifiable, Hashable, Sendable {
     let id = UUID()
     let pitchingOrder: String?
@@ -264,6 +317,7 @@ struct GameCenterPitchingLine: Identifiable, Hashable, Sendable {
     let earnedRuns: String?
     let earnedRunAverage: String?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         pitchingOrder: String? = nil,
         name: String,
@@ -303,12 +357,14 @@ struct GameCenterPitchingLine: Identifiable, Hashable, Sendable {
     }
 }
 
+// GameCenterPreview 구조체는 GameCenterPreview 타입의 역할과 값을 정의합니다.
 struct GameCenterPreview: Sendable {
     let probableStarters: GameCenterProbableStarters?
     let awayMatchup: GameCenterMatchupSnapshot?
     let homeMatchup: GameCenterMatchupSnapshot?
 }
 
+// GameCenterMatchupSnapshot 구조체는 GameCenterMatchupSnapshot 타입의 역할과 값을 정의합니다.
 struct GameCenterMatchupSnapshot: Sendable {
     let teamName: String
     let seasonRecord: String?

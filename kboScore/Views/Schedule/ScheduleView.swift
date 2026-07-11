@@ -1,19 +1,24 @@
 //
 //  ScheduleView.swift
 //  kboScore
+//  기능 설명: 월별/일별 경기 일정 화면과 경기 선택 흐름을 구성합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/26/26.
 //
 
-import Combine
 import SwiftUI
 
+// ScheduleDayResultAppearance 열거형는 ScheduleDayResultAppearance 타입의 역할과 값을 정의합니다.
 enum ScheduleDayResultAppearance: Equatable, Sendable {
     case win
     case loss
     case draw
     case neutral
 
+    // from 메서드는 이 타입의 주요 동작을 수행합니다.
     static func from(dominantStatus: GameStatus?, favoriteTeamResult: TeamGameResult?) -> ScheduleDayResultAppearance {
         guard dominantStatus == .final, let favoriteTeamResult else {
             return .neutral
@@ -29,758 +34,32 @@ enum ScheduleDayResultAppearance: Equatable, Sendable {
     }
 }
 
-enum ScheduleSelectedGamesContentState: Equatable, Sendable {
-    case initialLoading
-    case loadedEmpty
-    case loaded
-}
-
-@MainActor
-final class ScheduleViewModel: ObservableObject {
-    @Published var displayedMonth = Date()
-    @Published var selectedDate = Date()
-    @Published var scheduleFilter: ScheduleFilter = .all
-    private(set) var calendarDays: [MyTeamCalendarDay] = []
-    private(set) var selectedDateGames: [GameDetail] = []
-    private(set) var isDisplayedMonthAvailable = false
-    private(set) var hasAvailableMonths = false
-    private(set) var previousAvailableMonth: Date?
-    private(set) var nextAvailableMonth: Date?
-    private(set) var isLoadingDisplayedMonth = true
-    private(set) var statusMessage: String?
-    private(set) var monthGameCount = 0
-#if DEBUG
-    private(set) var debugSummary: String?
-#endif
-
-    private var cachedMonths: [KBOMonthScheduleKey: ScheduleMonthCacheEntry] = [:]
-    private var failedMonths: Set<KBOMonthScheduleKey> = []
-    private var inFlightMonthTasks: [KBOMonthScheduleKey: Task<ScheduleMonthCacheEntry, Error>] = [:]
-    private var pendingAutomaticSelectionMonthKey: KBOMonthScheduleKey?
-    private var calendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-        return calendar
-    }
-
-    var displayedMonthKey: KBOMonthScheduleKey {
-        monthKey(for: displayedMonth)
-    }
-
-    var selectedGamesContentState: ScheduleSelectedGamesContentState {
-        if selectedDateGames.isEmpty == false {
-            return .loaded
-        }
-        if isLoadingDisplayedMonth, monthGameCount == 0 {
-            return .initialLoading
-        }
-        return .loadedEmpty
-    }
-
-    func loadDisplayedMonth(appModel: AppModel) async {
-        await loadMonth(
-            displayedMonth,
-            forceRefresh: false,
-            appModel: appModel
-        )
-        await normalizeDisplayedMonth(appModel: appModel)
-    }
-
-    func refreshDisplayedMonth(appModel: AppModel) async {
-        await loadMonth(
-            displayedMonth,
-            forceRefresh: true,
-            appModel: appModel
-        )
-        if SchedulePresentation.dayKey(for: selectedDate) == SchedulePresentation.dayKey(for: Date()) {
-            await appModel.refreshScheduleDay(for: selectedDate)
-            let key = displayedMonthKey
-            let refreshedSnapshot = appModel.currentScheduleMonthSnapshot(for: key)
-            let mergedGames = mergeSelectedDayRefresh(
-                refreshedSnapshot,
-                into: cachedMonths[key]?.games ?? [],
-                selectedDayKey: SchedulePresentation.dayKey(for: selectedDate)
-            )
-            cachedMonths[key] = await ScheduleMonthCacheEntry.build(
-                key: key,
-                games: mergedGames
-            )
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-        }
-
-        await reconcileStalePastGamesIfNeeded(appModel: appModel)
-    }
-
-    func changeDisplayedMonth(
-        to month: Date,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>
-    ) {
-        let previousKey = displayedMonthKey
-        let requestedMonth = startOfMonth(for: month)
-        let requestedKey = monthKey(for: requestedMonth)
-        guard requestedKey != previousKey else { return }
-
-#if DEBUG
-        print("ScheduleMonthChanged from=\(previousKey.yearMonthText) to=\(requestedKey.yearMonthText)")
-#endif
-        let hasCachedRequestedMonth = cachedMonths[requestedKey] != nil
-        setLoadingDisplayedMonth(hasCachedRequestedMonth == false)
-        displayedMonth = requestedMonth
-        selectedDate = preferredSelectedDate(for: requestedKey)
-        pendingAutomaticSelectionMonthKey = requestedKey
-        Task {
-            await rebuildPresentation(
-                favoriteTeamID: favoriteTeamID,
-                attendedGameKeys: attendedGameKeys
-            )
-        }
-    }
-
-    func selectDate(
-        _ date: Date,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>
-    ) {
-        selectedDate = date
-        pendingAutomaticSelectionMonthKey = nil
-        Task {
-            await rebuildPresentation(
-                favoriteTeamID: favoriteTeamID,
-                attendedGameKeys: attendedGameKeys
-            )
-        }
-    }
-
-    func rebuildPresentation(
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>
-    ) async {
-        let presentation = await SchedulePresentation.build(
-            displayedMonth: displayedMonth,
-            selectedDate: selectedDate,
-            filter: scheduleFilter,
-            favoriteTeamID: favoriteTeamID,
-            attendedGameKeys: attendedGameKeys,
-            cachedMonthEntries: Dictionary(
-                uniqueKeysWithValues: cachedMonths.map { ($0.key.yearMonthText, $0.value) }
-            ),
-            failedMonthKeys: Set(failedMonths.map(\.yearMonthText)),
-            currentDate: Date()
-        )
-        apply(presentation)
-    }
-
-    private func normalizeDisplayedMonth(appModel: AppModel) async {
-        if calendar.isDate(selectedDate, equalTo: displayedMonth, toGranularity: .month) == false {
-            selectedDate = preferredSelectedDate(for: displayedMonthKey)
-        }
-        await rebuildPresentation(
-            favoriteTeamID: appModel.settings.favoriteTeamID,
-            attendedGameKeys: appModel.attendedGameKeys
-        )
-    }
-
-    private func loadMonth(
-        _ month: Date,
-        forceRefresh: Bool,
-        appModel: AppModel
-    ) async {
-        let key = monthKey(for: month)
-
-        if forceRefresh == false, cachedMonths[key] != nil {
-            logLocalMonthIfNeeded(key)
-            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
-            setLoadingDisplayedMonth(false)
-            applyPendingAutomaticSelectionIfNeeded(for: key)
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-            return
-        }
-
-        if let task = inFlightMonthTasks[key] {
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight")
-#endif
-            setLoadingDisplayedMonth(cachedMonths[key] == nil)
-            defer {
-                setLoadingDisplayedMonth(false)
-            }
-            do {
-                cachedMonths[key] = try await task.value
-                failedMonths.remove(key)
-            } catch {
-                failedMonths.insert(key)
-            }
-            applyPendingAutomaticSelectionIfNeeded(for: key)
-            await rebuildPresentation(
-                favoriteTeamID: appModel.settings.favoriteTeamID,
-                attendedGameKeys: appModel.attendedGameKeys
-            )
-            return
-        }
-
-        setLoadingDisplayedMonth(cachedMonths[key] == nil)
-        let task = Task<ScheduleMonthCacheEntry, Error> { @MainActor in
-            let fetched = try await appModel.fetchIsolatedScheduleMonth(
-                for: key,
-                bypassingCache: forceRefresh
-            )
-            return await ScheduleMonthCacheEntry.build(key: key, games: fetched)
-        }
-        inFlightMonthTasks[key] = task
-        defer {
-            inFlightMonthTasks[key] = nil
-            setLoadingDisplayedMonth(false)
-        }
-
-        do {
-            let entry = try await task.value
-            cachedMonths[key] = entry
-            failedMonths.remove(key)
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository gameCount=\(entry.games.count)")
-#endif
-        } catch {
-            failedMonths.insert(key)
-#if DEBUG
-            print("[ScheduleCache] month=\(key.yearMonthText) source=repository failed error=\(error)")
-#endif
-        }
-
-        applyPendingAutomaticSelectionIfNeeded(for: key)
-        await rebuildPresentation(
-            favoriteTeamID: appModel.settings.favoriteTeamID,
-            attendedGameKeys: appModel.attendedGameKeys
-        )
-    }
-
-    private func apply(_ presentation: SchedulePresentation) {
-        objectWillChange.send()
-        calendarDays = presentation.calendarDays
-        selectedDateGames = presentation.selectedDateGames
-        isDisplayedMonthAvailable = presentation.isDisplayedMonthAvailable
-        hasAvailableMonths = presentation.hasAvailableMonths
-        previousAvailableMonth = presentation.previousAvailableMonth
-        nextAvailableMonth = presentation.nextAvailableMonth
-        statusMessage = presentation.statusMessage
-        monthGameCount = presentation.monthGameCount
-#if DEBUG
-        debugSummary = presentation.debugSummary
-#endif
-    }
-
-    private func setLoadingDisplayedMonth(_ isLoading: Bool) {
-        guard isLoadingDisplayedMonth != isLoading else { return }
-        objectWillChange.send()
-        isLoadingDisplayedMonth = isLoading
-    }
-
-    private func logLocalMonthIfNeeded(_ key: KBOMonthScheduleKey) {
-#if DEBUG
-        print("[ScheduleCache] month=\(key.yearMonthText) source=local")
-#endif
-    }
-
-    private func applyPendingAutomaticSelectionIfNeeded(for key: KBOMonthScheduleKey) {
-        guard pendingAutomaticSelectionMonthKey == key else { return }
-        selectedDate = preferredSelectedDate(for: key)
-        pendingAutomaticSelectionMonthKey = nil
-    }
-
-    private func startOfMonth(for date: Date) -> Date {
-        let components = calendar.dateComponents([.year, .month], from: date)
-        return calendar.date(from: components) ?? date
-    }
-
-    private func shiftedMonth(from date: Date, by offset: Int) -> Date {
-        calendar.date(byAdding: .month, value: offset, to: startOfMonth(for: date)) ?? date
-    }
-
-    private func preferredSelectedDate(for key: KBOMonthScheduleKey) -> Date {
-        let monthStart = monthStart(for: key)
-        let today = Date()
-        if monthKey(for: today) == key {
-            return today
-        }
-        if let firstGameDate = cachedMonths[key]?.games.first?.scheduledStart {
-            return calendar.startOfDay(for: firstGameDate)
-        }
-        return monthStart
-    }
-
-    private func monthStart(for key: KBOMonthScheduleKey) -> Date {
-        calendar.date(from: DateComponents(year: key.year, month: key.month, day: 1)) ?? Date()
-    }
-
-    private func monthKey(for date: Date) -> KBOMonthScheduleKey {
-        KBOMonthScheduleKey(date: date, calendar: calendar)
-    }
-
-    private func mergeSelectedDayRefresh(
-        _ refreshedSnapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        selectedDayKey: String
-    ) -> [GameDetail] {
-        guard existingMonthGames.isEmpty == false else {
-            return refreshedSnapshot.sorted { $0.scheduledStart < $1.scheduledStart }
-        }
-
-        var mergedGames = existingMonthGames
-        let refreshedDayGames = refreshedSnapshot.filter {
-            SchedulePresentation.dayKey(for: $0.scheduledStart) == selectedDayKey
-        }
-
-        for refreshedGame in refreshedDayGames {
-            let refreshedAliases = refreshedGame.gameIdentityAliases
-            if let index = mergedGames.firstIndex(where: { $0.gameIdentityAliases.isDisjoint(with: refreshedAliases) == false }) {
-                mergedGames[index] = refreshedGame
-            } else {
-                mergedGames.append(refreshedGame)
-            }
-        }
-
-        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    private func mergeAppModelMonthSnapshot(
-        _ snapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        for key: KBOMonthScheduleKey
-    ) -> [GameDetail] {
-        ScheduleMonthOverlayResolver.merge(
-            existingMonthGames: existingMonthGames,
-            incomingGames: snapshot,
-            monthKey: key,
-            calendar: calendar
-        )
-    }
-
-    private func mergePostReconciliationDateRefresh(
-        _ refreshedSnapshot: [GameDetail],
-        into existingMonthGames: [GameDetail],
-        refreshedDayKeys: Set<String>
-    ) -> [GameDetail] {
-        guard refreshedDayKeys.isEmpty == false else {
-            return existingMonthGames.sorted { $0.scheduledStart < $1.scheduledStart }
-        }
-
-        let preservedGames = existingMonthGames.filter {
-            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart)) == false
-        }
-        let refreshedGames = refreshedSnapshot.filter {
-            refreshedDayKeys.contains(SchedulePresentation.dayKey(for: $0.scheduledStart))
-        }
-        return (preservedGames + refreshedGames).sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    private func reconcileStalePastGamesIfNeeded(appModel: AppModel) async {
-        guard appModel.isScheduleStaleReconciliationInFlight() == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=inFlight")
-#endif
-            return
-        }
-
-        let key = displayedMonthKey
-        let visibleGames = cachedMonths[key]?.games ?? []
-        let dates = ScheduleStaleGameReconciliationResolver.staleGameDates(
-            in: visibleGames,
-            today: appModel.currentScheduleRefreshDate(),
-            calendar: calendar
-        )
-
-        guard dates.isEmpty == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=noCandidates")
-#endif
-            return
-        }
-
-        let selectedDates = Array(dates.prefix(3))
-        let droppedOlderDateCount = dates.count - selectedDates.count
-#if DEBUG
-        print("[ScheduleRefresh] stale reconciliation totalStaleDateCount=\(dates.count) selectedDateCount=\(selectedDates.count) droppedOlderDateCount=\(droppedOlderDateCount) selectedDates=\(selectedDates.joined(separator: ","))")
-#endif
-        let preflightResult = await appModel.preflightRefreshStaleScheduleDates(selectedDates)
-        if displayedMonthKey == key {
-            await syncCachedMonthFromAppModelIfNeeded(key, appModel: appModel)
-#if DEBUG
-            print("[ScheduleRefresh] stale preflight visibleMonth updated month=\(key.yearMonthText)")
-#endif
-        } else {
-#if DEBUG
-            print("[ScheduleRefresh] stale preflight visibleMonth skipped reason=differentMonth month=\(key.yearMonthText) current=\(displayedMonthKey.yearMonthText)")
-#endif
-        }
-        await rebuildPresentation(
-            favoriteTeamID: appModel.settings.favoriteTeamID,
-            attendedGameKeys: appModel.attendedGameKeys
-        )
-
-        let reconciliationDates = preflightResult.remainingStaleDateKeys
-        guard reconciliationDates.isEmpty == false else {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation skipped reason=freshDataResolvedStaleDates")
-#endif
-            return
-        }
-
-        do {
-            let reconciledDates = try await appModel.reconcileStaleScheduleGameDates(reconciliationDates)
-            guard reconciledDates.isEmpty == false else {
-                return
-            }
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation success dates=\(reconciledDates.joined(separator: ","))")
-#endif
-            appModel.startPostReconciliationForceRefresh(reconciledDates)
-        } catch {
-#if DEBUG
-            print("[ScheduleRefresh] stale reconciliation failure dates=\(reconciliationDates.joined(separator: ",")) error=\(error)")
-#endif
-        }
-    }
-
-    private func syncCachedMonthFromAppModelIfNeeded(_ key: KBOMonthScheduleKey, appModel: AppModel) async {
-        let snapshot = appModel.currentScheduleMonthSnapshot(for: key)
-        guard snapshot.isEmpty == false else { return }
-        let currentGames = cachedMonths[key]?.games ?? []
-        let mergedGames = mergeAppModelMonthSnapshot(snapshot, into: currentGames, for: key)
-        guard currentGames != mergedGames else { return }
-        cachedMonths[key] = await ScheduleMonthCacheEntry.build(key: key, games: mergedGames)
-#if DEBUG
-        print("[ScheduleCache] month=\(key.yearMonthText) source=appModelSync incoming=\(snapshot.count) before=\(currentGames.count) after=\(mergedGames.count)")
-#endif
-    }
-
-    func adjacentMonth(offset: Int) -> Date {
-        shiftedMonth(from: displayedMonth, by: offset)
-    }
-}
-
-private struct ScheduleMonthCacheEntry: Sendable {
-    let key: KBOMonthScheduleKey
-    let games: [GameDetail]
-    let gamesByDate: [String: [GameDetail]]
-
-    nonisolated static func build(key: KBOMonthScheduleKey, games: [GameDetail]) async -> ScheduleMonthCacheEntry {
-        await Task.detached(priority: .userInitiated) {
-            let sortedGames = games.sorted { $0.scheduledStart < $1.scheduledStart }
-            let gamesByDate = Dictionary(grouping: sortedGames) { game in
-                SchedulePresentation.dayKey(for: game.scheduledStart)
-            }
-            return ScheduleMonthCacheEntry(key: key, games: sortedGames, gamesByDate: gamesByDate)
-        }.value
-    }
-}
-
-enum ScheduleMonthOverlayResolver {
-    static func merge(
-        existingMonthGames: [GameDetail],
-        incomingGames: [GameDetail],
-        monthKey: KBOMonthScheduleKey,
-        calendar: Calendar
-    ) -> [GameDetail] {
-        let monthIncomingGames = incomingGames.filter {
-            isGame($0, in: monthKey, calendar: calendar)
-        }
-        guard existingMonthGames.isEmpty == false else {
-            return monthIncomingGames.sorted { $0.scheduledStart < $1.scheduledStart }
-        }
-
-        var mergedGames = existingMonthGames.filter {
-            isGame($0, in: monthKey, calendar: calendar)
-        }
-
-        for incomingGame in monthIncomingGames {
-            let incomingAliases = incomingGame.gameIdentityAliases
-            if let index = mergedGames.firstIndex(where: { existingGame in
-                existingGame.gameIdentityAliases.isDisjoint(with: incomingAliases) == false
-            }) {
-                mergedGames[index] = incomingGame
-            } else {
-                mergedGames.append(incomingGame)
-            }
-        }
-
-        return mergedGames.sorted { $0.scheduledStart < $1.scheduledStart }
-    }
-
-    private static func isGame(
-        _ game: GameDetail,
-        in monthKey: KBOMonthScheduleKey,
-        calendar: Calendar
-    ) -> Bool {
-        let components = calendar.dateComponents([.year, .month], from: game.scheduledStart)
-        return components.year == monthKey.year && components.month == monthKey.month
-    }
-}
-
-private struct SchedulePresentation: Sendable {
-    let calendarDays: [MyTeamCalendarDay]
-    let selectedDateGames: [GameDetail]
-    let isDisplayedMonthAvailable: Bool
-    let hasAvailableMonths: Bool
-    let previousAvailableMonth: Date?
-    let nextAvailableMonth: Date?
-    let statusMessage: String?
-    let monthGameCount: Int
-#if DEBUG
-    let debugSummary: String?
-#endif
-
-    nonisolated static func build(
-        displayedMonth: Date,
-        selectedDate: Date,
-        filter: ScheduleFilter,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>,
-        cachedMonthEntries: [String: ScheduleMonthCacheEntry],
-        failedMonthKeys: Set<String>,
-        currentDate: Date
-    ) async -> SchedulePresentation {
-        await Task.detached(priority: .userInitiated) {
-            buildSynchronously(
-                displayedMonth: displayedMonth,
-                selectedDate: selectedDate,
-                filter: filter,
-                favoriteTeamID: favoriteTeamID,
-                attendedGameKeys: attendedGameKeys,
-                cachedMonthEntries: cachedMonthEntries,
-                failedMonthKeys: failedMonthKeys,
-                currentDate: currentDate
-            )
-        }.value
-    }
-
-    nonisolated static func dayKey(for date: Date) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", components.year ?? 1970, components.month ?? 1, components.day ?? 1)
-    }
-
-    nonisolated private static func buildSynchronously(
-        displayedMonth: Date,
-        selectedDate: Date,
-        filter: ScheduleFilter,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>,
-        cachedMonthEntries: [String: ScheduleMonthCacheEntry],
-        failedMonthKeys: Set<String>,
-        currentDate: Date
-    ) -> SchedulePresentation {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-        let displayedKey = KBOMonthScheduleKey(date: displayedMonth, calendar: calendar)
-        let displayedKeyText = displayedKey.yearMonthText
-        let monthEntry = cachedMonthEntries[displayedKeyText]
-        let filteredGamesByDate = filteredGamesByDate(
-            from: monthEntry,
-            filter: filter,
-            favoriteTeamID: favoriteTeamID
-        )
-        let monthStart = startOfMonth(for: displayedMonth, calendar: calendar)
-        let selectedDayKey = dayKey(for: selectedDate)
-        let selectedGames = sortSelectedGames(
-            filteredGamesByDate[selectedDayKey] ?? [],
-            favoriteTeamID: favoriteTeamID
-        )
-        let days = calendarDays(
-            for: monthStart,
-            gamesByDate: filteredGamesByDate,
-            filter: filter,
-            favoriteTeamID: favoriteTeamID,
-            attendedGameKeys: attendedGameKeys,
-            currentDate: currentDate,
-            calendar: calendar
-        )
-        let displayedMonthStart = startOfMonth(for: displayedMonth, calendar: calendar)
-        let previousMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonthStart)
-        let nextMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonthStart)
-        let isDisplayedMonthAvailable = true
-        let statusMessage = failedMonthKeys.contains(displayedKeyText) && monthEntry == nil
-            ? "월간 일정을 불러오지 못했습니다."
-            : nil
-        let monthGameCount = days.reduce(0) { count, day in
-            count + (day.isInDisplayedMonth ? day.gameCount : 0)
-        }
-
-#if DEBUG
-        return SchedulePresentation(
-            calendarDays: days,
-            selectedDateGames: selectedGames,
-            isDisplayedMonthAvailable: isDisplayedMonthAvailable,
-            hasAvailableMonths: true,
-            previousAvailableMonth: previousMonth,
-            nextAvailableMonth: nextMonth,
-            statusMessage: statusMessage,
-            monthGameCount: monthGameCount,
-            debugSummary: monthEntry.map { "월간 캐시 \($0.games.count)경기" }
-        )
-#else
-        return SchedulePresentation(
-            calendarDays: days,
-            selectedDateGames: selectedGames,
-            isDisplayedMonthAvailable: isDisplayedMonthAvailable,
-            hasAvailableMonths: true,
-            previousAvailableMonth: previousMonth,
-            nextAvailableMonth: nextMonth,
-            statusMessage: statusMessage,
-            monthGameCount: monthGameCount
-        )
-#endif
-    }
-
-    nonisolated private static func filteredGamesByDate(
-        from entry: ScheduleMonthCacheEntry?,
-        filter: ScheduleFilter,
-        favoriteTeamID: String?
-    ) -> [String: [GameDetail]] {
-        guard let entry else { return [:] }
-        switch filter {
-        case .all:
-            return entry.gamesByDate
-        case .myTeam:
-            guard let favoriteTeamID else { return [:] }
-            return entry.gamesByDate.mapValues { games in
-                games.filter { $0.involves(teamID: favoriteTeamID) }
-            }
-        }
-    }
-
-    nonisolated private static func calendarDays(
-        for monthStart: Date,
-        gamesByDate: [String: [GameDetail]],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?,
-        attendedGameKeys: Set<String>,
-        currentDate: Date,
-        calendar: Calendar
-    ) -> [MyTeamCalendarDay] {
-        guard let monthRange = calendar.dateInterval(of: .month, for: monthStart),
-              let firstWeek = calendar.dateInterval(of: .weekOfMonth, for: monthRange.start),
-              let monthEnd = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: monthRange.start),
-              let lastWeek = calendar.dateInterval(of: .weekOfMonth, for: monthEnd) else {
-            return []
-        }
-
-        let todayKey = dayKey(for: currentDate)
-        var days: [MyTeamCalendarDay] = []
-        var cursor = firstWeek.start
-        while cursor < lastWeek.end {
-            let cursorKey = dayKey(for: cursor)
-            let dayGames = gamesByDate[cursorKey] ?? []
-            let myTeamDayGames = favoriteTeamID.map { teamID in
-                dayGames.filter { $0.involves(teamID: teamID) }
-            } ?? []
-            days.append(
-                MyTeamCalendarDay(
-                    date: cursor,
-                    isInDisplayedMonth: calendar.isDate(cursor, equalTo: monthStart, toGranularity: .month),
-                    isToday: cursorKey == todayKey,
-                    gameCount: dayGames.count,
-                    hasAttendedGame: dayGames.contains { isGameAttended($0, attendedGameKeys: attendedGameKeys) },
-                    dominantStatus: dominantStatus(for: myTeamDayGames),
-                    opponentTeam: calendarOpponentTeam(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
-                    favoriteTeamIsHome: calendarFavoriteTeamIsHome(for: dayGames, filter: filter, favoriteTeamID: favoriteTeamID),
-                    favoriteTeamResult: calendarFavoriteTeamResult(for: myTeamDayGames, favoriteTeamID: favoriteTeamID)
-                )
-            )
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = nextDay
-        }
-        return days
-    }
-
-    nonisolated private static func startOfMonth(for date: Date, calendar: Calendar) -> Date {
-        let components = calendar.dateComponents([.year, .month], from: date)
-        return calendar.date(from: components) ?? date
-    }
-
-    nonisolated private static func sortSelectedGames(_ games: [GameDetail], favoriteTeamID: String?) -> [GameDetail] {
-        ScheduleGameSelector.sortSelectedGames(games, favoriteTeamID: favoriteTeamID)
-    }
-
-    nonisolated private static func dominantStatus(for games: [GameDetail]) -> GameStatus? {
-        ScheduleDayStatusResolver.dominantStatus(for: games)
-    }
-
-    nonisolated private static func calendarOpponentTeam(
-        for games: [GameDetail],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?
-    ) -> Team? {
-        guard filter == .myTeam, let favoriteTeamID else { return nil }
-        for game in games {
-            if game.awayTeam.id == favoriteTeamID { return game.homeTeam }
-            if game.homeTeam.id == favoriteTeamID { return game.awayTeam }
-        }
-        return nil
-    }
-
-    nonisolated private static func calendarFavoriteTeamResult(
-        for games: [GameDetail],
-        favoriteTeamID: String?
-    ) -> TeamGameResult? {
-        for game in games {
-            guard let favoriteTeamID,
-                  game.involves(teamID: favoriteTeamID),
-                  game.status == .final,
-                  let awayScore = game.awayScore,
-                  let homeScore = game.homeScore else { continue }
-            if awayScore == homeScore { return .tie }
-            let favoriteTeamWon = (game.awayTeam.id == favoriteTeamID && awayScore > homeScore) ||
-                (game.homeTeam.id == favoriteTeamID && homeScore > awayScore)
-            return favoriteTeamWon ? .win : .loss
-        }
-        return nil
-    }
-
-    nonisolated private static func calendarFavoriteTeamIsHome(
-        for games: [GameDetail],
-        filter: ScheduleFilter,
-        favoriteTeamID: String?
-    ) -> Bool? {
-        guard filter == .myTeam, let favoriteTeamID else { return nil }
-        for game in games {
-            if game.homeTeam.id == favoriteTeamID { return true }
-            if game.awayTeam.id == favoriteTeamID { return false }
-        }
-        return nil
-    }
-
-    nonisolated private static func isGameAttended(_ game: GameDetail, attendedGameKeys: Set<String>) -> Bool {
-        attendedGameKeys.isDisjoint(with: game.attendanceStorageAliases) == false
-    }
-}
-
-private struct ScheduleGameDetailRoute: Hashable {
+// ScheduleGameDetailRoute 구조체는 ScheduleGameDetailRoute 타입의 역할과 값을 정의합니다.
+struct ScheduleGameDetailRoute: Hashable {
     let stableIdentity: String
     let initialGame: GameDetail
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(game: GameDetail) {
         stableIdentity = game.stableDetailIdentity
         initialGame = game
     }
 
+    // == 메서드는 이 타입의 주요 동작을 수행합니다.
     static func == (lhs: ScheduleGameDetailRoute, rhs: ScheduleGameDetailRoute) -> Bool {
         lhs.stableIdentity == rhs.stableIdentity
     }
 
+    // hash 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     func hash(into hasher: inout Hasher) {
         hasher.combine(stableIdentity)
     }
 }
 
+// ScheduleView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 struct ScheduleView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = ScheduleViewModel()
 
     var body: some View {
@@ -821,6 +100,16 @@ struct ScheduleView: View {
             }
             .task(id: scheduleTaskID) {
                 await viewModel.loadDisplayedMonth(appModel: appModel)
+                await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+            }
+            .task(id: livePollingTaskID) {
+                await runLiveScorePollingLoop()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task {
+                    await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+                }
             }
             .navigationDestination(for: String.self) { gameIdentity in
                 GameDetailView(gameIdentity: gameIdentity)
@@ -834,8 +123,26 @@ struct ScheduleView: View {
     private var scheduleTaskID: String {
         "\(viewModel.scheduleFilter.rawValue)-\(appModel.settings.favoriteTeamID ?? "none")-\(viewModel.displayedMonthKey.yearMonthText)-\(appModel.schedulePostReconciliationRefreshGeneration)"
     }
+
+    private var livePollingTaskID: String {
+        "\(scenePhase)-\(viewModel.scheduleFilter.rawValue)-\(viewModel.selectedDate.timeIntervalSince1970)-\(viewModel.displayedMonthKey.yearMonthText)-\(appModel.settings.favoriteTeamID ?? "none")"
+    }
+
+    private func runLiveScorePollingLoop() async {
+        guard scenePhase == .active else { return }
+        await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+        while !Task.isCancelled, viewModel.shouldPollLiveScores(appModel: appModel) {
+            do {
+                try await Task.sleep(nanoseconds: 30_000_000_000)
+            } catch {
+                return
+            }
+            await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+        }
+    }
 }
 
+// ScheduleCalendarCardView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct ScheduleCalendarCardView: View {
     @Environment(AppModel.self) private var appModel
     @ObservedObject var viewModel: ScheduleViewModel
@@ -858,26 +165,7 @@ private struct ScheduleCalendarCardView: View {
 
             if isDisplayedMonthAvailable {
                 HStack {
-                    Button {
-                        guard let previousMonth = previousAvailableMonth else { return }
-                        viewModel.changeDisplayedMonth(
-                            to: previousMonth,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
-                            attendedGameKeys: appModel.attendedGameKeys
-                        )
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .opacity(previousAvailableMonth == nil ? 0.4 : 1)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(previousAvailableMonth == nil)
+                    monthNavigationButton(systemName: "chevron.left", targetMonth: previousAvailableMonth)
 
                     Spacer()
 
@@ -892,26 +180,7 @@ private struct ScheduleCalendarCardView: View {
 
                     Spacer()
 
-                    Button {
-                        guard let nextMonth = nextAvailableMonth else { return }
-                        viewModel.changeDisplayedMonth(
-                            to: nextMonth,
-                            favoriteTeamID: appModel.settings.favoriteTeamID,
-                            attendedGameKeys: appModel.attendedGameKeys
-                        )
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(
-                                appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            )
-                            .opacity(nextAvailableMonth == nil ? 0.4 : 1)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(nextAvailableMonth == nil)
+                    monthNavigationButton(systemName: "chevron.right", targetMonth: nextAvailableMonth)
                 }
 
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 8) {
@@ -929,35 +198,16 @@ private struct ScheduleCalendarCardView: View {
                                 favoriteTeamID: appModel.settings.favoriteTeamID,
                                 attendedGameKeys: appModel.attendedGameKeys
                             )
+                            Task {
+                                await viewModel.refreshLiveScoresIfNeeded(appModel: appModel)
+                            }
                         } label: {
                             VStack(spacing: 4) {
-                                Text(day.date.formatted(.dateTime.day()))
+                                Text(dayNumberText(for: day.date))
                                     .font(.caption.weight(isSelected(day) ? .bold : .medium))
                                     .foregroundStyle(dayNumberColor(for: day))
 
-                                ZStack {
-                                    if let opponentTeam = day.opponentTeam {
-                                        TeamMarkView(team: opponentTeam, size: day.gameCount > 1 ? 18 : 16)
-                                            .opacity(day.hasGames ? 1 : 0)
-                                    } else {
-                                        Circle()
-                                            .fill(markerColor(for: day))
-                                            .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
-                                            .opacity(day.hasGames ? 1 : 0.12)
-                                    }
-
-                                    if day.gameCount > 1 {
-                                        Text("\(day.gameCount)")
-                                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                                            .foregroundStyle(.white)
-                                            .padding(.horizontal, 4)
-                                            .padding(.vertical, 1)
-                                            .background(
-                                                dayGameCountBadgeColor(for: day),
-                                                in: Capsule()
-                                            )
-                                    }
-                                }
+                                dayMarker(for: day)
                             }
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background(dayBackground(for: day), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -971,15 +221,14 @@ private struct ScheduleCalendarCardView: View {
                             )
                             .overlay(alignment: .topTrailing) {
                                 if day.hasAttendedGame {
-                                    FavoriteTeamAttendanceMarker(
-                                        favoriteTeamID: appModel.settings.favoriteTeamID,
-                                        size: 15
-                                    )
+                                    ScheduleAttendanceAppIcon(size: 12)
                                         .padding(3)
+                                        .accessibilityHidden(true)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(dayAccessibilityLabel(for: day))
                     }
                 }
 
@@ -1040,7 +289,10 @@ private struct ScheduleCalendarCardView: View {
                                 ScheduleGameRow(
                                     game: game,
                                     favoriteTeamID: appModel.settings.favoriteTeamID,
-                                    filter: viewModel.scheduleFilter
+                                    filter: viewModel.scheduleFilter,
+                                    onAttendanceToggle: {
+                                        appModel.toggleGameAttendance(for: game)
+                                    }
                                 )
                             }
                             .buttonStyle(.plain)
@@ -1124,10 +376,104 @@ private struct ScheduleCalendarCardView: View {
         return "선택한 날짜에는 등록된 경기가 없습니다."
     }
 
+    private func monthNavigationButton(systemName: String, targetMonth: Date?) -> some View {
+        Button {
+            guard let targetMonth else { return }
+            viewModel.changeDisplayedMonth(
+                to: targetMonth,
+                favoriteTeamID: appModel.settings.favoriteTeamID,
+                attendedGameKeys: appModel.attendedGameKeys
+            )
+        } label: {
+            Image(systemName: systemName)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent)
+                .frame(width: 34, height: 34)
+                .background(
+                    appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .opacity(targetMonth == nil ? 0.4 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(targetMonth == nil)
+    }
+
+    @ViewBuilder
+    private func dayMarker(for day: MyTeamCalendarDay) -> some View {
+        if let opponentName = opponentMarkerText(for: day) {
+            Text(opponentName)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(markerColor(for: day))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+                .frame(maxWidth: .infinity, minHeight: 18)
+        } else if viewModel.scheduleFilter == .myTeam {
+            Color.clear
+                .frame(height: 18)
+        } else {
+            ZStack {
+                Circle()
+                    .fill(markerColor(for: day))
+                    .frame(width: day.gameCount > 1 ? 18 : 6, height: day.gameCount > 1 ? 18 : 6)
+                    .opacity(day.hasGames ? 1 : 0.12)
+
+                if day.gameCount > 1 {
+                    Text("\(day.gameCount)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(
+                            dayGameCountBadgeColor(for: day),
+                            in: Capsule()
+                        )
+                }
+            }
+            .frame(height: 18)
+        }
+    }
+
+    private func opponentMarkerText(for day: MyTeamCalendarDay) -> String? {
+        guard viewModel.scheduleFilter == .myTeam,
+              let opponentTeam = day.opponentTeam else {
+            return nil
+        }
+        return shortOpponentName(for: opponentTeam)
+    }
+
+    private func shortOpponentName(for team: Team) -> String {
+        switch team.id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "samsung":
+            return "삼성"
+        case "doosan":
+            return "두산"
+        case "hanwha":
+            return "한화"
+        case "lotte":
+            return "롯데"
+        case "kiwoom":
+            return "키움"
+        default:
+            break
+        }
+
+        for candidate in [team.shortName, team.displayName, team.name, team.id] {
+            let trimmedCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedCandidate.isEmpty == false {
+                return trimmedCandidate
+            }
+        }
+        return team.id
+    }
+
+    // isSelected 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func isSelected(_ day: MyTeamCalendarDay) -> Bool {
         Calendar(identifier: .gregorian).isDate(day.date, inSameDayAs: viewModel.selectedDate)
     }
 
+    // dayNumberColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayNumberColor(for day: MyTeamCalendarDay) -> Color {
         if isSelected(day) {
             return appModel.favoriteStadiumPalette?.secondary ?? appModel.currentTheme.accent
@@ -1138,6 +484,7 @@ private struct ScheduleCalendarCardView: View {
         return day.isInDisplayedMonth ? .primary : .secondary.opacity(0.6)
     }
 
+    // markerColor 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.
     private func markerColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return day.dominantStatus?.stadiumTintColor(palette) ?? palette.primary
@@ -1145,6 +492,7 @@ private struct ScheduleCalendarCardView: View {
         return day.dominantStatus?.tintColor ?? appModel.currentTheme.accent
     }
 
+    // dayResultAppearance 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayResultAppearance(for day: MyTeamCalendarDay) -> ScheduleDayResultAppearance {
         ScheduleDayResultAppearance.from(
             dominantStatus: day.dominantStatus,
@@ -1152,6 +500,7 @@ private struct ScheduleCalendarCardView: View {
         )
     }
 
+    // dayGameCountBadgeColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayGameCountBadgeColor(for day: MyTeamCalendarDay) -> Color {
         switch dayResultAppearance(for: day) {
         case .win:
@@ -1168,6 +517,7 @@ private struct ScheduleCalendarCardView: View {
         }
     }
 
+    // dayBackground 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayBackground(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             if day.isInDisplayedMonth == false {
@@ -1212,6 +562,7 @@ private struct ScheduleCalendarCardView: View {
         }
     }
 
+    // stadiumNoGameDayBackground 메서드는 이 타입의 주요 동작을 수행합니다.
     private func stadiumNoGameDayBackground(for day: MyTeamCalendarDay, palette: StadiumPalette) -> Color {
         isSelected(day) ? palette.elevatedCardStrong : palette.recessedSurface
     }
@@ -1220,6 +571,7 @@ private struct ScheduleCalendarCardView: View {
         .clear
     }
 
+    // dayTodayBorderColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func dayTodayBorderColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return day.isToday ? palette.secondary.opacity(0.85) : .clear
@@ -1227,14 +579,27 @@ private struct ScheduleCalendarCardView: View {
         return day.isToday ? KBOLivePalette.upcoming.opacity(0.9) : .clear
     }
 
+    // daySelectionBorderColor 메서드는 이 타입의 주요 동작을 수행합니다.
     private func daySelectionBorderColor(for day: MyTeamCalendarDay) -> Color {
         if let palette = appModel.favoriteStadiumPalette {
             return isSelected(day) ? palette.primary : .clear
         }
         return isSelected(day) ? appModel.currentTheme.accent : .clear
     }
+
+    private func dayAccessibilityLabel(for day: MyTeamCalendarDay) -> String {
+        let dateText = day.date.formatted(.dateTime.month().day())
+        let gameText = day.gameCount > 0 ? "경기 \(day.gameCount)개" : "경기 없음"
+        return day.hasAttendedGame ? "\(dateText), \(gameText), 직관 경기 있음" : "\(dateText), \(gameText)"
+    }
+
+    private func dayNumberText(for date: Date) -> String {
+        let day = Calendar(identifier: .gregorian).component(.day, from: date)
+        return "\(day)"
+    }
 }
 
+// ScheduleLoadingPlaceholderView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct ScheduleLoadingPlaceholderView: View {
     @Environment(AppModel.self) private var appModel
     let title: String
@@ -1256,6 +621,7 @@ private struct ScheduleLoadingPlaceholderView: View {
     }
 }
 
+// DoosanScheduleFilterControl 구조체는 DoosanScheduleFilterControl 타입의 역할과 값을 정의합니다.
 private struct DoosanScheduleFilterControl: View {
     @Binding var selection: ScheduleFilter
     let palette: StadiumPalette
@@ -1291,21 +657,23 @@ private struct DoosanScheduleFilterControl: View {
     }
 }
 
+// ScheduleGameRow 구조체는 ScheduleGameRow 타입의 역할과 값을 정의합니다.
 private struct ScheduleGameRow: View {
     @Environment(AppModel.self) private var appModel
     let game: GameDetail
     let favoriteTeamID: String?
     let filter: ScheduleFilter
+    let onAttendanceToggle: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            TeamMarkView(team: leadingTeam, size: 34)
-
+        HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(titleText)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Text(homeAwayLabel)
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
@@ -1315,11 +683,9 @@ private struct ScheduleGameRow: View {
                             appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.chipBackground,
                             in: Capsule()
                         )
+
                     if appModel.isGameAttended(game) {
-                        FavoriteTeamAttendanceMarker(
-                            favoriteTeamID: favoriteTeamID,
-                            size: 18
-                        )
+                        ScheduleAttendanceBadge()
                     }
                 }
 
@@ -1327,10 +693,21 @@ private struct ScheduleGameRow: View {
                     .font(.caption)
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .secondary)
 
+                if let liveScoreText {
+                    Text(liveScoreText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
+                }
+
                 if let finalResultText {
                     Text(finalResultText)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .primary)
+                }
+                if let cancelledText {
+                    Text(cancelledText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? .secondary)
                 }
             }
 
@@ -1340,16 +717,23 @@ private struct ScheduleGameRow: View {
                 Text(game.scheduledStart.formatted(date: .omitted, time: .shortened))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(appModel.favoriteStadiumPalette?.textSecondary ?? .primary)
-                Text(game.status.title)
+                Text(statusBadgeText)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
+                    .foregroundStyle(statusBadgeTint)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
                     .background(
-                        (appModel.favoriteStadiumPalette.map { game.status.stadiumTintColor($0) } ?? game.status.tintColor)
-                            .opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
+                            statusBadgeTint.opacity(appModel.isStadiumFavoriteSelected ? 0.26 : 0.10),
                         in: Capsule()
                     )
+
+                if appModel.isGameAttended(game) {
+                    Button(action: onAttendanceToggle) {
+//                        ScheduleAttendanceAppIcon(size: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("직관 해제")
+                }
             }
         }
         .padding(10)
@@ -1387,11 +771,50 @@ private struct ScheduleGameRow: View {
 
     private var finalResultText: String? {
         guard filter == .all,
+              game.status == .final,
               let winningTeam = game.finalWinningTeam,
               let scoreLine = game.finalScoreLine else {
             return nil
         }
         return "\(winningTeam.displayName) 승 · \(scoreLine)"
+    }
+    
+    private var isCancelledGame: Bool {
+        game.status == .cancelled
+    }
+
+    private var cancelledText: String? {
+        guard filter == .all, isCancelledGame else { return nil }
+        return "경기 취소"
+    }
+    
+    private var statusBadgeText: String {
+        if isCancelledGame {
+            return "취소"
+        }
+        return game.status.title
+    }
+
+    private var statusBadgeTint: Color {
+        if isCancelledGame {
+            return appModel.favoriteStadiumPalette?.textSecondary ?? .secondary
+        }
+        return appModel.favoriteStadiumPalette.map {
+            game.status.stadiumTintColor($0)
+        } ?? game.status.tintColor
+    }
+
+    private var liveScoreText: String? {
+        guard game.status.isLiveLike else { return nil }
+        guard let awayScore = game.awayScore,
+              let homeScore = game.homeScore else {
+            return nil
+        }
+        let scoreText = "\(game.awayTeam.displayName) \(awayScore) : \(homeScore) \(game.homeTeam.displayName)"
+        guard let inningText = KBOInningFormatter.korean(game.inningText) ?? game.inningText else {
+            return scoreText
+        }
+        return "\(inningText) · \(scoreText)"
     }
 
     private var homeAwayLabel: String {
@@ -1407,52 +830,47 @@ private struct ScheduleGameRow: View {
     }
 }
 
-private struct FavoriteTeamAttendanceMarker: View {
-    let favoriteTeamID: String?
+// ScheduleAttendanceBadge 구조체는 직관 표시 배지를 렌더링합니다.
+private struct ScheduleAttendanceBadge: View {
+    @Environment(AppModel.self) private var appModel
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ScheduleAttendanceAppIcon(size: 12)
+            Text("직관 경기")
+                .font(.caption2.weight(.bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(appModel.favoriteStadiumPalette?.textPrimary ?? appModel.currentTheme.accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            appModel.favoriteStadiumPalette?.elevatedCardStrong ?? appModel.currentTheme.chipBackground,
+            in: Capsule()
+        )
+        .accessibilityLabel("직관 경기")
+    }
+}
+
+// ScheduleAttendanceAppIcon 구조체는 앱 아이콘을 작은 직관 마커로 표시합니다.
+private struct ScheduleAttendanceAppIcon: View {
     let size: CGFloat
 
     var body: some View {
-        Group {
-            if let imageAssetName {
-                Image(imageAssetName)
-                    .renderingMode(.original)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Text("⭐")
-                    .font(.system(size: size * 0.82))
+        Image("AttendanceAppIcon")
+            .resizable()
+            .scaledToFill()
+            .frame(width: size, height: size)
+            .clipShape(RoundedRectangle(cornerRadius: max(2, size * 0.22), style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: max(2, size * 0.22), style: .continuous)
+                    .stroke(Color.white.opacity(0.9), lineWidth: 0.75)
             }
-        }
-        .frame(width: size, height: size)
-        .accessibilityElement()
-        .accessibilityLabel("직관 경기")
-    }
-
-    private var imageAssetName: String? {
-        switch favoriteTeamID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "doosan":
-            return "attendance-cheering-doosan"
-        case "hanwha":
-            return "attendance-cheering-hanwha"
-        case "kia":
-            return "attendance-cheering-kia"
-        case "kiwoom":
-            return "attendance-cheering-kiwoom"
-        case "lg":
-            return "attendance-cheering-lg"
-        case "lotte":
-            return "attendance-cheering-lotte"
-        case "nc":
-            return "attendance-cheering-nc"
-        case "samsung":
-            return "attendance-cheering-samsung"
-        case "ssg":
-            return "attendance-cheering-ssg"
-        default:
-            return nil
-        }
+            .shadow(color: .black.opacity(0.16), radius: 1, y: 0.5)
     }
 }
+
+
 
 #Preview {
     ScheduleView()

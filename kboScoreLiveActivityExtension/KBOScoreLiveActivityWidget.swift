@@ -1,6 +1,10 @@
 //
 //  KBOScoreLiveActivityWidget.swift
 //  kboScoreLiveActivityExtension
+//  기능 설명: KBO 경기 Live Activity와 다이내믹 아일랜드 UI를 렌더링합니다.
+//  사용자가 경기 상태와 설정을 빠르게 이해하도록 도메인 상태를 화면 구조에 직접 매핑합니다.
+//  SwiftUI 상태 갱신, 접근성, 작은 화면 레이아웃에서 정보가 겹치지 않도록 표시 조건을 제한합니다.
+//  TODO : 반복되는 화면 조각은 재사용 가능한 컴포넌트로 분리하고 미리보기 케이스를 보강합니다.
 //
 //  Created by Codex on 3/26/26.
 //
@@ -9,6 +13,7 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
+// KBOScoreLiveActivityWidget 구조체는 KBOScoreLiveActivityWidget 타입의 역할과 값을 정의합니다.
 struct KBOScoreLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: FavoriteTeamGameActivityAttributes.self) { context in
@@ -71,6 +76,7 @@ struct KBOScoreLiveActivityWidget: Widget {
     }
 }
 
+// LockScreenLiveActivityView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct LockScreenLiveActivityView: View {
     let context: ActivityViewContext<FavoriteTeamGameActivityAttributes>
 
@@ -82,6 +88,7 @@ private struct LockScreenLiveActivityView: View {
     }
 }
 
+// BroadcastScoreboardGame 구조체는 BroadcastScoreboardGame 타입의 역할과 값을 정의합니다.
 private struct BroadcastScoreboardGame {
     let away: BroadcastTeamSide
     let home: BroadcastTeamSide
@@ -90,7 +97,7 @@ private struct BroadcastScoreboardGame {
     let batterText: String?
     let pitcherText: String?
     let metadataText: String?
-    let battingSide: BroadcastBattingSide?
+    let battingSide: KBOLiveActivityOffenseSide?
     let baseState: BroadcastBaseState?
     let isPreGame: Bool
     let awayStartingPitcherName: String?
@@ -100,6 +107,7 @@ private struct BroadcastScoreboardGame {
     let outs: Int?
     let favoriteAccent: Color
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(context: ActivityViewContext<FavoriteTeamGameActivityAttributes>) {
         let favorite = BroadcastTeamSide(
             roleLabel: context.attributes.isHomeGame ? "홈" : "원정",
@@ -125,7 +133,11 @@ private struct BroadcastScoreboardGame {
         pitcherText = context.state.isPreGame ? nil : context.state.currentPitcherName
         awayStartingPitcherName = context.attributes.isHomeGame ? context.state.opponentStartingPitcherName : context.state.favoriteStartingPitcherName
         homeStartingPitcherName = context.attributes.isHomeGame ? context.state.favoriteStartingPitcherName : context.state.opponentStartingPitcherName
-        battingSide = context.state.isPreGame ? nil : Self.battingSide(from: context.state.inningText)
+        battingSide = KBOLiveActivityOffenseResolver.offenseSide(
+            isPreGame: context.state.isPreGame,
+            summaryText: context.state.summaryText,
+            inningText: context.state.inningText
+        )
         metadataText = Self.metadataText(
             inningText: context.state.inningText,
             statusText: context.state.summaryText,
@@ -149,6 +161,7 @@ private struct BroadcastScoreboardGame {
         return statusText
     }
 
+    // metadataText 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func metadataText(inningText: String, statusText: String, venue: String) -> String? {
         var parts: [String] = []
         if inningText.isEmpty == false && inningText != statusText {
@@ -160,17 +173,7 @@ private struct BroadcastScoreboardGame {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    private static func battingSide(from inningText: String) -> BroadcastBattingSide? {
-        let lowercased = inningText.lowercased()
-        if inningText.contains("초") || lowercased.contains("top") {
-            return .away
-        }
-        if inningText.contains("말") || lowercased.contains("bottom") {
-            return .home
-        }
-        return nil
-    }
-
+    // baseState 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func baseState(first: Bool?, second: Bool?, third: Bool?) -> BroadcastBaseState? {
         guard first != nil || second != nil || third != nil else {
             return nil
@@ -183,6 +186,7 @@ private struct BroadcastScoreboardGame {
         )
     }
 
+    // countText 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func countText(balls: Int?, strikes: Int?, outs: Int?) -> String? {
         let parts = [
             KBOCountDisplay.balls(balls).map { "B \($0)" },
@@ -217,17 +221,14 @@ private struct BroadcastScoreboardGame {
     }
 }
 
-private enum BroadcastBattingSide {
-    case away
-    case home
-}
-
+// BroadcastBaseState 구조체는 화면이나 도메인 흐름에서 사용하는 상태 값을 표현합니다.
 private struct BroadcastBaseState {
     let first: Bool
     let second: Bool
     let third: Bool
 }
 
+// BroadcastTeamSide 구조체는 BroadcastTeamSide 타입의 역할과 값을 정의합니다.
 private struct BroadcastTeamSide {
     let roleLabel: String
     let teamID: String
@@ -238,15 +239,9 @@ private struct BroadcastTeamSide {
     var accent: Color {
         TeamIdentity.catalog[teamID]?.theme.accent ?? .white
     }
-
-    var logoAssetName: String? {
-        guard let identity = TeamIdentity.catalog[teamID], identity.hasLogoAsset else {
-            return nil
-        }
-        return identity.logoAssetName
-    }
 }
 
+// ScoreboardAlignment 열거형는 ScoreboardAlignment 타입의 역할과 값을 정의합니다.
 private enum ScoreboardAlignment {
     case leading
     case trailing
@@ -270,6 +265,7 @@ private enum ScoreboardAlignment {
     }
 }
 
+// BroadcastScoreboardStrip 구조체는 BroadcastScoreboardStrip 타입의 역할과 값을 정의합니다.
 private struct BroadcastScoreboardStrip: View {
     let game: BroadcastScoreboardGame
 
@@ -303,6 +299,7 @@ private struct BroadcastScoreboardStrip: View {
     }
 }
 
+// BroadcastScoreboardMainRow 구조체는 BroadcastScoreboardMainRow 타입의 역할과 값을 정의합니다.
 private struct BroadcastScoreboardMainRow: View {
     let game: BroadcastScoreboardGame
 
@@ -338,6 +335,7 @@ private struct BroadcastScoreboardMainRow: View {
     }
 }
 
+// BroadcastTeamIdentityView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct BroadcastTeamIdentityView: View {
     let side: BroadcastTeamSide
     let alignment: ScoreboardAlignment
@@ -346,7 +344,7 @@ private struct BroadcastTeamIdentityView: View {
     var body: some View {
         HStack(spacing: 7) {
             if alignment == .leading {
-                teamMark
+                teamMark(isVisible: isBatting)
             }
 
             VStack(alignment: alignment.horizontal, spacing: 2) {
@@ -371,7 +369,7 @@ private struct BroadcastTeamIdentityView: View {
             }
 
             if alignment == .trailing {
-                teamMark
+                teamMark(isVisible: isBatting)
             }
         }
         .padding(.horizontal, isBatting ? 5 : 0)
@@ -386,21 +384,17 @@ private struct BroadcastTeamIdentityView: View {
     }
 
     @ViewBuilder
-    private var teamMark: some View {
-        if let logoAssetName = side.logoAssetName {
-            Image(logoAssetName)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 28, height: 28)
-        } else {
-            Rectangle()
-                .fill(side.accent)
-                .frame(width: 4, height: 28)
-                .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
-        }
+    private func teamMark(isVisible: Bool) -> some View {
+        Rectangle()
+            .fill(side.accent)
+            .frame(width: 4, height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+            .opacity(isVisible ? 1 : 0)
+            .accessibilityHidden(isVisible == false)
     }
 }
 
+// BroadcastScoreValue 구조체는 BroadcastScoreValue 타입의 역할과 값을 정의합니다.
 private struct BroadcastScoreValue: View {
     let scoreText: String
 
@@ -416,6 +410,7 @@ private struct BroadcastScoreValue: View {
     }
 }
 
+// BroadcastGameStateHub 구조체는 BroadcastGameStateHub 타입의 역할과 값을 정의합니다.
 private struct BroadcastGameStateHub: View {
     let inningText: String
     let statusText: String
@@ -466,6 +461,7 @@ private struct BroadcastGameStateHub: View {
     }
 }
 
+// BroadcastBaseDiamond 구조체는 BroadcastBaseDiamond 타입의 역할과 값을 정의합니다.
 private struct BroadcastBaseDiamond: View {
     let baseState: BroadcastBaseState
     let size: CGFloat
@@ -485,6 +481,7 @@ private struct BroadcastBaseDiamond: View {
         .accessibilityLabel(accessibilityText)
     }
 
+    // base 메서드는 이 타입의 주요 동작을 수행합니다.
     private func base(isOccupied: Bool) -> some View {
         RoundedRectangle(cornerRadius: size * 0.09, style: .continuous)
             .fill(isOccupied ? Color.white : Color.white.opacity(0.18))
@@ -511,6 +508,7 @@ private struct BroadcastBaseDiamond: View {
     }
 }
 
+// BroadcastScoreboardMetadataRow 구조체는 BroadcastScoreboardMetadataRow 타입의 역할과 값을 정의합니다.
 private struct BroadcastScoreboardMetadataRow: View {
     let game: BroadcastScoreboardGame
 
@@ -560,6 +558,7 @@ private struct BroadcastScoreboardMetadataRow: View {
     }
 }
 
+// BroadcastPlayerSlot 구조체는 BroadcastPlayerSlot 타입의 역할과 값을 정의합니다.
 private struct BroadcastPlayerSlot: View {
     let label: String
     let text: String?
@@ -588,6 +587,7 @@ private struct BroadcastPlayerSlot: View {
     }
 }
 
+// BroadcastCountCluster 구조체는 BroadcastCountCluster 타입의 역할과 값을 정의합니다.
 private struct BroadcastCountCluster: View {
     let balls: Int?
     let strikes: Int?
@@ -632,6 +632,7 @@ private struct BroadcastCountCluster: View {
     }
 }
 
+// BroadcastCountMetric 구조체는 BroadcastCountMetric 타입의 역할과 값을 정의합니다.
 private struct BroadcastCountMetric: Identifiable {
     let label: String
     let value: Int
@@ -648,6 +649,7 @@ private extension String {
     }
 }
 
+// DynamicIslandTeamView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DynamicIslandTeamView: View {
     let side: BroadcastTeamSide
     let alignment: ScoreboardAlignment
@@ -697,6 +699,7 @@ private struct DynamicIslandTeamView: View {
     }
 }
 
+// DynamicIslandStatusView 구조체는 화면에 표시되는 SwiftUI 뷰 구성을 담당합니다.
 private struct DynamicIslandStatusView: View {
     let inningText: String
     let statusText: String
@@ -725,6 +728,7 @@ private struct DynamicIslandStatusView: View {
     }
 }
 
+// DynamicIslandBroadcastMetadataRow 구조체는 DynamicIslandBroadcastMetadataRow 타입의 역할과 값을 정의합니다.
 private struct DynamicIslandBroadcastMetadataRow: View {
     let game: BroadcastScoreboardGame
 
@@ -767,6 +771,7 @@ private struct DynamicIslandBroadcastMetadataRow: View {
     }
 }
 
+// DynamicIslandMetadataSlot 구조체는 DynamicIslandMetadataSlot 타입의 역할과 값을 정의합니다.
 private struct DynamicIslandMetadataSlot: View {
     let text: String?
     let alignment: ScoreboardAlignment

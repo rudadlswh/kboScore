@@ -1,13 +1,19 @@
 //
 //  OfficialKBOGameCenterClient.swift
 //  kboScore
+//  기능 설명: KBO 공식 게임센터에서 상세 경기, 기록, 리뷰 데이터를 가져옵니다.
+//  외부 KBO·Supabase 응답을 앱 도메인 모델로 안정적으로 변환해 화면 로직이 데이터 소스 변화에 덜 흔들리게 합니다.
+//  네트워크 실패, 누락 필드, 캐시 만료, 원천 데이터 형식 변경을 허용 범위 안에서 처리해야 합니다.
+//  TODO : 실제 응답 fixture를 계속 추가하고 데이터 소스별 오류 분류를 더 세분화합니다.
 //
 //  Created by Codex on 4/8/26.
 //
 
 import Foundation
 
+// GameCenterBoxScorePayload 구조체는 GameCenterBoxScorePayload 타입의 역할과 값을 정의합니다.
 struct GameCenterBoxScorePayload: Sendable {
+// Source 열거형는 Source 타입의 역할과 값을 정의합니다.
     enum Source: String, Sendable {
         case fullBoxscore
         case scoreboardHTMLBoxscore
@@ -57,6 +63,7 @@ struct GameCenterBoxScorePayload: Sendable {
 }
 
 extension GameCenterReview {
+    // keyStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func keyStats(
         awayTeam: Team,
         homeTeam: Team,
@@ -70,6 +77,7 @@ extension GameCenterReview {
         ).comparison
     }
 
+    // fillingMissingLiveBatters 메서드는 이 타입의 주요 동작을 수행합니다.
     func fillingMissingLiveBatters(from lineupSections: [GameCenterBattingSection]?) -> GameCenterReview {
         guard let lineupSections, lineupSections.count >= 2 else { return self }
         return GameCenterReview(
@@ -82,6 +90,7 @@ extension GameCenterReview {
         )
     }
 
+    // overlayingLivePlateAppearanceStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func overlayingLivePlateAppearanceStats(from plateAppearanceSections: [GameCenterBattingSection]?) -> GameCenterReview {
         guard let plateAppearanceSections, plateAppearanceSections.count >= 2 else { return self }
         return GameCenterReview(
@@ -94,6 +103,7 @@ extension GameCenterReview {
         )
     }
 
+    // fillingMissingLivePitchers 메서드는 이 타입의 주요 동작을 수행합니다.
     func fillingMissingLivePitchers(from baseSections: [GameCenterPitchingSection]?) -> GameCenterReview {
         guard let baseSections, baseSections.count >= 2 else { return self }
         return GameCenterReview(
@@ -108,6 +118,7 @@ extension GameCenterReview {
 }
 
 private extension GameCenterBattingSection {
+    // fillingMissingLiveBatters 메서드는 이 타입의 주요 동작을 수행합니다.
     func fillingMissingLiveBatters(from lineupSection: GameCenterBattingSection) -> GameCenterBattingSection {
         guard lineupSection.lines.isEmpty == false else { return self }
 
@@ -141,6 +152,7 @@ private extension GameCenterBattingSection {
         )
     }
 
+    // overlayingLivePlateAppearanceStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func overlayingLivePlateAppearanceStats(from plateAppearanceSection: GameCenterBattingSection) -> GameCenterBattingSection {
         guard plateAppearanceSection.lines.isEmpty == false else { return self }
 
@@ -170,6 +182,8 @@ private extension GameCenterBattingLine {
             walks: walks,
             strikeouts: strikeouts,
             stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
             average: average,
             plateAppearanceHomeRuns: plateAppearanceHomeRuns,
             plateAppearanceWalks: plateAppearanceWalks,
@@ -181,6 +195,7 @@ private extension GameCenterBattingLine {
         name.normalizedLiveBatterName
     }
 
+    // overlayingLiveStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func overlayingLiveStats(from statsLine: GameCenterBattingLine) -> GameCenterBattingLine {
         GameCenterBattingLine(
             battingOrder: battingOrder.nilIfBlank ?? statsLine.battingOrder,
@@ -194,6 +209,8 @@ private extension GameCenterBattingLine {
             walks: statsLine.walks ?? walks,
             strikeouts: statsLine.strikeouts ?? strikeouts,
             stolenBases: statsLine.stolenBases ?? stolenBases,
+            groundedIntoDoublePlay: statsLine.groundedIntoDoublePlay ?? groundedIntoDoublePlay,
+            errors: statsLine.errors ?? errors,
             average: statsLine.average ?? average,
             plateAppearanceHomeRuns: statsLine.plateAppearanceHomeRuns ?? plateAppearanceHomeRuns,
             plateAppearanceWalks: statsLine.plateAppearanceWalks ?? plateAppearanceWalks,
@@ -201,6 +218,7 @@ private extension GameCenterBattingLine {
         )
     }
 
+    // overlayingLivePlateAppearanceStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func overlayingLivePlateAppearanceStats(from statsLine: GameCenterBattingLine) -> GameCenterBattingLine {
         GameCenterBattingLine(
             battingOrder: battingOrder,
@@ -214,6 +232,8 @@ private extension GameCenterBattingLine {
             walks: statsLine.walks ?? walks,
             strikeouts: statsLine.strikeouts ?? strikeouts,
             stolenBases: stolenBases,
+            groundedIntoDoublePlay: groundedIntoDoublePlay,
+            errors: errors,
             average: average,
             plateAppearanceHomeRuns: statsLine.homeRuns ?? plateAppearanceHomeRuns,
             plateAppearanceWalks: statsLine.walks ?? plateAppearanceWalks,
@@ -223,6 +243,7 @@ private extension GameCenterBattingLine {
 }
 
 private extension GameCenterPitchingSection {
+    // fillingMissingLivePitchers 메서드는 이 타입의 주요 동작을 수행합니다.
     func fillingMissingLivePitchers(from baseSection: GameCenterPitchingSection) -> GameCenterPitchingSection {
         var mergedLines = baseSection.lines
         var mergedKeys = Set(mergedLines.map(\.livePitcherMergeKey))
@@ -245,6 +266,7 @@ private extension GameCenterPitchingLine {
         name.normalizedLivePitcherName
     }
 
+    // overlayingLivePitchingStats 메서드는 이 타입의 주요 동작을 수행합니다.
     func overlayingLivePitchingStats(from statsLine: GameCenterPitchingLine) -> GameCenterPitchingLine {
         GameCenterPitchingLine(
             pitchingOrder: pitchingOrder ?? statsLine.pitchingOrder,
@@ -280,6 +302,7 @@ private extension Array where Element == GameCenterBattingLine {
         }.map(\.element)
     }
 
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -288,6 +311,7 @@ private extension Array where Element == GameCenterBattingLine {
 
 #if DEBUG
 private extension GameCenterBattingTotals {
+    // derived 메서드는 이 타입의 주요 동작을 수행합니다.
     static func derived(from lines: [GameCenterBattingLine]) -> GameCenterBattingTotals? {
         let atBats = lines.sum(\.atBats)
         let runs = lines.sum(\.runs)
@@ -321,6 +345,7 @@ private extension Array where Element == GameCenterPitchingLine {
         "IP:\(compactMap(\.innings).joined(separator: "+")) R:\(sum(\.runsAllowed).map(String.init) ?? "-") ER:\(sum(\.earnedRuns).map(String.init) ?? "-") BB:\(sum(\.walksAllowed).map(String.init) ?? "-") SO:\(sum(\.strikeouts).map(String.init) ?? "-")"
     }
 
+    // sum 메서드는 이 타입의 주요 동작을 수행합니다.
     func sum(_ keyPath: KeyPath<GameCenterPitchingLine, String?>) -> Int? {
         let values = compactMap { $0[keyPath: keyPath]?.intValue }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -344,10 +369,12 @@ private extension String {
     }
 }
 
+// LivePlateAppearanceSide 열거형는 LivePlateAppearanceSide 타입의 역할과 값을 정의합니다.
 private enum LivePlateAppearanceSide {
     case away
     case home
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(inningText: String) {
         let normalized = inningText.normalizedLivePlateAppearanceText
         if normalized.contains("초") || normalized.contains("TOP") {
@@ -360,10 +387,12 @@ private enum LivePlateAppearanceSide {
     }
 }
 
+// LivePitcherSide 열거형는 LivePitcherSide 타입의 역할과 값을 정의합니다.
 private enum LivePitcherSide: String {
     case away
     case home
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init?(inningText: String?) {
         guard let inningText else { return nil }
         let normalized = inningText.normalizedLivePlateAppearanceText
@@ -377,6 +406,7 @@ private enum LivePitcherSide: String {
     }
 }
 
+// LivePitcherAppearance 구조체는 LivePitcherAppearance 타입의 역할과 값을 정의합니다.
 private struct LivePitcherAppearance: Sendable {
     let playerName: String
     let side: LivePitcherSide
@@ -392,10 +422,12 @@ private extension PlateAppearanceDerivedStats {
 }
 
 private extension OfficialKeyPlayerRecord {
+    // keyPlayerIntegerStat 메서드는 이 타입의 주요 동작을 수행합니다.
     func keyPlayerIntegerStat(aliases: [String]) -> String? {
         keyPlayerRawValue(aliases: aliases).flatMap(\.gameCenterStatInt).map(String.init)
     }
 
+    // keyPlayerRawValue 메서드는 이 타입의 주요 동작을 수행합니다.
     private func keyPlayerRawValue(aliases: [String]) -> String? {
         let normalizedAliases = Set(aliases.map(\.normalizedKeyPlayerFieldName))
         return rawValues.first { key, _ in
@@ -457,11 +489,13 @@ private extension String {
     }
 }
 
+// OfficialKBOGameCenterClient 구조체는 외부 서비스나 시스템 기능 호출을 캡슐화합니다.
 struct OfficialKBOGameCenterClient: Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let calendar: Calendar
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         baseURL: URL = URL(string: "https://www.koreabaseball.com/")!,
         session: URLSession = .shared,
@@ -476,10 +510,12 @@ struct OfficialKBOGameCenterClient: Sendable {
         self.calendar = calendar
     }
 
+    // fetchDetail 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchDetail(for game: GameDetail) async throws -> GameCenterDetailPayload? {
         try await fetchDetail(for: game, includeRecordFallback: true)
     }
 
+    // fetchDetail 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchDetail(for game: GameDetail, includeRecordFallback: Bool) async throws -> GameCenterDetailPayload? {
         guard let context = try await fetchContext(for: game) else {
             return nil
@@ -538,6 +574,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // fetchRecordFallbackReview 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchRecordFallbackReview(for game: GameDetail) async throws -> GameCenterReview? {
         guard let context = try await fetchContext(for: game) else {
             return nil
@@ -554,6 +591,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // shouldFetchLineupBattingSections 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private func shouldFetchLineupBattingSections(
         for context: OfficialGameLookupContext,
         includeRecordFallback: Bool
@@ -568,6 +606,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return bases.first || bases.second || bases.third
     }
 
+    // makeReview 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeReview(
         from boxScore: GameCenterBoxScorePayload?,
         lineupBattingSections: [GameCenterBattingSection]?,
@@ -629,6 +668,7 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 
     #if DEBUG
+    // logOfficialRecordConsistency 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logOfficialRecordConsistency(review: GameCenterReview, source: String) {
         let awayOfficialBatting = review.awayBatting.totals
         let homeOfficialBatting = review.homeBatting.totals
@@ -645,6 +685,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         print("[GameDetailLive] record consistency pitching=pass reason=renderedFromOfficialRows")
     }
 
+    // battingTotalsMatch 메서드는 이 타입의 주요 동작을 수행합니다.
     private func battingTotalsMatch(_ official: GameCenterBattingTotals?, _ rendered: GameCenterBattingTotals?) -> Bool {
         guard let official, let rendered else { return true }
         return official.atBats == rendered.atBats &&
@@ -654,6 +695,7 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
     #endif
 
+    // makeLivePitchingBaseSections 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLivePitchingBaseSections(context: OfficialGameLookupContext) -> [GameCenterPitchingSection] {
         var awayLines: [GameCenterPitchingLine] = []
         var homeLines: [GameCenterPitchingLine] = []
@@ -707,6 +749,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         ]
     }
 
+    // makeLivePitcherAppearanceSections 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLivePitcherAppearanceSections(from events: [GameEvent]) -> [GameCenterPitchingSection] {
         guard events.isEmpty == false else {
             #if DEBUG
@@ -766,6 +809,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         ]
     }
 
+    // makeLivePitchingBaseLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLivePitchingBaseLine(name: String, order: String, role: String) -> GameCenterPitchingLine {
         GameCenterPitchingLine(
             pitchingOrder: order,
@@ -785,6 +829,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // makeLivePlateAppearanceBattingSections 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLivePlateAppearanceBattingSections(
         from events: [GameEvent],
         lineupSections: [GameCenterBattingSection]?
@@ -852,6 +897,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         ]
     }
 
+    // makeLivePlateAppearanceLines 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLivePlateAppearanceLines(
         from lineupSection: GameCenterBattingSection,
         statsByKey: [String: PlateAppearanceDerivedStats]
@@ -878,6 +924,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // reconcileScheduledStartTimes 메서드는 이 타입의 주요 동작을 수행합니다.
     func reconcileScheduledStartTimes(in games: [GameDetail]) async -> [GameDetail] {
         guard games.isEmpty == false else { return games }
 
@@ -900,6 +947,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // fetchContext 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchContext(for game: GameDetail) async throws -> OfficialGameLookupContext? {
         let requestContext = OfficialKBORequestDebugContext(game: game)
         let payload = try await fetchGameList(
@@ -918,10 +966,12 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // fetchEntries 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchEntries(for dateText: String) async throws -> [OfficialGameEntry] {
         try await fetchGameList(for: dateText, requestContext: nil).game
     }
 
+    // fetchGameList 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchGameList(
         for dateText: String,
         requestContext: OfficialKBORequestDebugContext?
@@ -938,6 +988,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // fetchScoreboardIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchScoreboardIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> OfficialScoreboardPayload? {
@@ -986,6 +1037,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // fetchScoreboardPageLineScoreIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchScoreboardPageLineScoreIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> OfficialScoreboardPayload? {
@@ -1024,6 +1076,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // fetchBoxScoreIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchBoxScoreIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> GameCenterBoxScorePayload? {
@@ -1110,6 +1163,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // fetchScoreboardHTMLBoxScoreIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchScoreboardHTMLBoxScoreIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> GameCenterBoxScorePayload? {
@@ -1157,6 +1211,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return nil
     }
 
+    // fetchLiveKeyPlayerRecordsIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchLiveKeyPlayerRecordsIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> GameCenterBoxScorePayload? {
@@ -1206,6 +1261,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return payload.review?.hasDisplayableRecords == true ? payload : nil
     }
 
+    // fetchKeyPlayerRecords 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchKeyPlayerRecords(
         endpoint: String,
         section: String,
@@ -1228,6 +1284,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return response.records
     }
 
+    // makeLiveKeyPlayerPayload 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLiveKeyPlayerPayload(
         hitterRecords: [OfficialKeyPlayerRecord],
         pitcherRecords: [OfficialKeyPlayerRecord],
@@ -1266,6 +1323,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // makeLiveKeyPlayerSummaryItems 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLiveKeyPlayerSummaryItems(
         hitterRecords: [OfficialKeyPlayerRecord],
         pitcherRecords: [OfficialKeyPlayerRecord]
@@ -1285,6 +1343,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return hitterItems + pitcherItems
     }
 
+    // makeLiveKeyPlayerBattingLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLiveKeyPlayerBattingLine(
         from record: OfficialKeyPlayerRecord
     ) -> GameCenterBattingLine? {
@@ -1311,6 +1370,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return line
     }
 
+    // makeLiveKeyPlayerPitchingLine 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeLiveKeyPlayerPitchingLine(
         from record: OfficialKeyPlayerRecord
     ) -> GameCenterPitchingLine? {
@@ -1334,6 +1394,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // fetchLineupBattingSectionsIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchLineupBattingSectionsIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> [GameCenterBattingSection]? {
@@ -1369,6 +1430,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // fetchPreviewIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     private func fetchPreviewIfNeeded(
         for context: OfficialGameLookupContext
     ) async throws -> GameCenterPreview? {
@@ -1411,6 +1473,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // resolveEntry 메서드는 입력 데이터를 판별하거나 정렬해 사용할 대상을 결정합니다.
     private func resolveEntry(
         in entries: [OfficialGameEntry],
         game: GameDetail
@@ -1443,6 +1506,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return matches.first
     }
 
+    // reconcileScheduledStart 메서드는 이 타입의 주요 동작을 수행합니다.
     private func reconcileScheduledStart(
         for game: GameDetail,
         entries: [OfficialGameEntry]
@@ -1480,9 +1544,11 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // officialDateText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func officialDateText(for game: GameDetail) -> String {
-        if let officialGameID = game.officialGameCenterID,
-           officialGameID.count >= 8 {
+        if let officialGameID = game.officialGameCenterID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           officialGameID.count >= 8,
+           officialGameID.prefix(8).allSatisfy(\.isNumber) {
             return String(officialGameID.prefix(8))
         }
         let components = calendar.dateComponents([.year, .month, .day], from: game.scheduledStart)
@@ -1494,6 +1560,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // scheduledStart 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func scheduledStart(for entry: OfficialGameEntry, fallback: Date) -> Date? {
         let trimmedStartTime = entry.startTime.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmedStartTime.isEmpty == false else { return nil }
@@ -1519,6 +1586,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return formatter.date(from: String(format: "%04d-%02d-%02d %@", year, month, day, trimmedStartTime))
     }
 
+    // makeBattingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makeBattingSection(from tableGroup: OfficialBattingTableGroup) -> GameCenterBattingSection? {
         guard let orderTable = decodeGridTable(from: tableGroup.orderTable) else {
             return nil
@@ -1531,6 +1599,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // battingStat 메서드는 이 타입의 주요 동작을 수행합니다.
     private func battingStat(
         _ table: OfficialGridTable?,
         row: OfficialGridRow?,
@@ -1551,6 +1620,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return nil
     }
 
+    // makePitchingSection 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     private func makePitchingSection(from tableGroup: OfficialPitchingTableGroup) -> GameCenterPitchingSection? {
         guard let table = decodeGridTable(from: tableGroup.table) else {
             return nil
@@ -1559,6 +1629,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return makePitchingSection(from: table)
     }
 
+    // columnIndex 메서드는 이 타입의 주요 동작을 수행합니다.
     private func columnIndex(in table: OfficialGridTable?, labels: [String]) -> Int? {
         guard let headerCells = table?.headers.first?.cells else { return nil }
         let normalizedLabels = labels.map(normalizeStatLabel)
@@ -1567,6 +1638,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // normalizeStatLabel 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private func normalizeStatLabel(_ value: String) -> String {
         let scalars = value.normalizedGridText.unicodeScalars.filter { scalar in
             CharacterSet.whitespacesAndNewlines.contains(scalar) == false &&
@@ -1576,10 +1648,12 @@ struct OfficialKBOGameCenterClient: Sendable {
         return String(String.UnicodeScalarView(scalars)).uppercased()
     }
 
+    // decodeLineupFallbackGridTable 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     func decodeLineupFallbackGridTable(from rawValue: String) -> OfficialGridTable? {
         decodeGridTable(from: rawValue)
     }
 
+    // gridRowCount 메서드는 이 타입의 주요 동작을 수행합니다.
     private func gridRowCount(in rawTable: String?) -> Int {
         guard let rawTable, let table = decodeGridTable(from: rawTable) else {
             return 0
@@ -1587,6 +1661,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return table.rows.count
     }
 
+    // logGridSample 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logGridSample(prefix: String, rawTable: String?) {
         #if DEBUG
         guard let rawTable, let table = decodeGridTable(from: rawTable) else {
@@ -1600,6 +1675,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         #endif
     }
 
+    // logGridDiagnostics 메서드는 이 타입의 주요 동작을 수행합니다.
     private func logGridDiagnostics(prefix: String, rawTable: String?) {
         #if DEBUG
         guard let rawTable, let table = decodeGridTable(from: rawTable) else {
@@ -1614,6 +1690,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         #endif
     }
 
+    // post 메서드는 이 타입의 주요 동작을 수행합니다.
     private func post<Response: Decodable>(
         endpoint: String,
         form: [String: String],
@@ -1630,6 +1707,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // getText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func getText(
         endpoint: String,
         queryItems: [URLQueryItem],
@@ -1645,6 +1723,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return String(data: payload.data, encoding: .utf8) ?? ""
     }
 
+    // getHTMLText 메서드는 이 타입의 주요 동작을 수행합니다.
     private func getHTMLText(
         endpoint: String,
         queryItems: [URLQueryItem],
@@ -1661,6 +1740,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return String(data: payload.data, encoding: .utf8) ?? ""
     }
 
+    // postData 메서드는 이 타입의 주요 동작을 수행합니다.
     private func postData(
         endpoint: String,
         form: [String: String],
@@ -1669,6 +1749,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         try await postPayload(endpoint: endpoint, form: form, requestContext: requestContext).data
     }
 
+    // postPayload 메서드는 이 타입의 주요 동작을 수행합니다.
     private func postPayload(
         endpoint: String,
         form: [String: String],
@@ -1684,6 +1765,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         )
     }
 
+    // requestPayload 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     private func requestPayload(
         endpoint: String,
         method: String,
@@ -1784,12 +1866,14 @@ struct OfficialKBOGameCenterClient: Sendable {
         return OfficialKBOHTTPPayload(data: data, diagnostic: diagnostic)
     }
 
+    // debugLogOfficialInvalidResponse 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogOfficialInvalidResponse(_ diagnostic: OfficialKBOResponseDiagnostic) {
         #if DEBUG
         print("[GameDetailLive] official request invalidResponse \(diagnostic.debugDescription)")
         #endif
     }
 
+    // bodyPreview 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func bodyPreview(from data: Data) -> String {
         let prefix = data.prefix(1000)
         if let text = String(data: prefix, encoding: .utf8) {
@@ -1798,6 +1882,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return "<non-utf8 body \(data.count) bytes>"
     }
 
+    // isHTMLOrRedirectBody 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func isHTMLOrRedirectBody(data: Data, contentType: String?) -> Bool {
         if contentType?.localizedCaseInsensitiveContains("text/html") == true {
             return true
@@ -1805,6 +1890,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         return isRedirectOrKnownErrorHTML(data: data)
     }
 
+    // isRedirectOrKnownErrorHTML 메서드는 조건을 평가해 참/거짓 결과를 반환합니다.
     private static func isRedirectOrKnownErrorHTML(data: Data) -> Bool {
         guard let text = String(data: data.prefix(1000), encoding: .utf8) else {
             return false
@@ -1816,6 +1902,7 @@ struct OfficialKBOGameCenterClient: Sendable {
             lowered.contains("오류가 발생")
     }
 
+    // officialError 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func officialError(in data: Data) -> (code: String, message: String)? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rawCode = object["code"] else {
@@ -1826,11 +1913,13 @@ struct OfficialKBOGameCenterClient: Sendable {
         return (code, (object["msg"] as? String)?.nilIfBlank ?? "<missing message>")
     }
 
+    // formDebugDescription 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func formDebugDescription(_ form: [String: String]?) -> String {
         guard let form else { return "<none>" }
         return form.keys.sorted().map { "\($0)=\(form[$0] ?? "")" }.joined(separator: "&")
     }
 
+    // debugLogOfficialBoxScoreStructure 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogOfficialBoxScoreStructure(_ data: Data) {
         #if DEBUG
         guard let json = try? JSONSerialization.jsonObject(with: data),
@@ -1863,6 +1952,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         #endif
     }
 
+    // debugLogOfficialLineupStructure 메서드는 화면 표시와 디버그에 사용할 문구를 구성합니다.
     private func debugLogOfficialLineupStructure(_ data: Data) {
         #if DEBUG
         guard let json = try? JSONSerialization.jsonObject(with: data) else {
@@ -1886,12 +1976,14 @@ struct OfficialKBOGameCenterClient: Sendable {
         #endif
     }
 
+    // formEncodedBody 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func formEncodedBody(from values: [String: String]) -> Data? {
         var components = URLComponents()
         components.queryItems = values.map { URLQueryItem(name: $0.key, value: $0.value) }
         return components.percentEncodedQuery?.data(using: .utf8)
     }
 
+    // officialTeamCode 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func officialTeamCode(for appTeamID: String) -> String {
         switch appTeamID {
         case "doosan":
@@ -1919,6 +2011,7 @@ struct OfficialKBOGameCenterClient: Sendable {
         }
     }
 
+    // normalizeVenue 메서드는 외부 값이나 원본 데이터를 앱에서 쓰는 형태로 변환합니다.
     private static func normalizeVenue(_ value: String) -> String {
         value
             .replacingOccurrences(of: "야구장", with: "")
@@ -1928,12 +2021,14 @@ struct OfficialKBOGameCenterClient: Sendable {
     }
 }
 
+// OfficialGameLookupContext 구조체는 OfficialGameLookupContext 타입의 역할과 값을 정의합니다.
 struct OfficialGameLookupContext: Sendable {
     let game: GameDetail
     let entry: OfficialGameEntry
     let requestContext: OfficialKBORequestDebugContext
 }
 
+// OfficialScoreboardPayload 구조체는 OfficialScoreboardPayload 타입의 역할과 값을 정의합니다.
 private struct OfficialScoreboardPayload: Sendable {
     let stadium: String?
     let startTime: String?
@@ -1943,11 +2038,13 @@ private struct OfficialScoreboardPayload: Sendable {
     let lineScore: GameCenterLineScore?
 }
 
+// OfficialKBOHTTPPayload 구조체는 OfficialKBOHTTPPayload 타입의 역할과 값을 정의합니다.
 private struct OfficialKBOHTTPPayload: Sendable {
     let data: Data
     let diagnostic: OfficialKBOResponseDiagnostic
 }
 
+// OfficialKBORequestDebugContext 구조체는 OfficialKBORequestDebugContext 타입의 역할과 값을 정의합니다.
 struct OfficialKBORequestDebugContext: Sendable {
     let providerGameID: String?
     let officialProviderGameID: String?
@@ -1955,6 +2052,7 @@ struct OfficialKBORequestDebugContext: Sendable {
     let officialGameID: String?
     let referer: String?
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(
         providerGameID: String?,
         officialProviderGameID: String?,
@@ -1969,6 +2067,7 @@ struct OfficialKBORequestDebugContext: Sendable {
         self.referer = referer
     }
 
+    // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     init(game: GameDetail) {
         self.init(
             providerGameID: game.providerGameID,
@@ -1979,6 +2078,7 @@ struct OfficialKBORequestDebugContext: Sendable {
         )
     }
 
+    // with 메서드는 이 타입의 주요 동작을 수행합니다.
     func with(officialGameID: String? = nil, referer: String? = nil) -> OfficialKBORequestDebugContext {
         OfficialKBORequestDebugContext(
             providerGameID: providerGameID,
@@ -1990,6 +2090,7 @@ struct OfficialKBORequestDebugContext: Sendable {
     }
 }
 
+// OfficialKBOResponseDiagnostic 구조체는 OfficialKBOResponseDiagnostic 타입의 역할과 값을 정의합니다.
 struct OfficialKBOResponseDiagnostic: Sendable {
     let requestURL: String
     let providerGameID: String?
@@ -2001,6 +2102,7 @@ struct OfficialKBOResponseDiagnostic: Sendable {
     let bodyPreview: String
     let parseFailureReason: String?
 
+    // with 메서드는 이 타입의 주요 동작을 수행합니다.
     func with(parseFailureReason: String?) -> OfficialKBOResponseDiagnostic {
         OfficialKBOResponseDiagnostic(
             requestURL: requestURL,
@@ -2030,6 +2132,7 @@ struct OfficialKBOResponseDiagnostic: Sendable {
     }
 }
 
+// OfficialKBOGameCenterError 열거형는 실패 상황을 구분하고 호출자에게 전달합니다.
 enum OfficialKBOGameCenterError: Error, CustomStringConvertible {
     case invalidURL
     case invalidResponse(OfficialKBOResponseDiagnostic)
@@ -2092,6 +2195,7 @@ private extension String {
         firstGameCenterRegexCapture(pattern: #"\((.*?)\)"#) ?? gameCenterPlainRecordText
     }
 
+    // strippingHTML 메서드는 이 타입의 주요 동작을 수행합니다.
     func strippingHTML() -> String {
         guard let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) else {
             return self
@@ -2148,6 +2252,7 @@ private extension String {
         return normalized.isEmpty || ["없음", "무", "NONE", "NO", "NIL", "-"].contains(normalized)
     }
 
+    // firstGameCenterRegexCapture 메서드는 이 타입의 주요 동작을 수행합니다.
     func firstGameCenterRegexCapture(pattern: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(startIndex..<endIndex, in: self)
@@ -2159,10 +2264,12 @@ private extension String {
         return String(self[captureRange])
     }
 
+    // gameCenterFirstCapture 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameCenterFirstCapture(_ pattern: String) -> String? {
         firstGameCenterRegexCapture(pattern: pattern)
     }
 
+    // gameCenterRegexMatchCount 메서드는 이 타입의 주요 동작을 수행합니다.
     func gameCenterRegexMatchCount(pattern: String) -> Int {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
         let range = NSRange(startIndex..<endIndex, in: self)
@@ -2183,6 +2290,7 @@ private extension GameCenterBattingSection {
         totals?.strikeouts?.gameCenterStatInt ?? total(\.strikeouts)
     }
 
+    // total 메서드는 이 타입의 주요 동작을 수행합니다.
     func total(_ keyPath: KeyPath<GameCenterBattingLine, String?>) -> Int? {
         let values = lines.compactMap { $0[keyPath: keyPath]?.gameCenterStatInt }
         return values.isEmpty ? nil : values.reduce(0, +)

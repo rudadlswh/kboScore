@@ -1,5 +1,10 @@
+//  기능 설명: 직관 경기 기록을 승패, 홈/원정, 팀별 통계로 집계합니다.
+//  직관 경기 기록을 승패, 홈/원정, 팀별 통계로 집계합니다.을 명확히 분리해 변경 범위와 책임을 예측 가능하게 유지합니다.
+//  입력 데이터 누락, 비동기 실행 순서, 플랫폼별 동작 차이를 고려해 방어적으로 처리합니다.
+//  TODO : 반복되는 정책이나 화면 상태가 늘어나면 전용 모델과 테스트로 분리합니다.
 import Foundation
 
+// AttendanceGameSide 열거형는 AttendanceGameSide 타입의 역할과 값을 정의합니다.
 enum AttendanceGameSide: Hashable, Sendable {
     case home
     case away
@@ -14,6 +19,7 @@ enum AttendanceGameSide: Hashable, Sendable {
     }
 }
 
+// AttendanceRecordSummary 구조체는 AttendanceRecordSummary 타입의 역할과 값을 정의합니다.
 struct AttendanceRecordSummary: Hashable, Sendable {
     let games: Int
     let wins: Int
@@ -46,36 +52,50 @@ struct AttendanceRecordSummary: Hashable, Sendable {
     }
 }
 
+// AttendanceGameRecord 구조체는 AttendanceGameRecord 타입의 역할과 값을 정의합니다.
 struct AttendanceGameRecord: Identifiable, Hashable, Sendable {
     let id: String
     let gameIdentity: String
     let side: AttendanceGameSide
     let opponentName: String
+    let matchupText: String
     let stadium: String
     let scoreText: String
     let gameDate: Date
-    let result: TeamGameResult
+    let result: TeamGameResult?
+    let gameStatus: GameStatus
+
+    var isUpcomingAttendance: Bool {
+        !gameStatus.isFinishedLike
+    }
 }
 
+// AttendanceDashboard 구조체는 AttendanceDashboard 타입의 역할과 값을 정의합니다.
 struct AttendanceDashboard: Hashable, Sendable {
     let overall: AttendanceRecordSummary
     let home: AttendanceRecordSummary
     let away: AttendanceRecordSummary
     let games: [AttendanceGameRecord]
+    let upcomingGames: [AttendanceGameRecord]
+    let pastGames: [AttendanceGameRecord]
 
     static let empty = AttendanceDashboard(
         overall: .empty,
         home: .empty,
         away: .empty,
-        games: []
+        games: [],
+        upcomingGames: [],
+        pastGames: []
     )
 
     var hasGames: Bool {
-        overall.hasGames
+        !upcomingGames.isEmpty || !pastGames.isEmpty
     }
 }
 
+// AttendanceDashboardBuilder 구조체는 화면이나 도메인 모델에 필요한 값을 조립합니다.
 struct AttendanceDashboardBuilder {
+    // build 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
     static func build(attendedGames games: [GameDetail], favoriteTeamID: String?) -> AttendanceDashboard {
         guard let favoriteTeamID else { return .empty }
 
@@ -86,7 +106,6 @@ struct AttendanceDashboardBuilder {
         for game in games.sorted(by: { $0.scheduledStart > $1.scheduledStart }) {
             guard seenKeys.insert(game.attendanceStorageKey).inserted,
                   let side = attendanceSide(for: game, favoriteTeamID: favoriteTeamID),
-                  let result = game.finalResult(for: favoriteTeamID),
                   let opponent = opponentTeam(for: game, favoriteTeamID: favoriteTeamID) else {
                 continue
             }
@@ -96,10 +115,12 @@ struct AttendanceDashboardBuilder {
                 gameIdentity: game.stableDetailIdentity,
                 side: side,
                 opponentName: opponent.displayName,
+                matchupText: "\(game.awayTeam.displayName) vs \(game.homeTeam.displayName)",
                 stadium: game.venue,
                 scoreText: game.finalScoreLine ?? "---",
                 gameDate: game.scheduledStart,
-                result: result
+                result: game.finalResult(for: favoriteTeamID),
+                gameStatus: game.status
             )
 
             switch side {
@@ -110,17 +131,26 @@ struct AttendanceDashboardBuilder {
             }
         }
 
-        let allRecords = (homeRecords + awayRecords)
+        let displayRecords = homeRecords + awayRecords
+        let upcomingRecords = displayRecords
+            .filter(\.isUpcomingAttendance)
+            .sorted { $0.gameDate < $1.gameDate }
+        let pastRecords = displayRecords
+            .filter { !$0.isUpcomingAttendance }
             .sorted { $0.gameDate > $1.gameDate }
+        let allRecords = upcomingRecords + pastRecords
 
         return AttendanceDashboard(
-            overall: summary(for: allRecords),
+            overall: summary(for: displayRecords),
             home: summary(for: homeRecords),
             away: summary(for: awayRecords),
-            games: allRecords
+            games: allRecords,
+            upcomingGames: upcomingRecords,
+            pastGames: pastRecords
         )
     }
 
+    // attendanceSide 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func attendanceSide(for game: GameDetail, favoriteTeamID: String) -> AttendanceGameSide? {
         if game.homeTeam.id == favoriteTeamID {
             return .home
@@ -131,6 +161,7 @@ struct AttendanceDashboardBuilder {
         return nil
     }
 
+    // opponentTeam 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func opponentTeam(for game: GameDetail, favoriteTeamID: String) -> Team? {
         if game.homeTeam.id == favoriteTeamID {
             return game.awayTeam
@@ -141,13 +172,15 @@ struct AttendanceDashboardBuilder {
         return nil
     }
 
+    // summary 메서드는 이 타입의 주요 동작을 수행합니다.
     private static func summary(for records: [AttendanceGameRecord]) -> AttendanceRecordSummary {
         var wins = 0
         var losses = 0
         var draws = 0
 
         for record in records {
-            switch record.result {
+            guard let result = record.result else { continue }
+            switch result {
             case .win:
                 wins += 1
             case .loss:
@@ -158,7 +191,7 @@ struct AttendanceDashboardBuilder {
         }
 
         return AttendanceRecordSummary(
-            games: records.count,
+            games: wins + losses + draws,
             wins: wins,
             losses: losses,
             draws: draws

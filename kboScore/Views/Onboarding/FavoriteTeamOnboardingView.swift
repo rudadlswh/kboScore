@@ -62,8 +62,6 @@ struct FavoriteTeamOnboardingView: View {
                                 selectedTeamID = team.id
                             } label: {
                                 HStack(spacing: 12) {
-                                    TeamMarkView(team: team, size: 38)
-
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(team.displayName)
                                             .font(.subheadline.weight(.bold))
