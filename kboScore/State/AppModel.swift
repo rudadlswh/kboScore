@@ -73,6 +73,7 @@ private enum FavoriteTeamScheduleWidgetSnapshotSource: Int {
 
 private struct FavoriteTeamScheduleWidgetMonthSource {
     let monthKey: KBOMonthScheduleKey
+    let favoriteTeamID: String
     let games: [GameDetail]
     let source: FavoriteTeamScheduleWidgetSnapshotSource
     let updatedAt: Date
@@ -280,7 +281,7 @@ final class AppModel {
     private(set) var failedScheduleMonths: Set<KBOMonthScheduleKey> = []
     private var monthlyScheduleRefreshDayKeys: [KBOMonthScheduleKey: String] = [:]
     private var monthlyScheduleDecisionLogKeys: [KBOMonthScheduleKey: String] = [:]
-    private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Void, Never>] = [:]
+    private var inFlightScheduleMonthTasks: [KBOMonthScheduleKey: Task<Bool, Never>] = [:]
     private var inFlightGameDetailRefreshTasks: [String: Task<GameDetailRefreshResult?, Never>] = [:]
     private var activeGameDetailLivePollingIdentity: String?
     private var gameDetailLivePollingTask: Task<Void, Never>?
@@ -433,7 +434,7 @@ final class AppModel {
         await refreshFavoriteTeamGameForHome(reason: "launch", bypassingCache: true)
         await loadHomeFallbackStandingsSourceIfNeeded(reason: "launch")
         await syncFavoriteTeamLiveActivity()
-        await syncFavoriteTeamWidgetSnapshot(includePrefetch: false)
+        await syncFavoriteTeamWidgetSnapshot(includePrefetch: true, reason: "launch")
         isLoading = false
     }
 
@@ -667,7 +668,7 @@ final class AppModel {
         }
         await syncFavoriteTeamLiveActivity()
         await syncFavoriteTeamWidgetSnapshot(
-            includePrefetch: false,
+            includePrefetch: reason == "foreground",
             reason: "liveActivity",
             monthKey: scheduleMonthKey(for: currentDateProvider())
         )
@@ -1647,11 +1648,11 @@ final class AppModel {
             #endif
             return
         }
-        favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
+        storeFavoriteTeamWidgetMonthSource(
+            sortedGames,
             monthKey: monthKey,
-            games: sortedGames,
-            source: .scheduleTabCurrentMonth,
-            updatedAt: currentDateProvider()
+            favoriteTeamID: settings.favoriteTeamID,
+            source: .scheduleTabCurrentMonth
         )
         #if DEBUG
         print("[WidgetScheduleBridge] month=\(monthKey.yearMonthText) source=scheduleTabMonth count=\(sortedGames.count) favoriteTeam=\(settings.favoriteTeamID ?? "nil")")
@@ -3892,20 +3893,20 @@ final class AppModel {
     }
 
     // loadMyTeamSchedule 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
-    private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async {
+    @discardableResult
+    private func loadMyTeamSchedule(for month: Date, forceRefresh: Bool) async -> Bool {
         let key = KBOMonthScheduleKey(date: month, calendar: calendar)
         if let existingTask = inFlightScheduleMonthTasks[key] {
             #if DEBUG
             print("[ScheduleCache] month=\(key.yearMonthText) source=inFlight reason=awaitExistingFetch")
             #endif
-            await existingTask.value
-            return
+            return await existingTask.value
         }
 
         let loadID = UUID().uuidString
         let task = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.performLoadMyTeamSchedule(
+            guard let self else { return false }
+            return await self.performLoadMyTeamSchedule(
                 for: month,
                 key: key,
                 forceRefresh: forceRefresh,
@@ -3913,8 +3914,9 @@ final class AppModel {
             )
         }
         inFlightScheduleMonthTasks[key] = task
-        await task.value
+        let succeeded = await task.value
         inFlightScheduleMonthTasks[key] = nil
+        return succeeded
     }
 
     // performLoadMyTeamSchedule 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
@@ -3923,7 +3925,7 @@ final class AppModel {
         key: KBOMonthScheduleKey,
         forceRefresh: Bool,
         loadID: String
-    ) async {
+    ) async -> Bool {
         let hasLocalMonth = monthlyScheduleGames[key] != nil
 
         if forceRefresh == false, hasLocalMonth {
@@ -3934,16 +3936,16 @@ final class AppModel {
                 monthlyScheduleDecisionLogKeys[key] = logKey
             }
             #endif
-            return
+            return true
         }
 
-        guard !loadingScheduleMonths.contains(key) else { return }
+        guard !loadingScheduleMonths.contains(key) else { return false }
 
         loadingScheduleMonths.insert(key)
         defer { loadingScheduleMonths.remove(key) }
 
         let localReason = forceRefresh ? "manualRefreshLocal" : "monthNavigation"
-        await loadScheduleMonthFromRepository(for: key, reason: localReason, loadID: loadID, bypassingCache: forceRefresh)
+        return await loadScheduleMonthFromRepository(for: key, reason: localReason, loadID: loadID, bypassingCache: forceRefresh)
     }
 
     // loadScheduleMonthFromRepository 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -3952,7 +3954,7 @@ final class AppModel {
         reason: String,
         loadID: String,
         bypassingCache: Bool
-    ) async {
+    ) async -> Bool {
         let startedAt = Date()
         do {
             let fetched = try await repository.fetchMonthlySchedule(for: key, bypassingCache: bypassingCache)
@@ -3963,6 +3965,14 @@ final class AppModel {
             )
             monthlyScheduleGames[key] = mergeMonthlyScheduleGames(normalized, for: key)
                 .sorted { $0.scheduledStart < $1.scheduledStart }
+            if key == currentWidgetMonthKey(), let favoriteTeamID = settings.favoriteTeamID {
+                storeFavoriteTeamWidgetMonthSource(
+                    monthlyScheduleGames[key] ?? [],
+                    monthKey: key,
+                    favoriteTeamID: favoriteTeamID,
+                    source: .appModelMonthly
+                )
+            }
             failedScheduleMonths.remove(key)
             invalidateScheduleDerivedCaches(for: key)
             await syncFavoriteTeamWidgetSnapshot(
@@ -3973,12 +3983,14 @@ final class AppModel {
             #if DEBUG
             print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) loadID=\(loadID) gameCount=\(monthlyScheduleGames[key]?.count ?? 0) scheduleMonthLoad skippedGlobalMerge=true durationMs=\(Self.durationMilliseconds(since: startedAt))")
             #endif
+            return true
         } catch {
             failedScheduleMonths.insert(key)
             #if DEBUG
             print("[ScheduleCache] month=\(key.yearMonthText) source=repository reason=\(reason) failed durationMs=\(Self.durationMilliseconds(since: startedAt)) error=\(error)")
             #endif
             await hydrateScheduleMonthFromLocalStore(for: key, reason: reason, loadID: loadID)
+            return false
         }
     }
 
@@ -4713,8 +4725,10 @@ final class AppModel {
             return
         }
 
-        if includePrefetch {
+        let requestedFavoriteTeamID = settings.favoriteTeamID
+        if includePrefetch, shouldPrefetchFavoriteTeamWidgetSchedule() {
             await prepareFavoriteTeamWidgetScheduleIfNeeded()
+            guard settings.favoriteTeamID == requestedFavoriteTeamID else { return }
         }
 
         let resolvedIncomingSource = incomingSource ?? favoriteTeamWidgetSnapshotSource(for: reason)
@@ -4781,6 +4795,11 @@ final class AppModel {
             source: reason,
             monthKey: widgetMonthKey.yearMonthText
         )
+        let persistedState = FavoriteTeamScheduleWidgetShared.loadState()
+        guard persistedState.favoriteTeamID == settings.favoriteTeamID,
+              persistedState.snapshot == snapshot else {
+            return
+        }
         lastFavoriteTeamWidgetSemanticKey = semanticKey
         lastFavoriteTeamWidgetSnapshot = snapshot
         reloadFavoriteTeamWidgetTimelines()
@@ -4832,18 +4851,54 @@ final class AppModel {
 
     // prepareFavoriteTeamWidgetScheduleIfNeeded 메서드는 이 타입의 주요 동작을 수행합니다.
     private func prepareFavoriteTeamWidgetScheduleIfNeeded() async {
-        guard settings.favoriteTeamID != nil else { return }
+        guard let favoriteTeamID = settings.favoriteTeamID else { return }
 
         let scheduleCalendar = widgetScheduleCalendar()
         let today = scheduleCalendar.startOfDay(for: currentDateProvider())
         let requestedMonth = startOfMonth(for: today, calendar: scheduleCalendar)
+        let requestedMonthKey = KBOMonthScheduleKey(date: requestedMonth, calendar: scheduleCalendar)
+        let snapshot = FavoriteTeamScheduleWidgetShared.loadSnapshot()
+        let needsRefresh = snapshot?.teamID == favoriteTeamID
+            && (snapshot?.refreshAfter ?? .distantPast) <= currentDateProvider()
 
-        await loadMyTeamSchedule(for: requestedMonth, forceRefresh: false)
+        let succeeded = await loadMyTeamSchedule(for: requestedMonth, forceRefresh: needsRefresh)
+        guard succeeded,
+              settings.favoriteTeamID == favoriteTeamID,
+              currentWidgetMonthKey() == requestedMonthKey,
+              let games = monthlyScheduleGames[requestedMonthKey] else { return }
+        storeFavoriteTeamWidgetMonthSource(
+            games,
+            monthKey: requestedMonthKey,
+            favoriteTeamID: favoriteTeamID,
+            source: .appModelMonthly
+        )
+    }
 
-        if let resolvedMonth = nearestScheduleMonth(to: requestedMonth, filter: .myTeam),
-           scheduleCalendar.isDate(resolvedMonth, equalTo: requestedMonth, toGranularity: .month) == false {
-            await loadMyTeamSchedule(for: resolvedMonth, forceRefresh: false)
-        }
+    private func shouldPrefetchFavoriteTeamWidgetSchedule() -> Bool {
+        guard let favoriteTeamID = settings.favoriteTeamID else { return false }
+        let monthKey = currentWidgetMonthKey()
+        let source = favoriteTeamWidgetMonthSources[monthKey]
+        let snapshot = FavoriteTeamScheduleWidgetShared.loadSnapshot()
+        return source?.favoriteTeamID != favoriteTeamID
+            || snapshot?.teamID != favoriteTeamID
+            || snapshot.map { FavoriteTeamScheduleWidgetSnapshotMonthPolicy.isCurrentMonth(snapshot: $0, now: currentDateProvider()) } != true
+            || snapshot.map { $0.refreshAfter <= currentDateProvider() } != false
+    }
+
+    private func storeFavoriteTeamWidgetMonthSource(
+        _ games: [GameDetail],
+        monthKey: KBOMonthScheduleKey,
+        favoriteTeamID: String?,
+        source: FavoriteTeamScheduleWidgetSnapshotSource
+    ) {
+        guard let favoriteTeamID, settings.favoriteTeamID == favoriteTeamID else { return }
+        favoriteTeamWidgetMonthSources[monthKey] = FavoriteTeamScheduleWidgetMonthSource(
+            monthKey: monthKey,
+            favoriteTeamID: favoriteTeamID,
+            games: games,
+            source: source,
+            updatedAt: currentDateProvider()
+        )
     }
 
     // makeFavoriteTeamWidgetSnapshot 메서드는 화면이나 도메인 모델에 필요한 값을 생성합니다.
@@ -4861,9 +4916,11 @@ final class AppModel {
         let displayedMonthKey = currentMonthKey
         let displayedMonthSourceGames: [GameDetail]?
         if preferredMonthKey == currentMonthKey {
-            displayedMonthSourceGames = preferredMonthGames ?? favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+            displayedMonthSourceGames = preferredMonthGames ?? favoriteTeamWidgetMonthSources[displayedMonthKey]
+                .flatMap { $0.favoriteTeamID == favoriteTeam.id ? $0.games : nil }
         } else {
-            displayedMonthSourceGames = favoriteTeamWidgetMonthSources[displayedMonthKey]?.games
+            displayedMonthSourceGames = favoriteTeamWidgetMonthSources[displayedMonthKey]
+                .flatMap { $0.favoriteTeamID == favoriteTeam.id ? $0.games : nil }
         }
         let calendarDays: [MyTeamCalendarDay]
         if let displayedMonthSourceGames {
