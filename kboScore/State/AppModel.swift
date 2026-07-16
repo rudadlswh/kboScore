@@ -139,6 +139,11 @@ struct GameDetailRefreshResult: Sendable {
     let publicGameID: String?
 }
 
+struct GameDetailRecordRefreshSignal: Equatable, Sendable {
+    let rawHash: String
+    let sequence: Int
+}
+
 private enum GameDetailLiveStateRefresh: Sendable {
     case updated(GameDetailRefreshResult)
     case unchanged
@@ -203,6 +208,8 @@ final class AppModel {
     private var favoriteTeamWidgetMonthSources: [KBOMonthScheduleKey: FavoriteTeamScheduleWidgetMonthSource] = [:]
     private var rawSupabaseGameDetailIdentities: [String: RawSupabaseGameDetailIdentity] = [:]
     private var lastGameDetailLiveStateRawHashByIdentity: [String: String] = [:]
+    private var gameDetailRecordRefreshSignalsByIdentity: [String: GameDetailRecordRefreshSignal] = [:]
+    private var gameDetailRecordRefreshSequence = 0
     private var inFlightAttendanceTasks: [UUID: Task<Void, Never>] = [:]
     private var attendanceListSyncInFlight = false
     private var attendanceListSyncSuppressed = false
@@ -2170,13 +2177,21 @@ final class AppModel {
 
     // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
     func fetchGameDetailDatabaseReviewResult(for game: GameDetail) async -> GameDetailDatabaseReviewFetchResult? {
+        await fetchGameDetailDatabaseReviewResult(for: game, forceRefresh: false)
+    }
+
+    // fetchGameDetailDatabaseReviewResult 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
+    func fetchGameDetailDatabaseReviewResult(
+        for game: GameDetail,
+        forceRefresh requestedForceRefresh: Bool
+    ) async -> GameDetailDatabaseReviewFetchResult? {
         guard game.status == .final || game.status.isLiveLike else {
             #if DEBUG
             print("[GameDetailDBRecords] selectedRecordSource=none reason=nonRecordStatus status=\(game.status.rawValue) gameID=\(game.id.uuidString)")
             #endif
             return nil
         }
-        let forceRefresh = game.status.isLiveLike
+        let forceRefresh = requestedForceRefresh || game.status.isLiveLike
         if let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource {
             let rawIdentity = rawSupabaseGameDetailIdentity(for: game)
             let providerGameID = game.providerGameID ?? rawIdentity?.providerGameID
@@ -2185,7 +2200,8 @@ final class AppModel {
                 return await fetchGameDetailDatabaseReviewResult(
                     rawSupabaseGameID: rawSupabaseGameID,
                     providerGameID: providerGameID,
-                    publicGameID: publicGameID
+                    publicGameID: publicGameID,
+                    forceRefresh: forceRefresh
                 )
             }
             if providerGameID?.nilIfBlank != nil || publicGameID?.nilIfBlank != nil {
@@ -2334,6 +2350,20 @@ final class AppModel {
         providerGameID: String?,
         publicGameID: String?
     ) async -> GameDetailDatabaseReviewFetchResult? {
+        await fetchGameDetailDatabaseReviewResult(
+            rawSupabaseGameID: rawSupabaseGameID,
+            providerGameID: providerGameID,
+            publicGameID: publicGameID,
+            forceRefresh: false
+        )
+    }
+
+    private func fetchGameDetailDatabaseReviewResult(
+        rawSupabaseGameID: UUID,
+        providerGameID: String?,
+        publicGameID: String?,
+        forceRefresh: Bool
+    ) async -> GameDetailDatabaseReviewFetchResult? {
         guard let recordSource = repository as? any KBOGameDetailDatabaseRecordDiagnosticDataSource else {
             #if DEBUG
             print("[GameDetailDBRecords] selectedRecordSource=none reason=unsupportedRepository rawSupabaseGameId=\(rawSupabaseGameID.uuidString)")
@@ -2345,7 +2375,7 @@ final class AppModel {
             providerGameID: providerGameID,
             publicGameID: publicGameID,
             recordType: "supabaseDbRecords",
-            forceRefresh: false
+            forceRefresh: forceRefresh
         ) {
             try await recordSource.fetchGameDetailDatabaseReview(
                 supabaseGameId: rawSupabaseGameID,
@@ -2482,6 +2512,15 @@ final class AppModel {
         )
     }
 
+    func gameDetailRecordRefreshSignal(for gameIdentity: String) -> GameDetailRecordRefreshSignal? {
+        if let signal = gameDetailRecordRefreshSignalsByIdentity[gameIdentity] {
+            return signal
+        }
+        guard let game = game(withIdentity: gameIdentity) else { return nil }
+        return gameDetailRecordRefreshSignalsByIdentity[game.stableDetailIdentity]
+            ?? gameDetailRecordRefreshSignalsByIdentity[game.canonicalGameIdentityValue]
+    }
+
     // runGameDetailLivePolling 메서드는 선택된 라이브 경기 상세를 2초 간격으로 갱신합니다.
     private func runGameDetailLiveStreamThenFallback(
         identity: String,
@@ -2571,6 +2610,13 @@ final class AppModel {
                     logGameDetailPolling("snapshot ignored reason=missingSelectedGame identity=\(identity) publicGameId=\(liveState.publicGameId)")
                     continue
                 }
+                guard shouldProcessGameDetailLiveStateRawHash(
+                    liveState.rawHash,
+                    identity: selectedGame.stableDetailIdentity,
+                    source: "sse"
+                ) else {
+                    continue
+                }
                 logGameDetailPolling("stream snapshot apply started publicGameId=\(liveState.publicGameId)")
                 var result = await refreshLatestGameSnapshotOnlyResult(
                     for: identity,
@@ -2582,10 +2628,16 @@ final class AppModel {
                         selectedGame: selectedGame,
                         gameIdentity: identity,
                         source: "sse-fallback",
-                        syncLiveActivity: false
+                        syncLiveActivity: false,
+                        deduplicateRawHash: false
                     )
                 }
                 if let result {
+                    publishGameDetailRecordRefreshSignal(
+                        identity: identity,
+                        game: result.game,
+                        rawHash: liveState.rawHash
+                    )
                     logStreamSnapshotApplyCompleted(publicGameID: liveState.publicGameId, game: result.game)
                     await startOrUpdateLiveActivityIfNeeded(for: result.game)
                     logGameDetailPolling("snapshot applied identity=\(identity) publicGameId=\(liveState.publicGameId) rawHash=\(liveState.rawHash) status=\(result.game.status.rawValue)")
@@ -2676,6 +2728,13 @@ final class AppModel {
                 "GameDetail polling tick latestSnapshot runner_on_first=\(boolDebugText(result.game.bases?.first)) runner_on_second=\(boolDebugText(result.game.bases?.second)) runner_on_third=\(boolDebugText(result.game.bases?.third)) identity=\(identity)"
             )
             logGameDetailPolling("GameDetail polling refresh succeeded identity=\(identity) status=\(result.game.status.rawValue)")
+            if result.game != selectedGame {
+                publishGameDetailRecordRefreshSignal(
+                    identity: identity,
+                    game: result.game,
+                    rawHash: "poll:\(generation):\(currentDateProvider().timeIntervalSince1970)"
+                )
+            }
             guard Task.isCancelled == false else { break }
             if result.game.shouldPollGameDetail(now: currentDateProvider()) {
                 await startOrUpdateLiveActivityIfNeeded(for: result.game)
@@ -2829,7 +2888,8 @@ final class AppModel {
         selectedGame: GameDetail,
         gameIdentity: String,
         source: String,
-        syncLiveActivity: Bool
+        syncLiveActivity: Bool,
+        deduplicateRawHash: Bool = true
     ) async -> GameDetailRefreshResult? {
         let stableKey = selectedGame.stableDetailIdentity
         if let selectedPublicGameID = selectedGame.publicGameID?.nilIfBlank,
@@ -2839,11 +2899,14 @@ final class AppModel {
             )
             return nil
         }
-        if lastGameDetailLiveStateRawHashByIdentity[stableKey] == liveState.rawHash {
-            logGameDetailPolling("snapshot ignored reason=rawHashUnchanged source=\(source) identity=\(stableKey) rawHash=\(liveState.rawHash)")
+        if deduplicateRawHash,
+           shouldProcessGameDetailLiveStateRawHash(
+               liveState.rawHash,
+               identity: stableKey,
+               source: source
+           ) == false {
             return nil
         }
-        lastGameDetailLiveStateRawHashByIdentity[stableKey] = liveState.rawHash
         let updatedGame = selectedGame.applyingLiveState(liveState)
         if source == "sse-fallback" {
             AppLog.info(.gameDetail, "[GameDetailLiveSituation] preserveRunnerNames source=\(source) before=\(liveRunnerDebug(selectedGame)) after=\(liveRunnerDebug(updatedGame))")
@@ -2881,6 +2944,34 @@ final class AppModel {
             providerGameID: selectedGame.providerGameID,
             publicGameID: liveState.publicGameId
         )
+    }
+
+    private func shouldProcessGameDetailLiveStateRawHash(
+        _ rawHash: String,
+        identity: String,
+        source: String
+    ) -> Bool {
+        guard lastGameDetailLiveStateRawHashByIdentity[identity] != rawHash else {
+            logGameDetailPolling("snapshot ignored reason=rawHashUnchanged source=\(source) identity=\(identity) rawHash=\(rawHash)")
+            return false
+        }
+        lastGameDetailLiveStateRawHashByIdentity[identity] = rawHash
+        return true
+    }
+
+    private func publishGameDetailRecordRefreshSignal(
+        identity: String,
+        game: GameDetail,
+        rawHash: String
+    ) {
+        gameDetailRecordRefreshSequence += 1
+        let signal = GameDetailRecordRefreshSignal(
+            rawHash: rawHash,
+            sequence: gameDetailRecordRefreshSequence
+        )
+        for key in Set([identity, game.stableDetailIdentity, game.canonicalGameIdentityValue]) {
+            gameDetailRecordRefreshSignalsByIdentity[key] = signal
+        }
     }
 
     // refreshGameDetailResult 메서드는 최신 상태를 다시 가져오고 관련 화면 데이터를 동기화합니다.

@@ -106,6 +106,7 @@ struct GameCenterReview: Sendable {
     let awayPitching: GameCenterPitchingSection
     let homePitching: GameCenterPitchingSection
     let recordSource: GameCenterRecordSource
+    let recordUpdatedAt: Date?
 
     // 이 초기화 메서드는 인스턴스 생성에 필요한 값을 설정합니다.
     nonisolated init(
@@ -114,7 +115,8 @@ struct GameCenterReview: Sendable {
         homeBatting: GameCenterBattingSection,
         awayPitching: GameCenterPitchingSection,
         homePitching: GameCenterPitchingSection,
-        recordSource: GameCenterRecordSource = .unknown
+        recordSource: GameCenterRecordSource = .unknown,
+        recordUpdatedAt: Date? = nil
     ) {
         self.summaryItems = summaryItems
         self.awayBatting = awayBatting
@@ -122,6 +124,7 @@ struct GameCenterReview: Sendable {
         self.awayPitching = awayPitching
         self.homePitching = homePitching
         self.recordSource = recordSource
+        self.recordUpdatedAt = recordUpdatedAt
     }
 
     var hasDisplayableRecords: Bool {
@@ -132,14 +135,18 @@ struct GameCenterReview: Sendable {
             summaryItems.isEmpty == false
     }
 
-    nonisolated func withRecordSource(_ source: GameCenterRecordSource) -> GameCenterReview {
+    nonisolated func withRecordSource(
+        _ source: GameCenterRecordSource,
+        recordUpdatedAt: Date? = nil
+    ) -> GameCenterReview {
         GameCenterReview(
             summaryItems: summaryItems,
             awayBatting: awayBatting,
             homeBatting: homeBatting,
             awayPitching: awayPitching,
             homePitching: homePitching,
-            recordSource: source
+            recordSource: source,
+            recordUpdatedAt: recordUpdatedAt ?? self.recordUpdatedAt
         )
     }
 }

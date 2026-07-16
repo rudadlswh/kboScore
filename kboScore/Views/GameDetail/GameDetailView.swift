@@ -124,7 +124,10 @@ struct GameDetailView: View {
                     for: initialGame,
                     forceRefresh: false,
                     fetchDatabaseRecordReview: { game in
-                        await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
+                        await appModel.fetchGameDetailDatabaseReviewResult(
+                            for: game,
+                            forceRefresh: false
+                        )?.review
                     }
                 )
             }
@@ -159,6 +162,22 @@ struct GameDetailView: View {
             guard let updatedGame else { return }
             Task {
                 await applySharedGameDetailUpdate(updatedGame)
+            }
+        }
+        .onChange(of: appModel.gameDetailRecordRefreshSignal(for: viewModel.stableIdentity)) { _, signal in
+            guard let signal, let game = viewModel.game else { return }
+            Task {
+                #if DEBUG
+                print("[GameDetailDBRecords] refresh requested source=liveSnapshot rawHash=\(signal.rawHash) sequence=\(signal.sequence)")
+                #endif
+                await loadDetailPresentation(
+                    for: game,
+                    inputLocalGameId: game.id,
+                    rawSupabaseGameID: viewModel.rawSupabaseGameID,
+                    rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
+                    rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
+                    forceRefresh: true
+                )
             }
         }
         .refreshable {
@@ -207,7 +226,7 @@ struct GameDetailView: View {
             rawSupabaseGameID: viewModel.rawSupabaseGameID,
             rawSupabaseProviderGameID: viewModel.rawSupabaseProviderGameID,
             rawSupabasePublicGameID: viewModel.rawSupabasePublicGameID,
-            forceRefresh: updatedGame.shouldPollGameDetail(now: Date())
+            forceRefresh: false
         )
     }
 
@@ -224,7 +243,10 @@ struct GameDetailView: View {
             for: game,
             forceRefresh: forceRefresh,
             fetchDatabaseRecordReview: { game in
-                await appModel.fetchGameDetailDatabaseReviewResult(for: game)?.review
+                await appModel.fetchGameDetailDatabaseReviewResult(
+                    for: game,
+                    forceRefresh: forceRefresh
+                )?.review
             }
         )
         await screenModel.mergeDatabaseRecordReviewAfterFetchGameSingle(
@@ -684,17 +706,27 @@ struct GameDetailPresentation {
             return nil
         }
         if status.isLiveLike {
-            if let databaseRecordReview,
-               databaseRecordReview.recordSource == .dbLiveRecordsFresh {
-                return databaseRecordReview
-            }
-            return [
+            let fullBoxscoreReview = [
                 boxscoreReview,
                 officialFallbackReview,
                 payloadReview
             ]
                 .compactMap { $0 }
                 .first { $0.recordSource == .fullBoxscore }
+            if let databaseRecordReview,
+               databaseRecordReview.recordSource == .dbLiveRecordsFresh {
+                if let fullBoxscoreReview,
+                   let boxscoreUpdatedAt = fullBoxscoreReview.recordUpdatedAt {
+                    guard let databaseUpdatedAt = databaseRecordReview.recordUpdatedAt else {
+                        return fullBoxscoreReview
+                    }
+                    if boxscoreUpdatedAt > databaseUpdatedAt {
+                        return fullBoxscoreReview
+                    }
+                }
+                return databaseRecordReview
+            }
+            return fullBoxscoreReview
         }
         if status == .final, let databaseRecordReview {
             return databaseRecordReview.enrichingBatterPositions(from: payloadReview ?? officialFallbackReview)

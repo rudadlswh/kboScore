@@ -672,9 +672,15 @@ extension SupabaseBackedKBORepository: KBOGameDetailSnapshotDataSource, KBOGameD
         guard status.isLiveLike else { return review }
         guard let latestRecordUpdatedAt,
               now.timeIntervalSince(latestRecordUpdatedAt) <= GameDetailDatabaseReviewFetchResult.liveRecordFreshnessThreshold else {
-            return review.withRecordSource(.staleDbRecordsIgnored)
+            return review.withRecordSource(
+                .staleDbRecordsIgnored,
+                recordUpdatedAt: latestRecordUpdatedAt
+            )
         }
-        return review.withRecordSource(.dbLiveRecordsFresh)
+        return review.withRecordSource(
+            .dbLiveRecordsFresh,
+            recordUpdatedAt: latestRecordUpdatedAt
+        )
     }
 
     nonisolated private static func latestRecordUpdatedAt(
