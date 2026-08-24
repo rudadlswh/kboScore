@@ -11546,6 +11546,87 @@ struct kboScoreTests {
         #expect(result.game.id != rawSupabaseGameID)
     }
 
+    @Test func liveDatabaseRecordRefreshBypassesRawSupabaseIDCache() async throws {
+        let localGameID = UUID(uuidString: "86A920BA-5084-56F4-8F60-B1CB508C30E7")!
+        let rawSupabaseGameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
+        let awayTeamID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let homeTeamID = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+        let teamRows = [
+            SupabaseTeamRow(id: awayTeamID, code: "doosan", name: "두산 베어스", shortName: "두산"),
+            SupabaseTeamRow(id: homeTeamID, code: "ssg", name: "SSG 랜더스", shortName: "SSG")
+        ]
+        let initialGame = try makeLiveBoxscoreDetailGame(status: .upcoming, id: localGameID)
+        let gameRow = try makeSupabaseGameRow(
+            id: rawSupabaseGameID,
+            publicGameID: initialGame.publicGameID ?? "20260510-DOO-SSG",
+            providerGameID: initialGame.providerGameID ?? "20260510SKOB0",
+            gameDate: "2026-05-10",
+            scheduledAt: "2026-05-10T14:00:00+09:00",
+            stadium: "잠실",
+            status: "live",
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID,
+            awayScore: 3,
+            homeScore: 1,
+            inningState: "Top 3"
+        )
+        let snapshot = try makeSupabaseLatestSnapshotRow(
+            gameID: rawSupabaseGameID,
+            inningLabel: "Top 3",
+            balls: 1,
+            strikes: 2,
+            outs: 1,
+            awayScore: 3,
+            homeScore: 1,
+            runnerOnFirst: true,
+            updatedAt: "2026-05-10T14:10:00+09:00"
+        )
+        let fixture = SupabaseDetailedRecordFixture(
+            game: initialGame,
+            awayTeamID: awayTeamID,
+            homeTeamID: homeTeamID
+        )
+        var batter = fixture.batter(
+            name: "최신타자",
+            teamID: awayTeamID,
+            sourceOrder: 0,
+            battingOrder: 1,
+            gameID: rawSupabaseGameID,
+            atBats: 2
+        )
+        batter.updatedAt = "2026-05-10T14:10:00+09:00"
+        let tracker = DetailFetchTracker()
+        let repository = SupabaseBackedKBORepository(
+            base: StubRepository(),
+            source: TrackingSupabaseSource(
+                teamRows: teamRows,
+                gameRows: [gameRow],
+                tracker: tracker,
+                batterRows: [batter],
+                latestSnapshotRows: [snapshot]
+            ),
+            runtimeState: nil
+        )
+        let model = AppModel(
+            repository: repository,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [initialGame], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { isoDate("2026-05-10T14:11:00+09:00") }
+        )
+
+        let refreshed = try #require(await model.refreshGameDetailResult(for: initialGame.stableDetailIdentity)?.game)
+        #expect(refreshed.status == .live)
+
+        _ = await model.fetchGameDetailDatabaseReviewResult(for: refreshed)
+        _ = await model.fetchGameDetailDatabaseReviewResult(for: refreshed)
+
+        let finalGame = try makeLiveBoxscoreDetailGame(status: .final, id: localGameID)
+        _ = await model.fetchGameDetailDatabaseReviewResult(for: finalGame)
+        _ = await model.fetchGameDetailDatabaseReviewResult(for: finalGame, forceRefresh: true)
+
+        #expect(await tracker.batterRecordGameIDs == [rawSupabaseGameID, rawSupabaseGameID, rawSupabaseGameID])
+    }
+
     @Test func latestGameSnapshotResultUsesSingleSnapshotQueryForLiveSituation() async throws {
         let gameID = UUID(uuidString: "1040A2AB-2E5D-4F20-9743-80C39C2C7345")!
         let game = makeGameDetail(
@@ -12461,6 +12542,80 @@ struct kboScoreTests {
         #expect(presentation.review?.awayBatting.lines.first?.atBats == "1")
     }
 
+    @Test func liveGamePrefersNewerBoxscoreOverOlderFreshDatabaseRecords() throws {
+        let game = try makeLiveBoxscoreDetailGame()
+        let databaseReview = sampleDatabaseRecordReview(game: game, batterCount: 2, pitcherCount: 1)
+            .withRecordSource(
+                .dbLiveRecordsFresh,
+                recordUpdatedAt: isoDate("2026-05-10T16:10:00+09:00")
+            )
+        let presentation = GameDetailPresentation(
+            game: game,
+            payload: nil,
+            boxscore: sampleOfficialPriorityBoxscoreResponse(),
+            databaseRecordReview: databaseReview,
+            officialFallbackReview: nil
+        )
+
+        #expect(presentation.review?.recordSource == .fullBoxscore)
+        #expect(presentation.review?.awayBatting.lines.first?.name == "김공식")
+    }
+
+    @Test func liveDatabaseRecordRefreshQueuesLatestRequestWhilePreviousRequestIsInFlight() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeLiveBoxscoreDetailGame()
+        func review(playerName: String, atBats: String) -> GameCenterReview {
+            GameCenterReview(
+                summaryItems: [],
+                awayBatting: GameCenterBattingSection(
+                    lines: [
+                        GameCenterBattingLine(
+                            battingOrder: "1",
+                            position: "중",
+                            name: playerName,
+                            atBats: atBats,
+                            runs: "0",
+                            hits: "1",
+                            runsBattedIn: "0",
+                            homeRuns: "0",
+                            walks: "0",
+                            strikeouts: "0",
+                            average: nil
+                        )
+                    ],
+                    totals: nil
+                ),
+                homeBatting: GameCenterBattingSection(lines: [], totals: nil),
+                awayPitching: GameCenterPitchingSection(lines: []),
+                homePitching: GameCenterPitchingSection(lines: []),
+                recordSource: .dbLiveRecordsFresh
+            )
+        }
+        let state = SequencedDatabaseReviewState(
+            reviews: [
+                review(playerName: "과거타자", atBats: "1"),
+                review(playerName: "최신타자", atBats: "3")
+            ],
+            delays: [150_000_000, 0]
+        )
+        let model = GameDetailScreenModel(
+            boxscoreClient: RecordingBoxscoreClient(
+                state: RecordingBoxscoreState(result: .success(.empty(gameId: game.publicGameID ?? "")))
+            ),
+            fetchDetail: { _ in nil },
+            fetchDatabaseRecordReview: { _ in await state.fetch() },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+
+        await model.load(for: game, forceRefresh: true)
+        await model.load(for: game, forceRefresh: true)
+        await model.waitForDatabaseRecordLoadForTesting()
+
+        #expect(await state.fetchCount == 2)
+        #expect(model.databaseRecordReview?.awayBatting.lines.first?.name == "최신타자")
+        #expect(model.databaseRecordReview?.awayBatting.lines.first?.atBats == "3")
+    }
+
     @Test func officialBoxscoreRecordPreventsLineupOnlyStatsOverwrite() throws {
         let game = try makeLiveBoxscoreDetailGame()
         let lineupOnlyReview = GameCenterReview(
@@ -12631,6 +12786,37 @@ struct kboScoreTests {
         #expect(presentation.review?.awayPitching.lines.map(\.name) == ["선발투수", "새투수"])
         #expect(presentation.review?.awayBatting.lines.map(\.name).contains("교체전타자") == false)
         #expect(presentation.review?.awayPitching.lines.map(\.name).contains("교체전투수") == false)
+    }
+
+    @Test func liveBoxscoreRefreshQueuesLatestRequestWhilePreviousRequestIsInFlight() async throws {
+        GameDetailScreenModel.resetBoxscoreLoadingCacheForTesting()
+        let game = try makeLiveBoxscoreDetailGame()
+        let older = liveReplacementBoxscore(
+            awayBatters: [("과거타자", 0, 1, "중", 1)],
+            awayPitchers: [("과거투수", 0, 1, "1")]
+        )
+        let latest = liveReplacementBoxscore(
+            awayBatters: [("최신타자", 0, 1, "중", 3)],
+            awayPitchers: [("최신투수", 0, 1, "2")]
+        )
+        let state = SequencedBoxscoreState(
+            results: [.success(older), .success(latest)],
+            delays: [150_000_000, 0]
+        )
+        let model = GameDetailScreenModel(
+            boxscoreClient: SequencedBoxscoreClient(state: state),
+            fetchDetail: { _ in nil },
+            fetchDatabaseRecordReview: { _ in nil },
+            fetchOfficialRecordFallback: { _ in nil }
+        )
+
+        await model.load(for: game, forceRefresh: true)
+        await model.load(for: game, forceRefresh: true)
+        await model.waitForBoxscoreLoadForTesting()
+
+        #expect(await state.fetchCount == 2)
+        #expect(model.boxscore?.awayBatters.first?.playerName == "최신타자")
+        #expect(model.boxscore?.awayPitchers.first?.playerName == "최신투수")
     }
 
     @Test func liveEmptyBoxscoreDoesNotOverwritePreviousFullBoxscoreRecords() async throws {
@@ -13326,6 +13512,49 @@ struct kboScoreTests {
 
         #expect(didApply)
         #expect(await state.requestedGameIDs == ["20260510-DOO-SSG"])
+        model.stopLiveGameDetailPolling()
+    }
+
+    @Test func sseRecordRefreshSignalDeduplicatesRawHashAndPublishesEachNewSnapshot() async throws {
+        let game = try makeLiveBoxscoreDetailGame(status: .live)
+        func liveState(rawHash: String) -> GameLiveStateResponse {
+            GameLiveStateResponse(
+                publicGameId: game.publicGameID ?? "20260510-DOO-SSG",
+                status: "live",
+                inning: nil,
+                half: nil,
+                awayScore: game.awayScore,
+                homeScore: game.homeScore,
+                balls: game.balls,
+                strikes: game.strikes,
+                outs: game.outs,
+                bases: .init(first: true, second: false, third: false),
+                currentPitcherName: game.currentPitcherName,
+                currentBatterName: game.currentBatterName,
+                rawHash: rawHash,
+                updatedAtKst: "2026-05-10T14:10:00+09:00"
+            )
+        }
+        let streamState = RecordingGameLiveStreamState(events: [
+            .snapshot(liveState(rawHash: "records-hash-1")),
+            .snapshot(liveState(rawHash: "records-hash-1")),
+            .snapshot(liveState(rawHash: "records-hash-2"))
+        ])
+        let model = AppModel(
+            repository: StubRepository(),
+            gameLiveStreamClient: RecordingGameLiveStreamClient(state: streamState),
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false,
+            currentDateProvider: { game.scheduledStart.addingTimeInterval(60) }
+        )
+
+        await model.startLiveGameDetailPolling(gameIdentity: game.stableDetailIdentity)
+        let didPublish = await eventually(timeout: 1.0, interval: 10_000_000) {
+            model.gameDetailRecordRefreshSignal(for: game.stableDetailIdentity)?.sequence == 2
+        }
+
+        #expect(didPublish)
+        #expect(model.gameDetailRecordRefreshSignal(for: game.stableDetailIdentity)?.rawHash == "records-hash-2")
         model.stopLiveGameDetailPolling()
     }
 
@@ -15729,6 +15958,7 @@ struct kboScoreTests {
 
     // scheduleInitialMonthLoadWithGamesShowsLoadedState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadWithGamesShowsLoadedState() async throws {
+        let attendanceClient = RecordingAttendanceClient()
         let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
@@ -15746,6 +15976,7 @@ struct kboScoreTests {
         let repository = StubRepository(fetchMonthlySchedule: { _ in [game] })
         let model = AppModel(
             repository: repository,
+            attendanceClient: attendanceClient,
             bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
             usePersistedSettings: false,
             currentDateProvider: { referenceDate }
@@ -15759,6 +15990,7 @@ struct kboScoreTests {
         #expect(viewModel.isLoadingDisplayedMonth == false)
         #expect(viewModel.selectedDateGames.map(\.id) == [game.id])
         #expect(viewModel.selectedGamesContentState == .loaded)
+        #expect(await attendanceClient.fetchCount() == 0)
     }
 
     // scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
@@ -15835,7 +16067,7 @@ struct kboScoreTests {
         viewModel.selectedDate = referenceDate
         await viewModel.loadDisplayedMonth(appModel: model)
 
-        let refreshTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
+        let refreshTask = Task { await viewModel.refreshDisplayedMonth(appModel: model) }
         await gate.waitUntilStarted()
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
@@ -15845,8 +16077,7 @@ struct kboScoreTests {
         await refreshTask.value
     }
 
-    @Test func scheduleReentryUsesRepositoryMonthCacheBeforeForceRefreshCompletes() async throws {
-        let gate = ScheduleFetchGate()
+    @Test func scheduleReentryUsesRepositoryMonthCacheWithoutRefetch() async throws {
         let referenceDate = isoDate("2026-07-21T09:00:00+09:00")
         let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
         let fullMonthGames = try makeScheduleMonthGames(count: 110, year: 2026, month: 7)
@@ -15863,10 +16094,6 @@ struct kboScoreTests {
         )
         let repository = CachedKBORepository(
             base: StubRepository(fetchMonthlySchedule: { _ in
-                let count = await fetchSequence.count
-                if count > 0 {
-                    await gate.wait()
-                }
                 return await fetchSequence.next()
             }),
             configuration: configuration,
@@ -15888,14 +16115,11 @@ struct kboScoreTests {
         viewModel.displayedMonth = referenceDate
         viewModel.selectedDate = referenceDate
 
-        let loadTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
-        await gate.waitUntilStarted()
+        await viewModel.loadDisplayedMonth(appModel: model)
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
         #expect(viewModel.selectedGamesContentState == .loaded)
-
-        await gate.release()
-        await loadTask.value
+        #expect(await fetchSequence.count == 1)
     }
 
     @Test func scheduleMonthRefreshEmptyResponsePreservesDisplayedMonthCache() async throws {
@@ -15921,7 +16145,7 @@ struct kboScoreTests {
         viewModel.selectedDate = referenceDate
 
         await viewModel.loadDisplayedMonth(appModel: model)
-        await viewModel.loadDisplayedMonth(appModel: model)
+        await viewModel.refreshDisplayedMonth(appModel: model)
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
         #expect(viewModel.selectedDateGames.count == 5)
@@ -17009,8 +17233,8 @@ struct kboScoreTests {
         #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: monthKey) == 1)
     }
 
-    // scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists 메서드는 월 진입 시 캐시 hit여도 remote를 다시 확인하는지 검증합니다.
-    @Test func scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists() async throws {
+    // scheduleTabMonthReentryUsesMemoryCacheWithoutRefetch 메서드는 같은 월 재진입 시 누적 네트워크 조회를 만들지 않는지 검증합니다.
+    @Test func scheduleTabMonthReentryUsesMemoryCacheWithoutRefetch() async throws {
         let selectedDate = isoDate("2026-07-05T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first { $0.id == "hanwha" })
@@ -17044,10 +17268,21 @@ struct kboScoreTests {
         viewModel.selectedDate = selectedDate
 
         await viewModel.loadDisplayedMonth(appModel: model)
+        viewModel.changeDisplayedMonth(
+            to: isoDate("2026-06-01T12:00:00+09:00"),
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
+        await viewModel.loadDisplayedMonth(appModel: model)
+        viewModel.changeDisplayedMonth(
+            to: selectedDate,
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
         await viewModel.loadDisplayedMonth(appModel: model)
 
         #expect(await tracker.scheduleTabMonthFetches == 2)
-        #expect(await tracker.scheduleTabBypassingCacheValues == [true, true])
+        #expect(await tracker.scheduleTabBypassingCacheValues == [false, false])
         #expect(viewModel.selectedDateGames.first?.status == .cancelled)
     }
 
@@ -17246,7 +17481,7 @@ struct kboScoreTests {
             "http://192.168.45.140:8088/api/v1/attendance": StubResponse(statusCode: 200, data: Data()),
             "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111": StubResponse(
                 statusCode: 200,
-                data: Data(#"{"gameIds":["22222222-2222-2222-2222-222222222222"]}"#.utf8)
+                data: Data(#"{"gameIds":["22222222-2222-2222-2222-222222222222"],"records":[{"gameId":"22222222-2222-2222-2222-222222222222","publicGameId":"20260705-LG-DOO","gameDate":"2026-07-05","scheduledAt":"2026-07-05T18:00:00+09:00","stadium":"잠실","status":"final","isCancelled":false,"isPostponed":false,"awayTeam":{"id":"lg","name":"LG 트윈스","shortName":"LG","logoUrl":null},"homeTeam":{"id":"doosan","name":"두산 베어스","shortName":"두산","logoUrl":null},"awayScore":4,"homeScore":2}]}"#.utf8)
             )
         ]
         URLProtocolStub.lastRequest = nil
@@ -17282,11 +17517,41 @@ struct kboScoreTests {
         #expect(payload?["installationId"] == installationID.uuidString)
         #expect(payload?["gameId"] == gameID.uuidString)
 
-        let gameIDs = try await client.fetchAttendedGameIDs(installationID: installationID)
+        let records = try await client.fetchAttendanceRecords(installationID: installationID)
         request = try #require(URLProtocolStub.lastRequest)
         #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111")
         #expect(request.httpMethod == "GET")
-        #expect(gameIDs == Set([gameID]))
+        #expect(records.gameIDs == Set([gameID]))
+        #expect(records.games.first?.publicGameID == "20260705-LG-DOO")
+        #expect(records.games.first?.awayScore == 4)
+    }
+
+    @Test func attendanceServerRecordsPopulateDashboardWithoutScheduleMonthLoad() async throws {
+        let gameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let teams = try attendanceFixtureTeams()
+        let attendedGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: isoDate("2026-05-05T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: 4,
+            homeScore: 2,
+            status: .final,
+            note: "supabase_game_id=\(gameID.uuidString) public_game_id=20260505-LG-DOO"
+        )
+        let client = RecordingAttendanceClient(fetchedGameIDs: [gameID], fetchedGames: [attendedGame])
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(model.attendanceDashboard.games.map(\.id) == [attendedGame.attendanceStorageKey])
+        #expect(model.attendanceDashboard.overall.games == 1)
+        #expect(model.attendanceDashboard.overall.wins == 1)
     }
 
     // attendanceClientBaseURLPrefersDebugAttendancePlistOverBackendEnvironment 메서드는 Debug 직관 API 기본값이 로컬 백엔드를 향하는지 검증합니다.
@@ -17467,6 +17732,43 @@ struct kboScoreTests {
         }
         #expect(rolledBack)
         #expect(model.attendedGameIDs == [other.id])
+    }
+
+    // 일시적인 저장 실패 뒤 같은 직관 동작을 다시 시도할 수 있는지 검증합니다.
+    @Test func attendanceToggleRetriesSameActionAfterTransientFailure() async throws {
+        let client = RecordingAttendanceClient(setError: AttendanceClientError.httpStatus(500))
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: game)
+        let firstRequestFailed = await eventually(timeout: 1) {
+            await client.setRequests().count == 1 && model.isAttendanceSyncPending(for: game) == false
+        }
+        #expect(firstRequestFailed)
+        #expect(model.isGameDetailAttended(game) == false)
+
+        await client.updateSetError(nil)
+        model.toggleGameDetailAttendance(for: game)
+        let retrySucceeded = await eventually(timeout: 1) {
+            await client.setRequests().count == 2 && model.isGameDetailAttended(game)
+        }
+
+        #expect(retrySucceeded)
+        #expect(model.attendedGameIDs == [game.id])
     }
 
     // gameDetailAttendanceButtonUsesSharedAttendanceState 메서드는 상세 버튼 selected 상태가 shared DB UUID 상태를 보는지 검증합니다.
@@ -19847,16 +20149,22 @@ private actor RecordingBoxscoreState {
 
 private actor SequencedBoxscoreState {
     private var results: [Result<GameBoxscoreResponse, Error>]
+    private var delays: [UInt64]
     private(set) var fetchCount = 0
     private(set) var requestedGameIDs: [String] = []
 
-    init(results: [Result<GameBoxscoreResponse, Error>]) {
+    init(results: [Result<GameBoxscoreResponse, Error>], delays: [UInt64] = []) {
         self.results = results
+        self.delays = delays
     }
 
-    func fetch(gameId: String) throws -> GameBoxscoreResponse {
+    func fetch(gameId: String) async throws -> GameBoxscoreResponse {
         fetchCount += 1
         requestedGameIDs.append(gameId)
+        let delay = delays.isEmpty ? 0 : delays.removeFirst()
+        if delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
         let result = results.isEmpty ? .failure(TestRepositoryError.supabaseUnavailable) : results.removeFirst()
         return try result.get()
     }
@@ -19977,6 +20285,26 @@ private actor RecordingDatabaseReviewFetcher {
     func fetch(game _: GameDetail) -> GameCenterReview? {
         fetchCount += 1
         return review
+    }
+}
+
+private actor SequencedDatabaseReviewState {
+    private var reviews: [GameCenterReview?]
+    private var delays: [UInt64]
+    private(set) var fetchCount = 0
+
+    init(reviews: [GameCenterReview?], delays: [UInt64] = []) {
+        self.reviews = reviews
+        self.delays = delays
+    }
+
+    func fetch() async -> GameCenterReview? {
+        fetchCount += 1
+        let delay = delays.isEmpty ? 0 : delays.removeFirst()
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        return reviews.isEmpty ? nil : reviews.removeFirst()
     }
 }
 
@@ -20867,31 +21195,38 @@ private struct RecordedAttendanceRequest: Sendable {
 
 private actor RecordingAttendanceClient: AttendanceClient {
     private let fetchedGameIDs: Set<UUID>
+    private let fetchedGames: [GameDetail]
     private let fetchError: AttendanceClientError?
-    private let setError: AttendanceClientError?
+    private var setError: AttendanceClientError?
     private var recordedFetchCount = 0
     private var recordedSetRequests: [RecordedAttendanceRequest] = []
 
     init(
         fetchedGameIDs: Set<UUID> = [],
+        fetchedGames: [GameDetail] = [],
         fetchError: AttendanceClientError? = nil,
         setError: AttendanceClientError? = nil
     ) {
         self.fetchedGameIDs = fetchedGameIDs
+        self.fetchedGames = fetchedGames
         self.fetchError = fetchError
         self.setError = setError
     }
 
     nonisolated func fetchAttendedGameIDs(installationID _: UUID) async throws -> Set<UUID> {
+        try await fetch().gameIDs
+    }
+
+    nonisolated func fetchAttendanceRecords(installationID _: UUID) async throws -> AttendanceRecords {
         try await fetch()
     }
 
-    private func fetch() throws -> Set<UUID> {
+    private func fetch() throws -> AttendanceRecords {
         recordedFetchCount += 1
         if let fetchError {
             throw fetchError
         }
-        return fetchedGameIDs
+        return AttendanceRecords(gameIDs: fetchedGameIDs, games: fetchedGames)
     }
 
     nonisolated func setAttendance(
@@ -20924,6 +21259,10 @@ private actor RecordingAttendanceClient: AttendanceClient {
 
     func fetchCount() -> Int {
         recordedFetchCount
+    }
+
+    func updateSetError(_ error: AttendanceClientError?) {
+        setError = error
     }
 }
 

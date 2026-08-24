@@ -573,8 +573,202 @@ private extension FavoriteTeamScheduleWidgetGameStatus {
     }
 }
 
+// FavoriteTeamLockScreenScheduleWidget 구조체는 잠금화면 전용 응원팀 일정 위젯을 정의합니다.
+struct FavoriteTeamLockScreenScheduleWidget: Widget {
+    static let kind = "FavoriteTeamLockScreenScheduleWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(
+            kind: Self.kind,
+            provider: FavoriteTeamScheduleWidgetV2Provider()
+        ) { entry in
+            FavoriteTeamLockScreenScheduleView(entry: entry)
+        }
+        .configurationDisplayName("응원팀 가까운 일정")
+        .description("응원팀의 가까운 경기 일정을 잠금화면에서 확인합니다.")
+        .supportedFamilies([.accessoryRectangular])
+    }
+}
+
+// FavoriteTeamLockScreenScheduleView 구조체는 가까운 5일과 상대팀을 달력 형태로 표시합니다.
+private struct FavoriteTeamLockScreenScheduleView: View {
+    let entry: FavoriteTeamScheduleWidgetV2Entry
+
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+        return calendar
+    }
+
+    var body: some View {
+        Group {
+            switch entry.content {
+            case .placeholder(let snapshot), .content(let snapshot):
+                schedule(snapshot)
+            case .noFavorite:
+                message("응원팀을 선택해 주세요")
+            case .unavailable:
+                message("일정 데이터를 불러올 수 없습니다")
+            }
+        }
+        .containerBackground(for: .widget) {
+            Color.clear
+        }
+    }
+
+    private func schedule(_ snapshot: FavoriteTeamScheduleWidgetSnapshot) -> some View {
+        HStack(spacing: 0) {
+            ForEach(nearbyDays(in: snapshot)) { day in
+                VStack(spacing: 2) {
+                    Text(day.date.formatted(.dateTime.day()))
+                        .font(.caption.weight(isToday(day) ? .bold : .medium))
+                        .foregroundStyle(isToday(day) ? .primary : .secondary)
+                        .underline(isToday(day))
+
+                    if let opponentName = opponentName(for: day) {
+                        Text(opponentName)
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    } else {
+                        Color.clear
+                            .frame(height: 12)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func nearbyDays(in snapshot: FavoriteTeamScheduleWidgetSnapshot) -> [FavoriteTeamScheduleWidgetSnapshot.Day] {
+        let days = snapshot.days.sorted { $0.date < $1.date }
+        guard days.count > 5 else { return days }
+
+        let todayIndex = days.firstIndex(where: isToday) ?? 0
+        let startIndex = min(max(todayIndex - 2, 0), days.count - 5)
+        return Array(days[startIndex..<(startIndex + 5)])
+    }
+
+    private func isToday(_ day: FavoriteTeamScheduleWidgetSnapshot.Day) -> Bool {
+        calendar.isDate(day.date, inSameDayAs: entry.date)
+    }
+
+    private func opponentName(for day: FavoriteTeamScheduleWidgetSnapshot.Day) -> String? {
+        guard day.gameCount > 0, let teamID = day.opponentTeamID else { return nil }
+        return TeamIdentity.catalog[teamID]?.teamDisplayName
+    }
+
+    private func message(_ text: String) -> some View {
+        Text(text)
+            .font(.headline)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+}
+
+// FavoriteTeamNextGameCircularWidget 구조체는 가장 가까운 응원팀 경기 한 건을 표시합니다.
+struct FavoriteTeamNextGameCircularWidget: Widget {
+    static let kind = "FavoriteTeamNextGameCircularWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(
+            kind: Self.kind,
+            provider: FavoriteTeamScheduleWidgetV2Provider()
+        ) { entry in
+            FavoriteTeamNextGameCircularView(entry: entry)
+        }
+        .configurationDisplayName("응원팀 다음 경기")
+        .description("응원팀의 가장 가까운 다음 경기를 잠금화면에서 확인합니다.")
+        .supportedFamilies([.accessoryCircular])
+    }
+}
+
+// FavoriteTeamNextGameCircularView 구조체는 다음 경기 상대팀과 날짜를 원형 영역에 표시합니다.
+private struct FavoriteTeamNextGameCircularView: View {
+    let entry: FavoriteTeamScheduleWidgetV2Entry
+
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
+        return calendar
+    }
+
+    var body: some View {
+        Group {
+            switch entry.content {
+            case .placeholder(let snapshot), .content(let snapshot):
+                if let game = nextGame(in: snapshot),
+                   let opponent = TeamIdentity.catalog[game.opponentTeamID ?? ""]?.teamDisplayName {
+                    VStack(spacing: 1) {
+                        Text(opponent)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+
+                        Text(dateLabel(for: game.date))
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    emptyLabel("경기 없음")
+                }
+            case .noFavorite:
+                emptyLabel("응원팀 없음")
+            case .unavailable:
+                emptyLabel("일정 없음")
+            }
+        }
+        .multilineTextAlignment(.center)
+        .containerBackground(for: .widget) {
+            Color.clear
+        }
+    }
+
+    private func nextGame(in snapshot: FavoriteTeamScheduleWidgetSnapshot) -> FavoriteTeamScheduleWidgetSnapshot.Day? {
+        let today = calendar.startOfDay(for: entry.date)
+        return snapshot.days
+            .filter {
+                $0.gameCount > 0
+                    && calendar.startOfDay(for: $0.date) >= today
+                    && $0.dominantStatus != .final
+                    && $0.dominantStatus != .cancelled
+            }
+            .min { $0.date < $1.date }
+    }
+
+    private func dateLabel(for date: Date) -> String {
+        if calendar.isDate(date, inSameDayAs: entry.date) {
+            return "오늘"
+        }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: entry.date),
+           calendar.isDate(date, inSameDayAs: tomorrow) {
+            return "내일"
+        }
+        let components = calendar.dateComponents([.month, .day], from: date)
+        return "\(components.month ?? 0)/\(components.day ?? 0)"
+    }
+
+    private func emptyLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .bold, design: .rounded))
+            .minimumScaleFactor(0.75)
+    }
+}
+
 #Preview(as: .systemLarge) {
     FavoriteTeamScheduleWidgetV2()
+} timeline: {
+    FavoriteTeamScheduleWidgetV2Entry.preview(date: Date())
+}
+
+#Preview(as: .accessoryRectangular) {
+    FavoriteTeamLockScreenScheduleWidget()
+} timeline: {
+    FavoriteTeamScheduleWidgetV2Entry.preview(date: Date())
+}
+
+#Preview(as: .accessoryCircular) {
+    FavoriteTeamNextGameCircularWidget()
 } timeline: {
     FavoriteTeamScheduleWidgetV2Entry.preview(date: Date())
 }

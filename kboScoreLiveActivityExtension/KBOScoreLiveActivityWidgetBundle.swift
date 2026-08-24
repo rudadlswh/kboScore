@@ -17,6 +17,8 @@ import WidgetKit
 struct KBOScoreLiveActivityWidgetBundle: WidgetBundle {
     var body: some Widget {
         FavoriteTeamScheduleWidgetV2()
+        FavoriteTeamLockScreenScheduleWidget()
+        FavoriteTeamNextGameCircularWidget()
         KBOScoreLiveActivityWidget()
     }
 }

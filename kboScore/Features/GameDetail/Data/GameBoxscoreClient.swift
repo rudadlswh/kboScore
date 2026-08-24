@@ -402,7 +402,8 @@ extension GameBoxscoreResponse {
             homeBatting: GameCenterBattingSection(lines: homeBatters.map(\.gameCenterLine), totals: nil),
             awayPitching: GameCenterPitchingSection(lines: awayPitchers.map(\.gameCenterLine)),
             homePitching: GameCenterPitchingSection(lines: homePitchers.map(\.gameCenterLine)),
-            recordSource: .fullBoxscore
+            recordSource: .fullBoxscore,
+            recordUpdatedAt: KBODateParser.parseTimestamp(updatedAt)
         )
     }
 

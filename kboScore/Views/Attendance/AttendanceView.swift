@@ -16,6 +16,7 @@ struct AttendanceView: View {
     @Environment(AppModel.self) private var appModel
 
     var body: some View {
+        let dashboard = appModel.attendanceDashboard
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -26,8 +27,8 @@ struct AttendanceView: View {
                             message: "응원팀 경기의 직관 기록을 모아 보여드립니다."
                         )
                     } else {
-                        summarySection
-                        attendedGamesSection
+                        summarySection(dashboard)
+                        attendedGamesSection(dashboard)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -59,11 +60,7 @@ struct AttendanceView: View {
         }
     }
 
-    private var dashboard: AttendanceDashboard {
-        appModel.attendanceDashboard
-    }
-
-    private var summarySection: some View {
+    private func summarySection(_ dashboard: AttendanceDashboard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionTitleView(title: "직관 성적")
             VStack(spacing: 8) {
@@ -77,7 +74,7 @@ struct AttendanceView: View {
     }
 
     @ViewBuilder
-    private var attendedGamesSection: some View {
+    private func attendedGamesSection(_ dashboard: AttendanceDashboard) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !dashboard.hasGames {
                 EmptyStateView(

@@ -63,7 +63,7 @@ final class ScheduleViewModel: ObservableObject {
     func loadDisplayedMonth(appModel: AppModel) async {
         await loadMonth(
             displayedMonth,
-            forceRefresh: true,
+            forceRefresh: false,
             appModel: appModel
         )
         await normalizeDisplayedMonth(appModel: appModel)
@@ -223,7 +223,6 @@ final class ScheduleViewModel: ObservableObject {
             callSite: "ScheduleViewModel.loadMonth",
             reason: forceRefresh ? "refreshDisplayedMonth" : "loadDisplayedMonth"
         )
-        await appModel.refreshAttendanceRecordsFromServer()
 
         applyPendingAutomaticSelectionIfNeeded(for: key)
         await rebuildPresentation(

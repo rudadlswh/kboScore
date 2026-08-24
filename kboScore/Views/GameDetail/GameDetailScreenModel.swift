@@ -74,8 +74,12 @@ final class GameDetailScreenModel {
     private var activeBoxscoreGameID: String?
     private var activeOfficialFallbackGameKey: String?
     private var boxscoreLoadTask: Task<Void, Never>?
+    private var boxscoreLoadGeneration = 0
+    private var pendingBoxscoreRefresh = false
     private var officialFallbackLoadTask: Task<Void, Never>?
     private var databaseRecordLoadTask: Task<Void, Never>?
+    private var databaseRecordLoadGeneration = 0
+    private var pendingDatabaseRecordRefresh = false
     private var activeDatabaseRecordGameKey: String?
     private var databaseRecordMergeInFlightGameIdentity: String?
     private var lastIgnoredLiveRecordSource: GameCenterRecordSource?
@@ -262,32 +266,34 @@ final class GameDetailScreenModel {
             #endif
             return
         }
-        if let databaseRecordLoadTask, activeDatabaseRecordGameKey == gameKey {
+        if databaseRecordLoadTask != nil, activeDatabaseRecordGameKey == gameKey {
             #if DEBUG
             print("[GameDetailDBRecords] fetch skipped reason=inFlight gameID=\(game.id.uuidString)")
             #endif
-            Task {
-                await databaseRecordLoadTask.value
+            if forceRefresh {
+                pendingDatabaseRecordRefresh = true
             }
             return
         }
 
         activeDatabaseRecordGameKey = gameKey
         databaseRecordMergeInFlightGameIdentity = game.stableDetailIdentity
+        databaseRecordLoadGeneration += 1
+        let generation = databaseRecordLoadGeneration
         databaseRecordLoadTask = Task { [weak self] in
             guard let self else { return }
             let loadedDatabaseRecordReview = await self.loadDatabaseRecordReviewIfNeeded(
                 for: game,
                 fetcher: fetcher
             )
-            guard self.currentGame?.stableDetailIdentity == game.stableDetailIdentity else {
-                if self.databaseRecordMergeInFlightGameIdentity == game.stableDetailIdentity {
-                    self.databaseRecordMergeInFlightGameIdentity = nil
-                }
-                if self.activeDatabaseRecordGameKey == gameKey {
-                    self.databaseRecordLoadTask = nil
-                    self.activeDatabaseRecordGameKey = nil
-                }
+            guard generation == self.databaseRecordLoadGeneration,
+                  self.currentGame?.stableDetailIdentity == game.stableDetailIdentity else {
+                self.finishDatabaseRecordLoad(
+                    for: game,
+                    gameKey: gameKey,
+                    generation: generation,
+                    fetcher: fetcher
+                )
                 return
             }
             if loadedDatabaseRecordReview?.hasDisplayableRecords == true {
@@ -298,18 +304,45 @@ final class GameDetailScreenModel {
             } else if let preserveExistingReview, preserveExistingReview.hasDisplayableRecords {
                 self.databaseRecordReview = preserveExistingReview
             }
-            if self.databaseRecordMergeInFlightGameIdentity == game.stableDetailIdentity {
-                self.databaseRecordMergeInFlightGameIdentity = nil
-            }
-            if self.activeDatabaseRecordGameKey == gameKey {
-                self.databaseRecordLoadTask = nil
-                self.activeDatabaseRecordGameKey = nil
-            }
+            self.finishDatabaseRecordLoad(
+                for: game,
+                gameKey: gameKey,
+                generation: generation,
+                fetcher: fetcher
+            )
             if self.databaseRecordReview?.hasDisplayableRecords != true,
                self.boxscore?.hasRecords != true {
                 self.scheduleOfficialRecordFallbackIfNeeded(for: game, forceRefresh: forceRefresh)
             }
         }
+    }
+
+    private func finishDatabaseRecordLoad(
+        for game: GameDetail,
+        gameKey: String,
+        generation: Int,
+        fetcher: (@Sendable (GameDetail) async -> GameCenterReview?)?
+    ) {
+        guard generation == databaseRecordLoadGeneration,
+              activeDatabaseRecordGameKey == gameKey else { return }
+        databaseRecordLoadTask = nil
+        activeDatabaseRecordGameKey = nil
+        if databaseRecordMergeInFlightGameIdentity == game.stableDetailIdentity {
+            databaseRecordMergeInFlightGameIdentity = nil
+        }
+        guard pendingDatabaseRecordRefresh,
+              currentGame?.stableDetailIdentity == game.stableDetailIdentity else {
+            pendingDatabaseRecordRefresh = false
+            return
+        }
+        pendingDatabaseRecordRefresh = false
+        scheduleDatabaseRecordReviewLoadIfNeeded(
+            for: currentGame ?? game,
+            gameKey: gameKey,
+            forceRefresh: true,
+            fetcher: fetcher,
+            preserveExistingReview: databaseRecordReview
+        )
     }
 
     // loadDatabaseRecordReviewIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
@@ -467,7 +500,6 @@ final class GameDetailScreenModel {
             boxscoreErrorMessage = nil
             return
         }
-        activeBoxscoreGameID = publicGameID
         let shouldBypassCache = game.status.isLiveLike || forceRefresh
         let boxscoreCacheKey = "\(publicGameID)::\(boxscoreClient.cacheIdentity)"
         if shouldBypassCache == false, lastLoadedBoxscoreGameID == boxscoreCacheKey {
@@ -491,14 +523,44 @@ final class GameDetailScreenModel {
             return
         }
 
-        boxscoreLoadTask?.cancel()
+        if let boxscoreLoadTask, boxscoreLoadTask.isCancelled == false,
+           activeBoxscoreGameID == publicGameID {
+            if shouldBypassCache {
+                pendingBoxscoreRefresh = true
+            }
+            return
+        }
+        activeBoxscoreGameID = publicGameID
+        startBoxscoreLoad(gameID: publicGameID, cacheKey: boxscoreCacheKey, forceRefresh: shouldBypassCache)
+    }
+
+    private func startBoxscoreLoad(gameID publicGameID: String, cacheKey: String, forceRefresh: Bool) {
+        boxscoreLoadGeneration += 1
+        let generation = boxscoreLoadGeneration
         boxscoreLoadTask = Task { [weak self] in
-            await self?.loadBoxscoreIfNeeded(gameID: publicGameID, cacheKey: boxscoreCacheKey, forceRefresh: shouldBypassCache)
+            await self?.loadBoxscoreIfNeeded(
+                gameID: publicGameID,
+                cacheKey: cacheKey,
+                forceRefresh: forceRefresh,
+                generation: generation
+            )
         }
     }
 
     // loadBoxscoreIfNeeded 메서드는 필요한 데이터를 조회하고 로딩 상태를 갱신합니다.
-    private func loadBoxscoreIfNeeded(gameID publicGameID: String, cacheKey: String, forceRefresh: Bool) async {
+    private func loadBoxscoreIfNeeded(
+        gameID publicGameID: String,
+        cacheKey: String,
+        forceRefresh: Bool,
+        generation: Int
+    ) async {
+        defer {
+            finishBoxscoreLoad(
+                gameID: publicGameID,
+                cacheKey: cacheKey,
+                generation: generation
+            )
+        }
         boxscoreErrorMessage = nil
         let task: Task<GameBoxscoreResponse?, Never>
         if forceRefresh == false, let inFlight = Self.inFlightBoxscoreTasks[cacheKey] {
@@ -519,6 +581,7 @@ final class GameDetailScreenModel {
         }
         let fetchedBoxscore = await task.value
         Self.inFlightBoxscoreTasks[cacheKey] = nil
+        guard generation == boxscoreLoadGeneration else { return }
         lastLoadedBoxscoreGameID = cacheKey
         guard activeBoxscoreGameID == publicGameID else { return }
 
@@ -540,6 +603,17 @@ final class GameDetailScreenModel {
                 scheduleOfficialRecordFallbackIfNeeded(for: currentGame, forceRefresh: forceRefresh)
             }
         }
+    }
+
+    private func finishBoxscoreLoad(gameID publicGameID: String, cacheKey: String, generation: Int) {
+        guard generation == boxscoreLoadGeneration else { return }
+        boxscoreLoadTask = nil
+        guard pendingBoxscoreRefresh, activeBoxscoreGameID == publicGameID else {
+            pendingBoxscoreRefresh = false
+            return
+        }
+        pendingBoxscoreRefresh = false
+        startBoxscoreLoad(gameID: publicGameID, cacheKey: cacheKey, forceRefresh: true)
     }
 
     // scheduleOfficialRecordFallbackIfNeeded 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
@@ -674,7 +748,10 @@ final class GameDetailScreenModel {
 
     // waitForBoxscoreLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForBoxscoreLoadForTesting() async {
-        await boxscoreLoadTask?.value
+        while let task = boxscoreLoadTask {
+            await task.value
+            await Task.yield()
+        }
     }
 
     // waitForDetailLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
@@ -684,7 +761,10 @@ final class GameDetailScreenModel {
 
     // waitForDatabaseRecordLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
     func waitForDatabaseRecordLoadForTesting() async {
-        await databaseRecordLoadTask?.value
+        while let task = databaseRecordLoadTask {
+            await task.value
+            await Task.yield()
+        }
     }
 
     // waitForOfficialFallbackLoadForTesting 메서드는 이 타입의 주요 동작을 수행합니다.
