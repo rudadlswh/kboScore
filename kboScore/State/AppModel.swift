@@ -215,7 +215,6 @@ final class AppModel {
     private var attendanceListSyncSuppressed = false
     private var attendanceSyncDisabled = false
     private var lastAttendanceListFailureSignature: String?
-    private var failedAttendanceActionKeys: Set<String> = []
 
     var isLoading = false
     var loadErrorMessage: String?
@@ -251,6 +250,7 @@ final class AppModel {
     private(set) var attendanceSyncFailureMessage: String?
     private(set) var attendedGameIDs: Set<UUID> = []
     private(set) var attendedGameKeys: Set<String> = []
+    private var attendanceRecordGames: [GameDetail] = []
     private var notifiedCancellationKeys: Set<String> = []
     var settings: AppSettings {
         didSet {
@@ -1183,7 +1183,7 @@ final class AppModel {
         var losses = 0
         var ties = 0
 
-        for game in knownScheduleGames(filter: .myTeam) {
+        for game in knownAttendanceGames().filter({ $0.involves(teamID: favoriteTeamID) }) {
             let key = game.attendanceStorageKey
             guard seenKeys.insert(key).inserted,
                   isGameAttended(game) else {
@@ -1223,7 +1223,7 @@ final class AppModel {
     }
 
     var attendanceDashboard: AttendanceDashboard {
-        let knownGames = knownScheduleGames(filter: .all)
+        let knownGames = knownAttendanceGames()
         #if DEBUG
         let loadedMonthGames = monthlyScheduleGames.values.reduce(0) { $0 + $1.count }
         print("[AttendanceTab] resolve start confirmedCount=\(attendedGameKeys.count) loadedMonthGames=\(loadedMonthGames)")
@@ -2108,17 +2108,16 @@ final class AppModel {
         for gameIdentity: String,
         initialGame: GameDetail? = nil
     ) async -> GameDetail? {
-        if let match = selectedGameMatch(for: gameIdentity) {
+        if let initialGame,
+           let match = SelectedGameResolver.match(for: gameIdentity, in: [initialGame]) {
             #if DEBUG
-            print("[GameDetailFetch] selectedGame resolved selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
+            print("[GameDetailFetch] selectedGame resolved source=routeInitialSnapshot selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
             #endif
             return match.game
         }
-        if let initialGame,
-           let match = SelectedGameResolver.match(for: gameIdentity, in: allKnownGames() + [initialGame]) {
+        if let match = selectedGameMatch(for: gameIdentity) {
             #if DEBUG
-            print("[GameDetailFetch] selectedGame resolved source=routeInitialSnapshot selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
-            print("[GameDetailFetch] selectedGame localMiss avoided reason=routeInitialSnapshot selectedIdentity=\(gameIdentity)")
+            print("[GameDetailFetch] selectedGame resolved selectedIdentity=\(gameIdentity) id=\(match.game.publicGameID ?? match.game.canonicalGameIdentityValue) reason=\(match.reason)")
             #endif
             return match.game
         }
@@ -3595,11 +3594,12 @@ final class AppModel {
         defer { attendanceListSyncInFlight = false }
 
         do {
-            let gameIDs = try await attendanceClient.fetchAttendedGameIDs(installationID: installationID)
+            let records = try await attendanceClient.fetchAttendanceRecords(installationID: installationID)
             guard Task.isCancelled == false else { return }
             let previousIDs = attendedGameIDs
-            let rawCount = gameIDs.count
-            setAttendedGameIDs(gameIDs)
+            let rawCount = records.gameIDs.count
+            setAttendedGameIDs(records.gameIDs)
+            attendanceRecordGames = records.games
             #if DEBUG
             print("[Attendance] confirmed replace source=server rawCount=\(rawCount) normalizedCount=\(attendedGameKeys.count)")
             #endif
@@ -3652,7 +3652,13 @@ final class AppModel {
     }
 
     private func attendanceResolvedGame(for game: GameDetail) -> GameDetail {
-        self.game(withID: game.id) ??
+        if rawSupabaseGameDetailIdentity(for: game)?.supabaseGameID != nil ||
+            game.supabaseGameID != nil ||
+            Self.supabaseGameID(from: game.note) != nil ||
+            Self.isLikelySupabaseDatabaseUUID(game.id) {
+            return game
+        }
+        return self.game(withID: game.id) ??
             self.game(withIdentity: game.stableDetailIdentity) ??
             self.game(withIdentity: game.canonicalGameIdentityValue) ??
             game.publicGameID.flatMap { self.game(withIdentity: $0) } ??
@@ -3744,11 +3750,6 @@ final class AppModel {
             return
         }
         let gameID = databaseGameID
-        let action = nextIsAttended ? "mark" : "unmark"
-        let actionKey = "\(action):\(gameID.uuidString)"
-        guard failedAttendanceActionKeys.contains(actionKey) == false else {
-            return
-        }
         inFlightAttendanceTasks[gameID]?.cancel()
         let client = attendanceClient
         inFlightAttendanceTasks[gameID] = Task { [weak self] in
@@ -3767,7 +3768,6 @@ final class AppModel {
                     self.invalidateScheduleDerivedCaches()
                     self.attendanceSyncFailureMessage = nil
                     self.inFlightAttendanceTasks[gameID] = nil
-                    self.failedAttendanceActionKeys.remove(actionKey)
                     self.attendanceSyncDisabled = false
                     #if DEBUG
                     let action = nextIsAttended ? "mark" : "unmark"
@@ -3781,7 +3781,6 @@ final class AppModel {
                     if Self.isUnconfiguredAttendanceError(error) {
                         self.attendanceSyncDisabled = true
                     }
-                    self.failedAttendanceActionKeys.insert(actionKey)
                     self.attendanceSyncFailureMessage = "직관 기록을 저장하지 못했습니다."
                     self.inFlightAttendanceTasks[gameID] = nil
                     #if DEBUG
@@ -5967,6 +5966,10 @@ final class AppModel {
             guard let favoriteTeamID = settings.favoriteTeamID else { return [] }
             return mergedGames.filter { $0.involves(teamID: favoriteTeamID) }
         }
+    }
+
+    private func knownAttendanceGames() -> [GameDetail] {
+        mergeEquivalentGames(games + monthlyScheduleGames.values.flatMap { $0 } + attendanceRecordGames)
     }
 
     // mergeMonthlyScheduleGames 메서드는 전달된 값을 반영하고 내부 저장 상태를 갱신합니다.

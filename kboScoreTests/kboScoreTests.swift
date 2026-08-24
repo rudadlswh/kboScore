@@ -15958,6 +15958,7 @@ struct kboScoreTests {
 
     // scheduleInitialMonthLoadWithGamesShowsLoadedState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
     @Test func scheduleInitialMonthLoadWithGamesShowsLoadedState() async throws {
+        let attendanceClient = RecordingAttendanceClient()
         let referenceDate = isoDate("2026-03-12T18:30:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first(where: { $0.id == "lg" }))
@@ -15975,6 +15976,7 @@ struct kboScoreTests {
         let repository = StubRepository(fetchMonthlySchedule: { _ in [game] })
         let model = AppModel(
             repository: repository,
+            attendanceClient: attendanceClient,
             bootstrap: MockKBOData.makeBootstrap(now: referenceDate),
             usePersistedSettings: false,
             currentDateProvider: { referenceDate }
@@ -15988,6 +15990,7 @@ struct kboScoreTests {
         #expect(viewModel.isLoadingDisplayedMonth == false)
         #expect(viewModel.selectedDateGames.map(\.id) == [game.id])
         #expect(viewModel.selectedGamesContentState == .loaded)
+        #expect(await attendanceClient.fetchCount() == 0)
     }
 
     // scheduleRefreshWithDisplayedGamesDoesNotShowInitialLoadingState 메서드는 비동기 작업이나 시스템 연동 흐름을 제어합니다.
@@ -16064,7 +16067,7 @@ struct kboScoreTests {
         viewModel.selectedDate = referenceDate
         await viewModel.loadDisplayedMonth(appModel: model)
 
-        let refreshTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
+        let refreshTask = Task { await viewModel.refreshDisplayedMonth(appModel: model) }
         await gate.waitUntilStarted()
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
@@ -16074,8 +16077,7 @@ struct kboScoreTests {
         await refreshTask.value
     }
 
-    @Test func scheduleReentryUsesRepositoryMonthCacheBeforeForceRefreshCompletes() async throws {
-        let gate = ScheduleFetchGate()
+    @Test func scheduleReentryUsesRepositoryMonthCacheWithoutRefetch() async throws {
         let referenceDate = isoDate("2026-07-21T09:00:00+09:00")
         let monthKey = KBOMonthScheduleKey(year: 2026, month: 7)
         let fullMonthGames = try makeScheduleMonthGames(count: 110, year: 2026, month: 7)
@@ -16092,10 +16094,6 @@ struct kboScoreTests {
         )
         let repository = CachedKBORepository(
             base: StubRepository(fetchMonthlySchedule: { _ in
-                let count = await fetchSequence.count
-                if count > 0 {
-                    await gate.wait()
-                }
                 return await fetchSequence.next()
             }),
             configuration: configuration,
@@ -16117,14 +16115,11 @@ struct kboScoreTests {
         viewModel.displayedMonth = referenceDate
         viewModel.selectedDate = referenceDate
 
-        let loadTask = Task { await viewModel.loadDisplayedMonth(appModel: model) }
-        await gate.waitUntilStarted()
+        await viewModel.loadDisplayedMonth(appModel: model)
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
         #expect(viewModel.selectedGamesContentState == .loaded)
-
-        await gate.release()
-        await loadTask.value
+        #expect(await fetchSequence.count == 1)
     }
 
     @Test func scheduleMonthRefreshEmptyResponsePreservesDisplayedMonthCache() async throws {
@@ -16150,7 +16145,7 @@ struct kboScoreTests {
         viewModel.selectedDate = referenceDate
 
         await viewModel.loadDisplayedMonth(appModel: model)
-        await viewModel.loadDisplayedMonth(appModel: model)
+        await viewModel.refreshDisplayedMonth(appModel: model)
 
         #expect(viewModel.monthGameCount == fullMonthGames.count)
         #expect(viewModel.selectedDateGames.count == 5)
@@ -17238,8 +17233,8 @@ struct kboScoreTests {
         #expect(model.favoriteTeamScheduleWidgetSourceMonthlyCountForTesting(monthKey: monthKey) == 1)
     }
 
-    // scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists 메서드는 월 진입 시 캐시 hit여도 remote를 다시 확인하는지 검증합니다.
-    @Test func scheduleTabMonthEntryForcesSupabaseFetchEvenWhenLocalCacheExists() async throws {
+    // scheduleTabMonthReentryUsesMemoryCacheWithoutRefetch 메서드는 같은 월 재진입 시 누적 네트워크 조회를 만들지 않는지 검증합니다.
+    @Test func scheduleTabMonthReentryUsesMemoryCacheWithoutRefetch() async throws {
         let selectedDate = isoDate("2026-07-05T12:00:00+09:00")
         let teams = MockKBOData.makeBootstrap().teams
         let awayTeam = try #require(teams.first { $0.id == "hanwha" })
@@ -17273,10 +17268,21 @@ struct kboScoreTests {
         viewModel.selectedDate = selectedDate
 
         await viewModel.loadDisplayedMonth(appModel: model)
+        viewModel.changeDisplayedMonth(
+            to: isoDate("2026-06-01T12:00:00+09:00"),
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
+        await viewModel.loadDisplayedMonth(appModel: model)
+        viewModel.changeDisplayedMonth(
+            to: selectedDate,
+            favoriteTeamID: nil,
+            attendedGameKeys: []
+        )
         await viewModel.loadDisplayedMonth(appModel: model)
 
         #expect(await tracker.scheduleTabMonthFetches == 2)
-        #expect(await tracker.scheduleTabBypassingCacheValues == [true, true])
+        #expect(await tracker.scheduleTabBypassingCacheValues == [false, false])
         #expect(viewModel.selectedDateGames.first?.status == .cancelled)
     }
 
@@ -17475,7 +17481,7 @@ struct kboScoreTests {
             "http://192.168.45.140:8088/api/v1/attendance": StubResponse(statusCode: 200, data: Data()),
             "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111": StubResponse(
                 statusCode: 200,
-                data: Data(#"{"gameIds":["22222222-2222-2222-2222-222222222222"]}"#.utf8)
+                data: Data(#"{"gameIds":["22222222-2222-2222-2222-222222222222"],"records":[{"gameId":"22222222-2222-2222-2222-222222222222","publicGameId":"20260705-LG-DOO","gameDate":"2026-07-05","scheduledAt":"2026-07-05T18:00:00+09:00","stadium":"잠실","status":"final","isCancelled":false,"isPostponed":false,"awayTeam":{"id":"lg","name":"LG 트윈스","shortName":"LG","logoUrl":null},"homeTeam":{"id":"doosan","name":"두산 베어스","shortName":"두산","logoUrl":null},"awayScore":4,"homeScore":2}]}"#.utf8)
             )
         ]
         URLProtocolStub.lastRequest = nil
@@ -17511,11 +17517,41 @@ struct kboScoreTests {
         #expect(payload?["installationId"] == installationID.uuidString)
         #expect(payload?["gameId"] == gameID.uuidString)
 
-        let gameIDs = try await client.fetchAttendedGameIDs(installationID: installationID)
+        let records = try await client.fetchAttendanceRecords(installationID: installationID)
         request = try #require(URLProtocolStub.lastRequest)
         #expect(request.url?.absoluteString == "http://192.168.45.140:8088/api/v1/attendance?installationId=11111111-1111-1111-1111-111111111111")
         #expect(request.httpMethod == "GET")
-        #expect(gameIDs == Set([gameID]))
+        #expect(records.gameIDs == Set([gameID]))
+        #expect(records.games.first?.publicGameID == "20260705-LG-DOO")
+        #expect(records.games.first?.awayScore == 4)
+    }
+
+    @Test func attendanceServerRecordsPopulateDashboardWithoutScheduleMonthLoad() async throws {
+        let gameID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let teams = try attendanceFixtureTeams()
+        let attendedGame = makeGameDetail(
+            id: gameID,
+            scheduledStart: isoDate("2026-05-05T14:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: 4,
+            homeScore: 2,
+            status: .final,
+            note: "supabase_game_id=\(gameID.uuidString) public_game_id=20260505-LG-DOO"
+        )
+        let client = RecordingAttendanceClient(fetchedGameIDs: [gameID], fetchedGames: [attendedGame])
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        await model.refreshAttendanceRecordsFromServer()
+
+        #expect(model.attendanceDashboard.games.map(\.id) == [attendedGame.attendanceStorageKey])
+        #expect(model.attendanceDashboard.overall.games == 1)
+        #expect(model.attendanceDashboard.overall.wins == 1)
     }
 
     // attendanceClientBaseURLPrefersDebugAttendancePlistOverBackendEnvironment 메서드는 Debug 직관 API 기본값이 로컬 백엔드를 향하는지 검증합니다.
@@ -17696,6 +17732,43 @@ struct kboScoreTests {
         }
         #expect(rolledBack)
         #expect(model.attendedGameIDs == [other.id])
+    }
+
+    // 일시적인 저장 실패 뒤 같은 직관 동작을 다시 시도할 수 있는지 검증합니다.
+    @Test func attendanceToggleRetriesSameActionAfterTransientFailure() async throws {
+        let client = RecordingAttendanceClient(setError: AttendanceClientError.httpStatus(500))
+        let teams = try attendanceFixtureTeams()
+        let game = makeGameDetail(
+            id: UUID(uuidString: "F6EE5DCB-0912-47CA-BD8A-737EA4CEA3F9")!,
+            scheduledStart: isoDate("2026-07-05T18:00:00+09:00"),
+            venue: "잠실",
+            awayTeam: teams.lg,
+            homeTeam: teams.doosan,
+            awayScore: nil,
+            homeScore: nil,
+            status: .upcoming
+        )
+        let model = AppModel(
+            attendanceClient: client,
+            bootstrap: KBOBootstrapData(teams: MockKBOData.makeBootstrap().teams, games: [game], notifications: [], settings: .default),
+            usePersistedSettings: false
+        )
+
+        model.toggleGameDetailAttendance(for: game)
+        let firstRequestFailed = await eventually(timeout: 1) {
+            await client.setRequests().count == 1 && model.isAttendanceSyncPending(for: game) == false
+        }
+        #expect(firstRequestFailed)
+        #expect(model.isGameDetailAttended(game) == false)
+
+        await client.updateSetError(nil)
+        model.toggleGameDetailAttendance(for: game)
+        let retrySucceeded = await eventually(timeout: 1) {
+            await client.setRequests().count == 2 && model.isGameDetailAttended(game)
+        }
+
+        #expect(retrySucceeded)
+        #expect(model.attendedGameIDs == [game.id])
     }
 
     // gameDetailAttendanceButtonUsesSharedAttendanceState 메서드는 상세 버튼 selected 상태가 shared DB UUID 상태를 보는지 검증합니다.
@@ -21122,31 +21195,38 @@ private struct RecordedAttendanceRequest: Sendable {
 
 private actor RecordingAttendanceClient: AttendanceClient {
     private let fetchedGameIDs: Set<UUID>
+    private let fetchedGames: [GameDetail]
     private let fetchError: AttendanceClientError?
-    private let setError: AttendanceClientError?
+    private var setError: AttendanceClientError?
     private var recordedFetchCount = 0
     private var recordedSetRequests: [RecordedAttendanceRequest] = []
 
     init(
         fetchedGameIDs: Set<UUID> = [],
+        fetchedGames: [GameDetail] = [],
         fetchError: AttendanceClientError? = nil,
         setError: AttendanceClientError? = nil
     ) {
         self.fetchedGameIDs = fetchedGameIDs
+        self.fetchedGames = fetchedGames
         self.fetchError = fetchError
         self.setError = setError
     }
 
     nonisolated func fetchAttendedGameIDs(installationID _: UUID) async throws -> Set<UUID> {
+        try await fetch().gameIDs
+    }
+
+    nonisolated func fetchAttendanceRecords(installationID _: UUID) async throws -> AttendanceRecords {
         try await fetch()
     }
 
-    private func fetch() throws -> Set<UUID> {
+    private func fetch() throws -> AttendanceRecords {
         recordedFetchCount += 1
         if let fetchError {
             throw fetchError
         }
-        return fetchedGameIDs
+        return AttendanceRecords(gameIDs: fetchedGameIDs, games: fetchedGames)
     }
 
     nonisolated func setAttendance(
@@ -21179,6 +21259,10 @@ private actor RecordingAttendanceClient: AttendanceClient {
 
     func fetchCount() -> Int {
         recordedFetchCount
+    }
+
+    func updateSetError(_ error: AttendanceClientError?) {
+        setError = error
     }
 }
 

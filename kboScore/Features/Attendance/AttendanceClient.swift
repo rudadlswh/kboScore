@@ -10,6 +10,7 @@ import Foundation
 
 protocol AttendanceClient: Sendable {
     nonisolated func fetchAttendedGameIDs(installationID: UUID) async throws -> Set<UUID>
+    nonisolated func fetchAttendanceRecords(installationID: UUID) async throws -> AttendanceRecords
     nonisolated func setAttendance(
         _ isAttended: Bool,
         installationID: UUID,
@@ -17,6 +18,17 @@ protocol AttendanceClient: Sendable {
         publicGameID: String?,
         providerGameID: String?
     ) async throws
+}
+
+extension AttendanceClient {
+    nonisolated func fetchAttendanceRecords(installationID: UUID) async throws -> AttendanceRecords {
+        AttendanceRecords(gameIDs: try await fetchAttendedGameIDs(installationID: installationID), games: [])
+    }
+}
+
+nonisolated struct AttendanceRecords: Sendable {
+    let gameIDs: Set<UUID>
+    let games: [GameDetail]
 }
 
 enum AttendanceClientFactory {
@@ -207,6 +219,10 @@ struct BackendAttendanceClient: AttendanceClient {
     }
 
     nonisolated func fetchAttendedGameIDs(installationID: UUID) async throws -> Set<UUID> {
+        try await fetchAttendanceRecords(installationID: installationID).gameIDs
+    }
+
+    nonisolated func fetchAttendanceRecords(installationID: UUID) async throws -> AttendanceRecords {
         guard var components = URLComponents(url: baseURL.appendingPathComponent("api/v1/attendance"), resolvingAgainstBaseURL: false) else {
             throw AttendanceClientError.invalidURL
         }
@@ -231,10 +247,11 @@ struct BackendAttendanceClient: AttendanceClient {
             let statusCode = try statusCode(from: response)
             try validate(statusCode)
             let decoded = try JSONDecoder().decode(AttendanceListResponse.self, from: data)
+            let records = decoded.records.compactMap(\.game)
             #if DEBUG
-            print("[Attendance] list response status=\(statusCode) count=\(decoded.gameIds.count)")
+            print("[Attendance] list response status=\(statusCode) count=\(decoded.gameIds.count) recordCount=\(records.count)")
             #endif
-            return Set(decoded.gameIds)
+            return AttendanceRecords(gameIDs: Set(decoded.gameIds), games: records)
         } catch {
             #if DEBUG
             print("[Attendance] sync failed action=list gameID=none error=\(error)")
@@ -320,4 +337,80 @@ nonisolated private struct AttendanceRequest: Encodable, Sendable {
 
 nonisolated private struct AttendanceListResponse: Decodable, Sendable {
     let gameIds: [UUID]
+    let records: [AttendanceGameDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case gameIds
+        case records
+    }
+
+    nonisolated init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        gameIds = try container.decode([UUID].self, forKey: .gameIds)
+        records = try container.decodeIfPresent([AttendanceGameDTO].self, forKey: .records) ?? []
+    }
+}
+
+nonisolated private struct AttendanceGameDTO: Decodable, Sendable {
+    let gameId: UUID
+    let publicGameId: String?
+    let gameDate: String?
+    let scheduledAt: String?
+    let stadium: String?
+    let status: String?
+    let isCancelled: Bool
+    let isPostponed: Bool
+    let awayTeam: AttendanceTeamDTO
+    let homeTeam: AttendanceTeamDTO
+    let awayScore: Int?
+    let homeScore: Int?
+
+    var game: GameDetail? {
+        guard let scheduledStart = KBODateParser.parseTimestamp(scheduledAt) ?? KBODateParser.parseGameDate(gameDate) else {
+            return nil
+        }
+        let mappedStatus: GameStatus = isCancelled || isPostponed
+            ? .cancelled
+            : KBODataMapper.mapGameStatus(code: status, text: nil)
+        let publicGameNote = publicGameId.map { " public_game_id=\($0)" } ?? ""
+        let venue = stadium?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return GameDetail(
+            id: gameId,
+            scheduledStart: scheduledStart,
+            venue: (venue?.isEmpty == false ? venue : nil) ?? "장소 미정",
+            awayTeam: awayTeam.team,
+            homeTeam: homeTeam.team,
+            awayScore: mappedStatus == .upcoming ? nil : awayScore,
+            homeScore: mappedStatus == .upcoming ? nil : homeScore,
+            status: mappedStatus,
+            seasonClassification: .unknown,
+            inningText: nil,
+            bases: nil,
+            balls: nil,
+            strikes: nil,
+            outs: nil,
+            highlightText: nil,
+            events: [],
+            note: "supabase_game_id=\(gameId.uuidString)\(publicGameNote)",
+            providerGameID: nil,
+            awayStartingPitcherName: nil,
+            homeStartingPitcherName: nil
+        )
+    }
+}
+
+nonisolated private struct AttendanceTeamDTO: Decodable, Sendable {
+    let id: String
+    let name: String
+    let shortName: String
+
+    var team: Team {
+        Team(
+            id: Team.canonicalID(for: id) ?? id.lowercased(),
+            name: name,
+            shortName: shortName,
+            englishName: id.uppercased(),
+            markText: shortName
+        )
+    }
 }

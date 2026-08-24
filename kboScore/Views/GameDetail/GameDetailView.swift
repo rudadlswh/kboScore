@@ -114,7 +114,9 @@ struct GameDetailView: View {
         .tint(appModel.favoriteStadiumPalette?.primary ?? appModel.currentTheme.accent)
         .task(id: viewModel.stableIdentity) {
             let initialRenderStartedAt = Date()
-            viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
+            if viewModel.game == nil {
+                viewModel.configureInitialGameIfNeeded(appModel.initialGameSnapshot(for: gameIdentity))
+            }
             let inputLocalGameID = viewModel.game?.id
             if let initialGame = viewModel.game {
                 #if DEBUG
